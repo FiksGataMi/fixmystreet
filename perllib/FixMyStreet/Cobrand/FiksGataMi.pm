@@ -7,6 +7,13 @@ use warnings;
 use Carp;
 use mySociety::MaPit;
 use FixMyStreet::Geocode::OSM;
+use DateTime;
+
+sub set_lang_and_domain {
+    my $self = shift;
+    DateTime->DefaultLocale( 'nb_NO' );
+    return $self->SUPER::set_lang_and_domain(@_);
+}
 
 sub country {
     return 'NO';

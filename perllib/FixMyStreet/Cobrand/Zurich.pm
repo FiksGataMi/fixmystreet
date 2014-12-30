@@ -50,6 +50,12 @@ you already have, and the countres set so that they shouldn't in future.
 
 =cut
 
+sub set_lang_and_domain {
+    my $self = shift;
+    DateTime->DefaultLocale( 'de_CH' );
+    return $self->SUPER::set_lang_and_domain(@_);
+}
+
 sub shorten_recency_if_new_greater_than_fixed {
     return 0;
 }

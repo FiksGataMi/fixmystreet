@@ -207,9 +207,6 @@ sub setup_request {
     # XXX Put in cobrand / do properly
     if ($c->cobrand->moniker eq 'zurich') {
         FixMyStreet::DB::Result::Problem->visible_states_add_unconfirmed();
-        DateTime->DefaultLocale( 'de_CH' );
-    } else {
-        DateTime->DefaultLocale( 'en_US' );
     }
 
     if (FixMyStreet->test_mode) {
