@@ -10,17 +10,25 @@ use FixMyStreet::Geocode::OSM;
 use DateTime;
 
 sub set_lang_and_domain {
-    my $self = shift;
-    DateTime->DefaultLocale( 'nb_NO' );
-    return $self->SUPER::set_lang_and_domain(@_);
+    my ( $self, $lang, $unicode, $dir ) = @_;
+
+    if ( $lang != 'nb' && $lang != 'nn' )
+        $lang = 'nb';
+
+    if ( $lang == 'nn' )
+        DateTime->DefaultLocale( 'nn_NO' );
+    else
+        DateTime->DefaultLocale( 'nb_NO' );
+
+    return $self->SUPER::set_lang_and_domain($lang, $unicode, $dir);
 }
 
 sub country {
     return 'NO';
 }
 
-sub languages { [ 'en-gb,English,en_GB', 'nb,Norwegian,nb_NO' ] }
-sub language_override { 'nb' }
+sub languages { [ 'en-gb,English,en_GB', 'nb,Norwegian,nb_NO', 'nn,Norwegian,nn_NO' ] }
+sub language_override { }
 
 sub enter_postcode_text {
     my ( $self ) = @_;
