@@ -8,19 +8,29 @@ use Carp;
 use mySociety::MaPit;
 use FixMyStreet::Geocode::OSM;
 use DateTime;
+use HTTP::Negotiate;
 
 sub set_lang_and_domain {
     my ( $self, $lang, $unicode, $dir ) = @_;
 
-    if ( $lang != 'nb' && $lang != 'nn' )
-        $lang = 'nb';
+    my $headers = $self->{c} ? $self->{c}->req->headers : undef;
 
-    if ( $lang == 'nn' )
+    my $variants = [
+        ['nb', undef, undef, undef, undef, 'nb', undef],
+        ['nn', undef, undef, undef, undef, 'nn', undef],
+    ];
+
+    my $lang_override = $lang || HTTP::Negotiate::choose($variants, $headers);
+
+    if (!$lang_override || ($lang_override != 'nb' && $lang_override != 'nn'))
+       $lang_override = 'nb';
+
+    if ( $lang_override == 'nn' )
         DateTime->DefaultLocale( 'nn_NO' );
     else
         DateTime->DefaultLocale( 'nb_NO' );
 
-    return $self->SUPER::set_lang_and_domain($lang, $unicode, $dir);
+    return $self->SUPER::set_lang_and_domain($lang_override, $unicode, $dir);
 }
 
 sub country {
