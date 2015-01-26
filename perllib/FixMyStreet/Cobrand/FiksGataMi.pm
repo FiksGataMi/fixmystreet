@@ -6,14 +6,30 @@ use warnings;
 
 use Carp;
 use mySociety::MaPit;
+use FixMyStreet;
 use FixMyStreet::Geocode::OSM;
 
 sub country {
     return 'NO';
 }
 
-sub languages { [ 'en-gb,English,en_GB', 'nb,Norwegian,nb_NO' ] }
-sub language_override { 'nb' }
+sub base_url_with_lang {
+    my $self = shift;
+
+    my $base = $self->base_url;
+
+    my $lang = $mySociety::Locale::lang;
+    if ($lang eq 'nn') {
+        $base =~ s{http://}{$&nn.};
+    } else {
+        $base =~ s{http://}{$&nb.};
+    }
+
+    return $base
+}
+
+sub languages { [ 'en-gb,English,en_GB', 'nb,Norwegian,nb_NO', 'nn,Norwegian,nn_NO' ] }
+#sub language_override { 'nb' }
 
 sub enter_postcode_text {
     my ( $self ) = @_;
