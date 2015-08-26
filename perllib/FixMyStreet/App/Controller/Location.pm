@@ -6,6 +6,7 @@ BEGIN {extends 'Catalyst::Controller'; }
 
 use Encode;
 use FixMyStreet::Geocode;
+use Utils;
 
 =head1 NAME
 
@@ -28,15 +29,15 @@ Use latitude and longitude if provided in parameters.
 sub determine_location_from_coords : Private {
     my ( $self, $c ) = @_;
 
-    my $latitude  = $c->req->param('latitude')  || $c->req->param('lat');
-    my $longitude = $c->req->param('longitude') || $c->req->param('lon');
+    my $latitude = $c->get_param('latitude') || $c->get_param('lat');
+    my $longitude = $c->get_param('longitude') || $c->get_param('lon');
 
     if ( defined $latitude && defined $longitude ) {
-        $c->stash->{latitude}  = $latitude;
-        $c->stash->{longitude} = $longitude;
+        ($c->stash->{latitude}, $c->stash->{longitude}) =
+            map { Utils::truncate_coordinate($_) } ($latitude, $longitude);
 
         # Also save the pc if there is one
-        if ( my $pc = $c->req->param('pc') ) {
+        if ( my $pc = $c->get_param('pc') ) {
             $c->stash->{pc} = $pc;
         }
 
@@ -50,7 +51,7 @@ sub determine_location_from_coords : Private {
 
 User has searched for a location - try to find it for them.
 
-Return -1 if nothing provided.
+Return false if nothing provided.
 
 If one match is found returns true and lat/lng is set.
 
@@ -64,18 +65,19 @@ sub determine_location_from_pc : Private {
     my ( $self, $c, $pc ) = @_;
 
     # check for something to search
-    $pc ||= $c->req->param('pc') || return -1;
+    $pc ||= $c->get_param('pc') || return;
     $c->stash->{pc} = $pc;    # for template
 
     if ( $pc =~ /^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/ ) {
-        $c->stash->{latitude}  = $1;
-        $c->stash->{longitude} = $2;
+        ($c->stash->{latitude}, $c->stash->{longitude}) =
+            map { Utils::truncate_coordinate($_) } ($1, $2);
         return $c->forward( 'check_location' );
     }
     if ( $c->cobrand->country eq 'GB' && $pc =~ /^([A-Z])([A-Z])([\d\s]{4,})$/i) {
         if (my $convert = gridref_to_latlon( $1, $2, $3 )) {
-            $c->stash->{latitude}  = $convert->{latitude};
-            $c->stash->{longitude} = $convert->{longitude};
+            ($c->stash->{latitude}, $c->stash->{longitude}) =
+                map { Utils::truncate_coordinate($_) }
+                ($convert->{latitude}, $convert->{longitude});
             return $c->forward( 'check_location' );
         }
     }

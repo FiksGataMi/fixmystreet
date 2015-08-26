@@ -7,6 +7,7 @@ use FixMyStreet;
 use FixMyStreet::Geocode::Bing;
 use DateTime;
 use Encode;
+use List::MoreUtils 'none';
 use URI;
 use Digest::MD5 qw(md5_hex);
 
@@ -157,7 +158,9 @@ Set the language and domain of the site based on the cobrand and host.
 sub set_lang_and_domain {
     my ( $self, $lang, $unicode, $dir ) = @_;
 
-    my $languages = join('|', @{$self->languages});
+    my @languages = @{$self->languages};
+    push @languages, 'en-gb,English,en_GB' if none { /en-gb/ } @languages;
+    my $languages = join('|', @languages);
     my $lang_override = $self->language_override || $lang;
     my $lang_domain = $self->language_domain || 'FixMyStreet';
 
@@ -174,7 +177,7 @@ sub set_lang_and_domain {
 
     return $set_lang;
 }
-sub languages { FixMyStreet->config('LANGUAGES') || [ 'en-gb,English,en_GB' ] }
+sub languages { FixMyStreet->config('LANGUAGES') || [] }
 sub language_domain { }
 sub language_override { }
 
@@ -337,6 +340,16 @@ sub reports_per_page {
     return FixMyStreet->config('ALL_REPORTS_PER_PAGE') || 100;
 }
 
+=head2 reports_ordering
+
+The order_by clause to use for reports on all reports page
+
+=cut
+
+sub reports_ordering {
+    return { -desc => 'lastupdate' };
+}
+
 =head2 on_map_list_limit
 
 Return the maximum number of items to be given in the list of reports on the map
@@ -352,6 +365,14 @@ Return the default maximum age for pins.
 =cut
 
 sub on_map_default_max_pin_age { return '6 months'; }
+
+=head2 on_map_default_status
+
+Return the default ?status= query parameter to use for filter on map page.
+
+=cut
+
+sub on_map_default_status { return 'all'; }
 
 =head2 allow_photo_upload
 
@@ -895,5 +916,9 @@ sub get_country_for_ip_address {
     return 0;
 }
 
-1;
+sub jurisdiction_id_example {
+    my $self = shift;
+    return $self->moniker;
+}
 
+1;

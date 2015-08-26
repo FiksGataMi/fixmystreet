@@ -4,6 +4,7 @@ use base 'FixMyStreet::Cobrand::Default';
 use DateTime;
 use POSIX qw(strcoll);
 use RABX;
+use Scalar::Util 'blessed';
 
 use strict;
 use warnings;
@@ -76,7 +77,7 @@ sub example_places {
     return [ 'Langstrasse', 'Basteiplatz' ];
 }
 
-sub languages { [ 'de-ch,Deutsch,de_CH', 'en-gb,English,en_GB' ] }
+sub languages { [ 'de-ch,Deutsch,de_CH' ] }
 sub language_override { 'de-ch' }
 
 # If lat/lon are in the URI, we must have zoom as well, otherwise OpenLayers defaults to 0.
@@ -158,7 +159,8 @@ sub updates_as_hashref {
         $hashref->{update_pp} = $self->prettify_dt( $problem->lastupdate );
 
         if ( $problem->state eq 'fixed - council' ) {
-            $hashref->{details} = FixMyStreet::App::View::Web->add_links( $ctx, $problem->extra ? $problem->extra->{public_response} : '' );
+            $hashref->{details} = FixMyStreet::App::View::Web->add_links(
+                $ctx, $problem->get_extra_metadata('public_response') || '' );
         } elsif ( $problem->state eq 'closed' ) {
             $hashref->{details} = sprintf( _('Assigned to %s'), $problem->body($ctx)->name );
         }
@@ -169,13 +171,16 @@ sub updates_as_hashref {
 
 sub allow_photo_display {
     my ( $self, $r ) = @_;
-    if (ref($r) ne 'HASH') {
-        return $r->extra && $r->extra->{publish_photo};
+    if (blessed $r) {
+        return $r->get_extra_metadata( 'publish_photo' );
     }
+
+    # additional munging in case $r isn't an object, TODO see if we can remove this
     my $extra = $r->{extra};
     utf8::encode($extra) if utf8::is_utf8($extra);
     my $h = new IO::String($extra);
     $extra = RABX::wire_rd($h);
+    return unless ref $extra eq 'HASH';
     return $extra->{publish_photo};
 }
 
@@ -264,10 +269,9 @@ sub get_or_check_overdue {
     my ($self, $problem) = @_;
 
     # use the cached version is it exists (e.g. when called from template)
-    my $extra = $problem->extra;
-    if (exists $extra->{closed_overdue} and defined $extra->{closed_overdue}) {
-        return $extra->{closed_overdue}
-    }
+    my $overdue = $problem->get_extra_metadata('closed_overdue');
+    return $overdue if defined $overdue;
+
     return $self->overdue($problem);
 }
 
@@ -338,8 +342,8 @@ sub admin {
         my @children = map { $_->id } $body->bodies->all;
         my @all = (@children, $body->id);
 
-        my $order = $c->req->params->{o} || 'created';
-        my $dir = defined $c->req->params->{d} ? $c->req->params->{d} : 1;
+        my $order = $c->get_param('o') || 'created';
+        my $dir = defined $c->get_param('d') ? $c->get_param('d') : 1;
         $c->stash->{order} = $order;
         $c->stash->{dir} = $dir;
         $order .= ' desc' if $dir;
@@ -358,7 +362,7 @@ sub admin {
             order_by => $order,
         });
 
-        my $page = $c->req->params->{p} || 1;
+        my $page = $c->get_param('p') || 1;
         $c->stash->{other} = $c->cobrand->problems->search({
             state => { -not_in => [ 'unconfirmed', 'confirmed', 'planned' ] },
             bodies_str => \@all,
@@ -372,8 +376,8 @@ sub admin {
 
         my $body = $c->stash->{body};
 
-        my $order = $c->req->params->{o} || 'created';
-        my $dir = defined $c->req->params->{d} ? $c->req->params->{d} : 1;
+        my $order = $c->get_param('o') || 'created';
+        my $dir = defined $c->get_param('d') ? $c->get_param('d') : 1;
         $c->stash->{order} = $order;
         $c->stash->{dir} = $dir;
         $order .= ' desc' if $dir;
@@ -392,7 +396,7 @@ sub admin {
             order_by => $order
         } );
 
-        my $page = $c->req->params->{p} || 1;
+        my $page = $c->get_param('p') || 1;
         $c->stash->{reports_published} = $c->cobrand->problems->search( {
             state => 'fixed - council',
             bodies_str => $body->parent->id,
@@ -445,14 +449,14 @@ sub admin_report_edit {
     }
 
     # If super or sdm check that the token is correct before proceeding
-    if ( ($type eq 'super' || $type eq 'dm') && $c->req->param('submit') ) {
+    if ( ($type eq 'super' || $type eq 'dm') && $c->get_param('submit') ) {
         $c->forward('check_token');
     }
 
     # All types of users can add internal notes
-    if ( ($type eq 'super' || $type eq 'dm' || $type eq 'sdm') && $c->req->param('submit') ) {
+    if ( ($type eq 'super' || $type eq 'dm' || $type eq 'sdm') && $c->get_param('submit') ) {
         # If there is a new note add it as a comment to the problem (with is_internal_note set true in extra).
-        if ( my $new_internal_note = $c->req->params->{new_internal_note} ) {
+        if ( my $new_internal_note = $c->get_param('new_internal_note') ) {
             $problem->add_to_comments( {
                 text => $new_internal_note,
                 user => $c->user->obj,
@@ -465,13 +469,19 @@ sub admin_report_edit {
     }
 
     # Problem updates upon submission
-    if ( ($type eq 'super' || $type eq 'dm') && $c->req->param('submit') ) {
-        # Predefine the hash so it's there for lookups
-        my $extra = $problem->extra || {};
-        $extra->{publish_photo} = $c->req->params->{publish_photo} || 0;
-        $extra->{third_personal} = $c->req->params->{third_personal} || 0;
+    if ( ($type eq 'super' || $type eq 'dm') && $c->get_param('submit') ) {
+        $problem->set_extra_metadata('publish_photo' => $c->get_param('publish_photo') || 0 );
+        $problem->set_extra_metadata('third_personal' => $c->get_param('third_personal') || 0 );
+
         # Make sure we have a copy of the original detail field
-        $extra->{original_detail} = $problem->detail if !$extra->{original_detail} && $c->req->params->{detail} && $problem->detail ne $c->req->params->{detail};
+        if (my $new_detail = $c->get_param('detail')) {
+            my $old_detail = $problem->detail;
+            if (! $problem->get_extra_metadata('original_detail')
+                && ($old_detail ne $new_detail))
+            {
+                $problem->set_extra_metadata( original_detail => $old_detail );
+            }
+        }
 
         # Some changes will be accompanied by an internal note, which if needed
         # should be stored in this variable.
@@ -479,65 +489,62 @@ sub admin_report_edit {
 
         # Workflow things
         my $redirect = 0;
-        my $new_cat = $c->req->params->{category};
+        my $new_cat = $c->get_param('category');
         if ( $new_cat && $new_cat ne $problem->category ) {
-            my $cat = $c->model('DB::Contact')->search( { category => $c->req->params->{category} } )->first;
+            my $cat = $c->model('DB::Contact')->search( { category => $c->get_param('category') } )->first;
             my $old_cat = $problem->category;
             $problem->category( $new_cat );
             $problem->external_body( undef );
             $problem->bodies_str( $cat->body_id );
             $problem->whensent( undef );
-            $extra->{changed_category} = 1;
+            $problem->set_extra_metadata(changed_category => 1);
             $internal_note_text = "Weitergeleitet von $old_cat an $new_cat";
             $redirect = 1 if $cat->body_id ne $body->id;
-        } elsif ( my $subdiv = $c->req->params->{body_subdivision} ) {
-            $extra->{moderated_overdue} //= $self->overdue( $problem );
+        } elsif ( my $subdiv = $c->get_param('body_subdivision') ) {
+            $problem->set_extra_metadata_if_undefined( moderated_overdue => $self->overdue( $problem ) );
             $self->set_problem_state($c, $problem, 'in progress');
             $problem->external_body( undef );
             $problem->bodies_str( $subdiv );
             $problem->whensent( undef );
             $redirect = 1;
-        } elsif ( my $external = $c->req->params->{body_external} ) {
-            $extra->{moderated_overdue} //= $self->overdue( $problem );
+        } elsif ( my $external = $c->get_param('body_external') ) {
+            $problem->set_extra_metadata_if_undefined( moderated_overdue => $self->overdue( $problem ) );
             $self->set_problem_state($c, $problem, 'closed');
-            $extra->{closed_overdue} //= $self->overdue( $problem );
+            $problem->set_extra_metadata_if_undefined( closed_overdue => $self->overdue( $problem ) );
             $problem->external_body( $external );
             $problem->whensent( undef );
             _admin_send_email( $c, 'problem-external.txt', $problem );
             $redirect = 1;
         } else {
-            if (my $state = $c->req->params->{state}) {
+            if (my $state = $c->get_param('state')) {
 
                 if ($problem->state eq 'unconfirmed' and $state ne 'unconfirmed') {
                     # only set this for the first state change
-                    $extra->{moderated_overdue} //= $self->overdue( $problem );
+                    $problem->set_extra_metadata_if_undefined( moderated_overdue => $self->overdue( $problem ) );
                 }
 
                 $self->set_problem_state($c, $problem, $state);
 
                 if ($self->problem_is_closed($problem)) {
-                    $extra->{closed_overdue} //= $self->overdue( $problem );
+                    $problem->set_extra_metadata_if_undefined( closed_overdue => $self->overdue( $problem ) );
                 }
-                if ( $state eq 'hidden' && $c->req->params->{send_rejected_email} ) {
+                if ( $state eq 'hidden' && $c->get_param('send_rejected_email') ) {
                     _admin_send_email( $c, 'problem-rejected.txt', $problem );
                 }
             }
         }
 
-        $problem->extra( $extra );
-        $problem->title( $c->req->param('title') );
-        $problem->detail( $c->req->param('detail') );
-        $problem->latitude( $c->req->param('latitude') );
-        $problem->longitude( $c->req->param('longitude') );
+        $problem->title( $c->get_param('title') ) if $c->get_param('title');
+        $problem->detail( $c->get_param('detail') ) if $c->get_param('detail');
+        $problem->latitude( $c->get_param('latitude') );
+        $problem->longitude( $c->get_param('longitude') );
 
         # Final, public, Update from DM
-        if (my $update = $c->req->param('status_update')) {
-            $extra->{public_response} = $update;
-            $problem->extra( $extra );
-            if ($c->req->params->{publish_response}) {
+        if (my $update = $c->get_param('status_update')) {
+            $problem->set_extra_metadata(public_response => $update);
+            if ($c->get_param('publish_response')) {
                 $self->set_problem_state($c, $problem, 'fixed - council');
-                $extra->{closed_overdue} = $self->overdue( $problem );
-                $problem->extra( { %$extra } );
+                $problem->set_extra_metadata( closed_overdue => $self->overdue( $problem ) );
                 _admin_send_email( $c, 'problem-closed.txt', $problem );
             }
         }
@@ -581,7 +588,7 @@ sub admin_report_edit {
         # Has cut-down edit template for adding update and sending back up only
         $c->stash->{template} = 'admin/report_edit-sdm.html';
 
-        if ($c->req->param('send_back')) {
+        if ($c->get_param('send_back')) {
             $c->forward('check_token');
 
             $problem->bodies_str( $body->parent->id );
@@ -590,20 +597,20 @@ sub admin_report_edit {
             # log here
             $c->res->redirect( '/admin/summary' );
 
-        } elsif ($c->req->param('submit')) {
+        } elsif ($c->get_param('submit')) {
             $c->forward('check_token');
 
             my $db_update = 0;
-            if ( $c->req->param('latitude') != $problem->latitude || $c->req->param('longitude') != $problem->longitude ) {
-                $problem->latitude( $c->req->param('latitude') );
-                $problem->longitude( $c->req->param('longitude') );
+            if ( $c->get_param('latitude') != $problem->latitude || $c->get_param('longitude') != $problem->longitude ) {
+                $problem->latitude( $c->get_param('latitude') );
+                $problem->longitude( $c->get_param('longitude') );
                 $db_update = 1;
             }
 
             $problem->update if $db_update;
 
             # Add new update from status_update
-            if (my $update = $c->req->param('status_update')) {
+            if (my $update = $c->get_param('status_update')) {
                 FixMyStreet::App->model('DB::Comment')->create( {
                     text => $update,
                     user => $c->user->obj,
@@ -618,10 +625,8 @@ sub admin_report_edit {
             $c->stash->{status_message} = '<p><em>' . _('Updated!') . '</em></p>';
 
             # If they clicked the no more updates button, we're done.
-            if ($c->req->param('no_more_updates')) {
-                my $extra = $problem->extra || {};
-                $extra->{subdiv_overdue} = $self->overdue( $problem );
-                $problem->extra( $extra );
+            if ($c->get_param('no_more_updates')) {
+                $problem->set_extra_metadata( subdiv_overdue => $self->overdue( $problem ) );
                 $problem->bodies_str( $body->parent->id );
                 $problem->whensent( undef );
                 $self->set_problem_state($c, $problem, 'planned');
@@ -645,7 +650,7 @@ sub admin_report_edit {
 sub _admin_send_email {
     my ( $c, $template, $problem ) = @_;
 
-    return unless $problem->extra && $problem->extra->{email_confirmed};
+    return unless $problem->get_extra_metadata('email_confirmed');
 
     my $to = $problem->name
         ? [ $problem->user->email, $problem->name ]
@@ -707,7 +712,7 @@ sub admin_stats {
     my $c = $self->{c};
 
     my %date_params;
-    my $ym = $c->req->params->{ym};
+    my $ym = $c->get_param('ym');
     my ($m, $y) = $ym ? ($ym =~ /^(\d+)\.(\d+)$/) : ();
     $c->stash->{ym} = $ym;
     if ($y && $m) {
@@ -721,7 +726,7 @@ sub admin_stats {
         state => [ FixMyStreet::DB::Result::Problem->visible_states() ],
     );
 
-    if ( $c->req->params->{export} ) {
+    if ( $c->get_param('export') ) {
         my $problems = $c->model('DB::Problem')->search(
             {%date_params},
             {
@@ -730,25 +735,55 @@ sub admin_stats {
                     'latitude', 'longitude',
                     'cobrand',  'category',
                     'state',    'user_id',
-                    'external_body'
-                ]
+                    'external_body',
+                    'title', 'detail',
+                    'photo',
+                    'whensent', 'lastupdate',
+                    'service',
+                    'extra',
+                ],
             }
         );
-        my $body = "ID,Created,E,N,Category,Status,UserID,External Body\n";
+        my $body = "Report ID,Created,Sent to Agency,Last Updated,E,N,Category,Status,UserID,External Body,Title,Detail,Media URL,Interface Used,Council Response\n";
+        require Text::CSV;
+        my $csv = Text::CSV->new({ binary => 1 });
         while ( my $report = $problems->next ) {
             my $external_body;
             my $body_name = "";
             if ( $external_body = $report->body($c) ) {
-                $body_name = $external_body->name;
+                $body_name = $external_body->name || '[Unknown body]';
             }
-            $body .= join( ',',
-                $report->id,           $report->created,
+
+            my $detail = $report->detail;
+            my $public_response = $report->get_extra_metadata('public_response') || '';
+
+            # replace newlines with HTML <br/> element
+            $detail =~ s{\r?\n}{ <br/> }g;
+            $public_response =~ s{\r?\n}{ <br/> }g;
+
+            my @columns = (
+                $report->id,
+                $report->created,
+                $report->whensent,
+                $report->lastupdate,
                 $report->local_coords, $report->category,
                 $report->state,        $report->user_id,
-                "\"$body_name\"" )
-              . "\n";
+                $body_name,
+                $report->title,
+                $detail,
+                $c->cobrand->base_url . $report->get_photo_params->{url},
+                $report->service || 'Web interface',
+                $public_response,
+            );
+            if ($csv->combine(@columns)) {
+                $body .= $csv->string . "\n";
+            }
+            else {
+                $body .= sprintf "{{error emitting CSV line: %s}}\n", $csv->error_diag;
+            }
         }
         $c->res->content_type('text/csv; charset=utf-8');
+        $c->res->header('Content-Disposition' => 'attachment; filename=stats.csv');
         $c->res->body($body);
     }
 

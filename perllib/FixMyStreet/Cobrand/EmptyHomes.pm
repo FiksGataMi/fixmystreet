@@ -13,6 +13,12 @@ sub path_to_web_templates {
     return [ FixMyStreet->path_to( 'templates/web', $self->moniker )->stringify ];
 }
 
+sub _fallback_body_sender {
+    my ( $self, $body, $category ) = @_;
+
+    return { method => 'EmptyHomes' };
+};
+
 =item
 
 Return the base url for this cobranded site
@@ -132,7 +138,7 @@ sub process_extras {
     my $body_id = shift;
     my $extra   = shift;
 
-    my $value = $ctx->request->params->{address} || '';
+    my $value = $ctx->get_param('address') || '';
     $ctx->stash->{field_errors}->{address} = _('This information is required')
         unless $value;
     $extra->{address} = $value;

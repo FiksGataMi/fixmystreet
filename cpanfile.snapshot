@@ -1165,10 +1165,10 @@ DISTRIBUTIONS
       Try::Tiny 0.07
       namespace::clean 0.24
       perl 5.008001
-  DBIx-Class-EncodedColumn-0.00011
-    pathname: W/WR/WREIS/DBIx-Class-EncodedColumn-0.00011.tar.gz
+  DBIx-Class-EncodedColumn-0.00013
+    pathname: W/WR/WREIS/DBIx-Class-EncodedColumn-0.00013.tar.gz
     provides:
-      DBIx::Class::EncodedColumn 0.00011
+      DBIx::Class::EncodedColumn 0.00013
       DBIx::Class::EncodedColumn::Crypt 0.01
       DBIx::Class::EncodedColumn::Crypt::Eksblowfish::Bcrypt 0.00001
       DBIx::Class::EncodedColumn::Crypt::OpenPGP 0.01
@@ -1177,7 +1177,8 @@ DISTRIBUTIONS
       DBD::SQLite 0
       DBIx::Class 0.06002
       Dir::Self 0
-      ExtUtils::MakeMaker 6.42
+      Encode 0
+      ExtUtils::MakeMaker 6.36
       File::Spec 0
       File::Temp 0
       Sub::Name 0.04
@@ -4176,6 +4177,22 @@ DISTRIBUTIONS
       Test::More 0.88
       namespace::autoclean 0
       namespace::clean 0.10
+  MooseX-NonMoose-0.26
+    pathname: D/DO/DOY/MooseX-NonMoose-0.26.tar.gz
+    provides:
+      MooseX::NonMoose 0.26
+      MooseX::NonMoose::InsideOut 0.26
+      MooseX::NonMoose::Meta::Role::Class 0.26
+      MooseX::NonMoose::Meta::Role::Constructor 0.26
+    requirements:
+      ExtUtils::MakeMaker 6.30
+      List::MoreUtils 0
+      Module::Runtime 0
+      Moose::Exporter 0
+      Moose::Role 2.0000
+      Moose::Util 0
+      Try::Tiny 0
+      warnings 0
   MooseX-Params-Validate-0.18
     pathname: D/DR/DROLSKY/MooseX-Params-Validate-0.18.tar.gz
     provides:
@@ -6597,6 +6614,12 @@ DISTRIBUTIONS
     pathname: M/ML/MLEHMANN/common-sense-3.6.tar.gz
     provides:
       common::sense 3.6
+    requirements:
+      ExtUtils::MakeMaker 0
+  gettext-1.05
+    pathname: P/PV/PVANDRY/gettext-1.05.tar.gz
+    provides:
+      Locale::gettext 1.05
     requirements:
       ExtUtils::MakeMaker 0
   libwww-perl-6.05

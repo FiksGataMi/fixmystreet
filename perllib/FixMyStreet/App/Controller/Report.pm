@@ -24,7 +24,7 @@ Redirect to homepage unless C<id> parameter in query, in which case redirect to
 sub index : Path('') : Args(0) {
     my ( $self, $c ) = @_;
 
-    my $id = $c->req->param('id');
+    my $id = $c->get_param('id');
 
     my $uri =
         $id
@@ -78,7 +78,7 @@ sub _display : Private {
 sub support : Path('support') : Args(0) {
     my ( $self, $c ) = @_;
 
-    my $id = $c->req->param('id');
+    my $id = $c->get_param('id');
 
     my $uri =
         $id
@@ -151,6 +151,10 @@ sub load_updates : Private {
     @combined = map { $_->[1] } sort { $a->[0] <=> $b->[0] } @combined;
     $c->stash->{updates} = \@combined;
 
+    if ($c->sessionid && $c->flash->{alert_to_reporter}) {
+        $c->stash->{alert_to_reporter} = 1;
+    }
+
     return 1;
 }
 
@@ -159,18 +163,15 @@ sub format_problem_for_display : Private {
 
     my $problem = $c->stash->{problem};
 
-    ( $c->stash->{short_latitude}, $c->stash->{short_longitude} ) =
+    ( $c->stash->{latitude}, $c->stash->{longitude} ) =
       map { Utils::truncate_coordinate($_) }
       ( $problem->latitude, $problem->longitude );
 
-    unless ( $c->req->param('submit_update') ) {
+    unless ( $c->get_param('submit_update') ) {
         $c->stash->{add_alert} = 1;
     }
 
     $c->stash->{extra_name_info} = $problem->bodies_str && $problem->bodies_str eq '2482' ? 1 : 0;
-    if ( $c->sessionid && $c->flash->{created_report} ) {
-        $c->stash->{created_report} = $c->flash->{created_report};
-    }
 
     $c->forward('generate_map_tags');
 

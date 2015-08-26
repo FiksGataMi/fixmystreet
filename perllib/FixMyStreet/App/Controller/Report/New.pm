@@ -74,7 +74,6 @@ partial
 
 =cut
 
-use constant COUNCIL_ID_BARNET => 2489;
 use constant COUNCIL_ID_BROMLEY => 2482;
 
 sub report_new : Path : Args(0) {
@@ -220,14 +219,22 @@ sub category_extras_ajax : Path('category_extras') : Args(0) {
         return 1;
     }
     $c->forward('setup_categories_and_bodies');
+    $c->forward('check_for_category');
 
+    my $category = $c->stash->{category};
     my $category_extra = '';
-    if ( $c->stash->{category_extras}->{ $c->req->param('category') } && @{ $c->stash->{category_extras}->{ $c->req->param('category') } } >= 1  ) {
+    my $generate;
+    if ( $c->stash->{category_extras}->{$category} && @{ $c->stash->{category_extras}->{$category} } >= 1 ) {
         $c->stash->{report_meta} = {};
-        $c->stash->{report} = { category => $c->req->param('category') };
-        $c->stash->{category_extras} = { $c->req->param('category' ) => $c->stash->{category_extras}->{ $c->req->param('category') } };
-
-        $category_extra= $c->render_fragment( 'report/new/category_extras.html');
+        $c->stash->{category_extras} = { $category => $c->stash->{category_extras}->{$category} };
+        $generate = 1;
+    }
+    if ($c->stash->{unresponsive}->{$category}) {
+        $generate = 1;
+    }
+    if ($generate) {
+        $c->stash->{report} = { category => $category };
+        $category_extra = $c->render_fragment( 'report/new/category_extras.html');
     }
 
     my $body = JSON->new->utf8(1)->encode(
@@ -257,7 +264,7 @@ sub report_import : Path('/import') {
     $c->res->content_type('text/plain; charset=utf-8');
 
     my %input =
-      map { $_ => $c->req->param($_) || '' } (
+      map { $_ => $c->get_param($_) || '' } (
         'service', 'subject',  'detail', 'name', 'email', 'phone',
         'easting', 'northing', 'lat',    'lon',  'id',    'phone_id',
       );
@@ -408,7 +415,7 @@ sub initialize_report : Private {
     # create a new one. Stick it on the stash.
     my $report = undef;
 
-    if ( my $partial = scalar $c->req->param('partial') ) {
+    if ( my $partial = $c->get_param('partial') ) {
 
         for (1) {    # use as pseudo flow control
 
@@ -462,15 +469,15 @@ sub initialize_report : Private {
 
     }
 
-    if ( $c->req->param('first_name') && $c->req->param('last_name') ) {
-        $c->stash->{first_name} = $c->req->param('first_name');
-        $c->stash->{last_name} = $c->req->param('last_name');
+    if ( $c->get_param('first_name') && $c->get_param('last_name') ) {
+        $c->stash->{first_name} = $c->get_param('first_name');
+        $c->stash->{last_name} = $c->get_param('last_name');
 
-        $c->req->param( 'name', sprintf( '%s %s', $c->req->param('first_name'), $c->req->param('last_name') ) );
+        $c->set_param('name', sprintf( '%s %s', $c->get_param('first_name'), $c->get_param('last_name') ));
     }
 
     # Capture whether the map was used
-    $report->used_map( $c->req->param('skipped') ? 0 : 1 );
+    $report->used_map( $c->get_param('skipped') ? 0 : 1 );
 
     $c->stash->{report} = $report;
 
@@ -524,8 +531,8 @@ sub determine_location_from_tile_click : Private {
 
     # Extract the data needed
     my ( $pin_tile_x, $pin_tile_y ) = $x_key =~ m{$param_key_regex};
-    my $pin_x = $c->req->param($x_key);
-    my $pin_y = $c->req->param($y_key);
+    my $pin_x = $c->get_param($x_key);
+    my $pin_y = $c->get_param($y_key);
 
     # return if they are both 0 - this happens when you submit the form by
     # hitting enter and not using the button. It also happens if you click
@@ -540,8 +547,8 @@ sub determine_location_from_tile_click : Private {
     );
 
     # store it on the stash
-    $c->stash->{latitude}  = $latitude;
-    $c->stash->{longitude} = $longitude;
+    ($c->stash->{latitude}, $c->stash->{longitude}) =
+        map { Utils::truncate_coordinate($_) } ($latitude, $longitude);
 
     # set a flag so that the form is not considered submitted. This will prevent
     # errors showing on the fields.
@@ -604,6 +611,11 @@ sub setup_categories_and_bodies : Private {
     my %category_extras  = ();       # extra fields to fill in for open311
     my %non_public_categories =
       ();    # categories for which the reports are not public
+    $c->stash->{unresponsive} = {};
+
+    if (keys %bodies == 1 && $first_body->send_method && $first_body->send_method eq 'Refused') {
+        $c->stash->{unresponsive}{ALL} = $first_body->id;
+    }
 
     # FIXME - implement in cobrand
     if ( $c->cobrand->moniker eq 'emptyhomes' ) {
@@ -624,18 +636,6 @@ sub setup_categories_and_bodies : Private {
             _('Empty public building - school, hospital, etc.')
         );
 
-    } elsif ($first_area->{id} != COUNCIL_ID_BROMLEY 
-          && $first_area->{id} != COUNCIL_ID_BARNET 
-          && $first_area->{type} eq 'LBO') {
-
-        $bodies_to_list{ $first_body->id } = 1;
-        my @local_categories;
-        @local_categories =  sort keys %{ Utils::london_categories() };
-        @category_options = (
-            _('-- Pick a category --'),
-            @local_categories 
-        );
-
     } else {
 
         # keysort does not appear to obey locale so use strcoll (see i18n.t)
@@ -649,8 +649,12 @@ sub setup_categories_and_bodies : Private {
             unless ( $seen{$contact->category} ) {
                 push @category_options, $contact->category;
 
-                $category_extras{ $contact->category } = $contact->extra
-                    if $contact->extra;
+                my $metas = $contact->get_extra_fields;
+                $category_extras{ $contact->category } = $metas
+                    if scalar @$metas;
+
+                $c->stash->{unresponsive}{$contact->category} = $contact->body_id
+                    if $contact->email =~ /^REFUSED$/i;
 
                 $non_public_categories{ $contact->category } = 1 if $contact->non_public;
             }
@@ -663,6 +667,9 @@ sub setup_categories_and_bodies : Private {
             push @category_options, _('Other') if $seen{_('Other')};
         }
     }
+
+    $c->cobrand->munge_category_list(\@category_options, \@contacts, \%category_extras)
+        if $c->cobrand->can('munge_category_list');
 
     if ($c->cobrand->can('hidden_categories')) {
         my %hidden_categories = map { $_ => 1 }
@@ -703,7 +710,7 @@ on the presence of the C<submit_problem> parameter.
 sub check_form_submitted : Private {
     my ( $self, $c ) = @_;
     return if $c->stash->{force_form_not_submitted};
-    return $c->req->param('submit_problem') || '';
+    return $c->get_param('submit_problem') || '';
 }
 
 =head2 process_user
@@ -718,7 +725,7 @@ sub process_user : Private {
     my $report = $c->stash->{report};
 
     # Extract all the params to a hash to make them easier to work with
-    my %params = map { $_ => scalar $c->req->param($_) }
+    my %params = map { $_ => $c->get_param($_) }
       ( 'email', 'name', 'phone', 'password_register', 'fms_extra_title' );
 
     my $user_title = Utils::trim_text( $params{fms_extra_title} );
@@ -750,7 +757,7 @@ sub process_user : Private {
         unless $report->user;
 
     # The user is trying to sign in. We only care about email from the params.
-    if ( $c->req->param('submit_sign_in') || $c->req->param('password_sign_in') ) {
+    if ( $c->get_param('submit_sign_in') || $c->get_param('password_sign_in') ) {
         unless ( $c->forward( '/auth/sign_in' ) ) {
             $c->stash->{field_errors}->{password} = _('There was a problem with your email/password combination. If you cannot remember your password, or do not have one, please fill in the &lsquo;sign in by email&rsquo; section of the form.');
             return 1;
@@ -788,7 +795,7 @@ sub process_report : Private {
 
     # Extract all the params to a hash to make them easier to work with
     my %params =       #
-      map { $_ => scalar $c->req->param($_) }    #
+      map { $_ => $c->get_param($_) }
       (
         'title', 'detail', 'pc',                 #
         'detail_size', 'detail_depth',
@@ -851,15 +858,6 @@ sub process_report : Private {
             $report->extra( \%extra );
         }
 
-    } elsif ($first_area->{id} != COUNCIL_ID_BROMLEY 
-          && $first_area->{id} != COUNCIL_ID_BARNET 
-          && $first_area->{type} eq 'LBO') {
-
-        unless ( Utils::london_categories()->{ $report->category } ) {
-            $c->stash->{field_errors}->{category} = _('Please choose a category');
-        }
-        $report->bodies_str( $first_body->id );
-
     } elsif ( $report->category ) {
 
         # FIXME All contacts were fetched in setup_categories_and_bodies,
@@ -880,28 +878,34 @@ sub process_report : Private {
             return 1;
         }
 
-        # construct the bodies string:
-        #  'x,x' - x are body IDs that have this category
-        #  'x,x|y' - x are body IDs that have this category, y body IDs with *no* contact
-        my $body_string = join( ',', map { $_->body_id } @contacts );
-        $body_string .=
-          '|' . join( ',', map { $_->id } @{ $c->stash->{missing_details_bodies} } )
-            if $body_string && @{ $c->stash->{missing_details_bodies} };
-        $report->bodies_str($body_string);
+        if ($c->stash->{unresponsive}{$report->category} || $c->stash->{unresponsive}{ALL}) {
+            # Unresponsive, don't try and send a report.
+            $report->bodies_str(-1);
+        } else {
+            # construct the bodies string:
+            #  'x,x' - x are body IDs that have this category
+            #  'x,x|y' - x are body IDs that have this category, y body IDs with *no* contact
+            my $body_string = join( ',', map { $_->body_id } @contacts );
+            $body_string .=
+              '|' . join( ',', map { $_->id } @{ $c->stash->{missing_details_bodies} } )
+                if $body_string && @{ $c->stash->{missing_details_bodies} };
+            $report->bodies_str($body_string);
+        }
 
-        my @extra = ();
-        my $metas = $contacts[0]->extra;
+        my @extra;
+        # NB: we are only checking extras for the *first* retrieved contact.
+        my $metas = $contacts[0]->get_extra_fields();
 
         foreach my $field ( @$metas ) {
             if ( lc( $field->{required} ) eq 'true' ) {
-                unless ( $c->request->param( $field->{code} ) ) {
+                unless ( $c->get_param($field->{code}) ) {
                     $c->stash->{field_errors}->{ $field->{code} } = _('This information is required');
                 }
             }
             push @extra, {
                 name => $field->{code},
                 description => $field->{description},
-                value => $c->request->param( $field->{code} ) || '',
+                value => $c->get_param($field->{code}) || '',
             };
         }
 
@@ -913,7 +917,7 @@ sub process_report : Private {
 
         if ( @extra ) {
             $c->stash->{report_meta} = { map { $_->{name} => $_ } @extra };
-            $report->extra( \@extra );
+            $report->set_extra_fields( @extra );
         }
     } elsif ( @{ $c->stash->{bodies_to_list} } ) {
 
@@ -964,7 +968,7 @@ sub check_for_errors : Private {
         # We only want to validate the phone number web requests (where the
         # service parameter is blank) because previous versions of the mobile
         # apps don't validate the presence of a phone number.
-        if ( ! $c->req->param('phone') and ! $c->req->param('service') ) {
+        if ( ! $c->get_param('phone') and ! $c->get_param('service') ) {
             $field_errors{phone} = _("This information is required");
         }
     }
@@ -974,7 +978,7 @@ sub check_for_errors : Private {
     # if they're got the login details wrong when signing in then
     # we don't care about the name field even though it's validated
     # by the user object
-    if ( $c->req->param('submit_sign_in') and $field_errors{password} ) {
+    if ( $c->get_param('submit_sign_in') and $field_errors{password} ) {
         delete $field_errors{name};
     }
 
@@ -1060,9 +1064,9 @@ sub save_user_and_report : Private {
     $report->bodies_str( undef ) if $report->bodies_str eq '-1';
 
     # if there is a Message Manager message ID, pass it back to the client view
-    if ($c->cobrand->moniker eq 'fixmybarangay' && $c->req->param('external_source_id')=~/^\d+$/) {
-        $c->stash->{external_source_id} = $c->req->param('external_source_id');
-        $report->external_source_id( $c->req->param('external_source_id') );
+    if ($c->cobrand->moniker eq 'fixmybarangay' && $c->get_param('external_source_id') =~ /^\d+$/) {
+        $c->stash->{external_source_id} = $c->get_param('external_source_id');
+        $report->external_source_id( $c->get_param('external_source_id') );
         $report->external_source( $c->config->{MESSAGE_MANAGER_URL} ) ;
     }
     
@@ -1090,10 +1094,6 @@ sub generate_map : Private {
     my $latitude  = $c->stash->{latitude};
     my $longitude = $c->stash->{longitude};
 
-    ( $c->stash->{short_latitude}, $c->stash->{short_longitude} ) =
-      map { Utils::truncate_coordinate($_) }
-      ( $c->stash->{latitude}, $c->stash->{longitude} );
-
     # Don't do anything if the user skipped the map
     if ( $c->stash->{report}->used_map ) {
         $c->stash->{page} = 'new';
@@ -1116,7 +1116,7 @@ sub generate_map : Private {
 sub check_for_category : Private {
     my ( $self, $c ) = @_;
 
-    $c->stash->{category} = $c->req->param('category');
+    $c->stash->{category} = $c->get_param('category');
 
     return 1;
 }
@@ -1136,23 +1136,10 @@ sub redirect_or_confirm_creation : Private {
     if ( $report->confirmed ) {
         # Subscribe problem reporter to email updates
         $c->forward( 'create_reporter_alert' );
-        my $report_uri;
-
-        if ( $c->cobrand->moniker eq 'fixmybarangay' && $c->user->from_body && $c->stash->{external_source_id}) {
-            $report_uri = $c->uri_for( '/report', $report->id, undef, { external_source_id => $c->stash->{external_source_id} } );
-        } elsif ( $c->cobrand->never_confirm_reports && $report->non_public ) {
-            $c->log->info( 'cobrand was set to always confirm reports and report was non public, success page showed');
-            $c->stash->{template} = 'report_created.html';
-            return 1;
-        } else {
-            $report_uri = $c->cobrand->base_url_for_report( $report ) . $report->url;
-        }
-        $c->log->info($report->user->id . ' was logged in, redirecting to /report/' . $report->id);
-        if ( $c->sessionid ) {
-            $c->flash->{created_report} = 'loggedin';
-        }
-        $c->res->redirect($report_uri);
-        $c->detach;
+        $c->log->info($report->user->id . ' was logged in, showing confirmation page for ' . $report->id);
+        $c->stash->{created_report} = 'loggedin';
+        $c->stash->{template} = 'tokens/confirm_problem.html';
+        return 1;
     }
 
     # otherwise create a confirm token and email it to them.
@@ -1199,7 +1186,7 @@ sub redirect_to_around : Private {
     my ( $self, $c ) = @_;
 
     my $params = {
-        pc => ( $c->stash->{pc} || $c->req->param('pc') || '' ),
+        pc => ( $c->stash->{pc} || $c->get_param('pc') || '' ),
         lat => $c->stash->{latitude},
         lon => $c->stash->{longitude},
     };
