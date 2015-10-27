@@ -28,7 +28,7 @@ If no search redirect back to the homepage.
 
 =cut
 
-sub around_index : Path : Args(0) {
+sub index : Path : Args(0) {
     my ( $self, $c ) = @_;
 
     # handle old coord systems
@@ -302,15 +302,10 @@ sub ajax : Path('/ajax') {
         'around/on_map_list_items.html',
         { on_map => $on_map, around_map => $around_map }
     );
-    my $around_map_list_html = $c->render_fragment(
-        'around/around_map_list_items.html',
-        { on_map => $on_map, around_map => $around_map }
-    );
 
     # JSON encode the response
     my $json = { pins => $pins };
     $json->{current} = $on_map_list_html if $on_map_list_html;
-    $json->{current_near} = $around_map_list_html if $around_map_list_html;
     my $body = JSON->new->utf8(1)->encode($json);
     $c->res->body($body);
 }

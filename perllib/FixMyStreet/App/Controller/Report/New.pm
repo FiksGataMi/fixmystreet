@@ -93,6 +93,7 @@ sub report_new : Path : Args(0) {
     $c->forward('check_for_category');
 
     # deal with the user and report and check both are happy
+
     return unless $c->forward('check_form_submitted');
     $c->forward('process_user');
     $c->forward('process_report');
@@ -105,6 +106,12 @@ sub report_new : Path : Args(0) {
 # This is for the new phonegap versions of the app. It looks a lot like
 # report_new but there's a few workflow differences as we only ever want
 # to sent JSON back here
+
+sub report_new_test : Path('_test_') : Args(0) {
+    my ( $self, $c ) = @_;
+    $c->stash->{template}   = 'email_sent.html';
+    $c->stash->{email_type} = $c->get_param('email_type');
+}
 
 sub report_new_ajax : Path('mobile') : Args(0) {
     my ( $self, $c ) = @_;
@@ -284,7 +291,7 @@ sub report_import : Path('/import') {
     }
 
     # handle the photo upload
-    $c->forward( '/photo/process_photo_upload' );
+    $c->forward( '/photo/process_photo' );
     my $fileid = $c->stash->{upload_fileid};
     if ( my $error = $c->stash->{photo_error} ) {
         push @errors, $error;
@@ -883,13 +890,29 @@ sub process_report : Private {
             $report->bodies_str(-1);
         } else {
             # construct the bodies string:
-            #  'x,x' - x are body IDs that have this category
-            #  'x,x|y' - x are body IDs that have this category, y body IDs with *no* contact
-            my $body_string = join( ',', map { $_->body_id } @contacts );
-            $body_string .=
-              '|' . join( ',', map { $_->id } @{ $c->stash->{missing_details_bodies} } )
-                if $body_string && @{ $c->stash->{missing_details_bodies} };
+            my $body_string = do {
+                if ( $c->cobrand->can('singleton_bodies_str') && $c->cobrand->singleton_bodies_str ) {
+                    # Cobrands like Zurich can only ever have a single body: 'x', because some functionality
+                    # relies on string comparison against bodies_str.
+                    if (@contacts) {
+                        $contacts[0]->body_id;
+                    }
+                    else {
+                        '';
+                    }
+                }
+                else {
+                    #  'x,x' - x are body IDs that have this category
+                    my $bs = join( ',', map { $_->body_id } @contacts );
+                    $bs;
+                };
+            };
             $report->bodies_str($body_string);
+            # Record any body IDs which might have meant to match, but had no contact
+            if ($body_string && @{ $c->stash->{missing_details_bodies} }) {
+                my $missing = join( ',', map { $_->id } @{ $c->stash->{missing_details_bodies} } );
+                $report->bodies_missing($missing);
+            }
         }
 
         my @extra;
@@ -1142,6 +1165,9 @@ sub redirect_or_confirm_creation : Private {
         return 1;
     }
 
+    my $template = 'problem-confirm.txt';
+    $template = 'problem-confirm-not-sending.txt' unless $report->bodies_str;
+
     # otherwise create a confirm token and email it to them.
     my $data = $c->stash->{token_data} || {};
     my $token = $c->model("DB::Token")->create( {
@@ -1152,7 +1178,10 @@ sub redirect_or_confirm_creation : Private {
         }
     } );
     $c->stash->{token_url} = $c->uri_for_email( '/P', $token->token );
-    $c->send_email( 'problem-confirm.txt', {
+    if ($c->cobrand->can('problem_confirm_email_extras')) {
+        $c->cobrand->problem_confirm_email_extras($report);
+    }
+    $c->send_email( $template, {
         to => [ $report->name ? [ $report->user->email, $report->name ] : $report->user->email ],
     } );
 

@@ -31,16 +31,16 @@ $(function(){
 
     // Questionnaire hide/showings
     if (!$('#been_fixed_no').prop('checked') && !$('#been_fixed_unknown').prop('checked')) {
-        $('#another_qn').hide();
+        $('.js-another-questionnaire').hide();
     }
-    $('#been_fixed_no').click(function() {
-        $('#another_qn').show('fast');
+    $('#been_fixed_no').on('click', function() {
+        $('.js-another-questionnaire').show('fast');
     });
-    $('#been_fixed_unknown').click(function() {
-        $('#another_qn').show('fast');
+    $('#been_fixed_unknown').on('click', function() {
+        $('.js-another-questionnaire').show('fast');
     });
-    $('#been_fixed_yes').click(function() {
-        $('#another_qn').hide('fast');
+    $('#been_fixed_yes').on('click', function() {
+        $('.js-another-questionnaire').hide('fast');
     });
 
     // Form validation
@@ -177,13 +177,8 @@ $(function(){
             category: $(this).val()
         };
 
-        if ( typeof fixmystreet !== 'undefined' ) {
-            args.latitude = fixmystreet.latitude;
-            args.longitude = fixmystreet.longitude;
-        } else {
-            args.latitude = $('input[name="latitude"]').val();
-            args.longitude = $('input[name="longitude"]').val();
-        }
+        args.latitude = $('input[name="latitude"]').val();
+        args.longitude = $('input[name="longitude"]').val();
 
         $.getJSON('/report/new/category_extras', args, function(data) {
             var $category_meta = $('#category_meta');

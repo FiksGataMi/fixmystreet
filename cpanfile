@@ -43,6 +43,7 @@ requires 'DBIx::Class::ResultSet';
 requires 'DBIx::Class::Schema::Loader';
 requires 'Digest::MD5';
 requires 'Digest::SHA';
+requires 'Email::MIME';
 requires 'Email::Send';
 requires 'Email::Send::SMTP';
 requires 'Email::Simple';
@@ -67,6 +68,7 @@ requires 'Math::Trig';
 requires 'Module::Pluggable';
 requires 'Moose';
 requires 'namespace::autoclean';
+requires 'Net::DNS::Resolver';
 requires 'Net::Domain::TLD';
 requires 'Net::SMTP::SSL';
 requires 'Net::SMTP::TLS';
@@ -89,9 +91,6 @@ requires 'YAML';
 feature 'uk', 'FixMyStreet.com specific requirements' => sub {
     # East Hampshire
     requires 'SOAP::Lite';
-    # Barnet
-    # TODO: This can perhaps be removed since Barnet switched to email for problem reports
-    requires 'SOAP::WSDL';
 };
 
 feature 'open311-endpoint', 'Open311::Endpoint specific requirements' => sub {
@@ -104,7 +103,7 @@ feature 'open311-endpoint', 'Open311::Endpoint specific requirements' => sub {
 };
 
 feature 'zurich', 'Zueri wie neu specific requirements' => sub {
-#    # Geocoder
+    # Geocoder
     requires 'SOAP::Lite';
 };
 

@@ -20,6 +20,18 @@ sub set_restriction {
     $site_key = $key;
 }
 
+sub to_body {
+    my ($rs, $bodies) = @_;
+    return $rs unless $bodies;
+    unless (ref $bodies eq 'ARRAY') {
+        $bodies = [ map { ref $_ ? $_->id : $_ } $bodies ];
+    }
+    $rs = $rs->search(
+        \[ "regexp_split_to_array(bodies_str, ',') && ?", [ {} => $bodies ] ]
+    );
+    return $rs;
+}
+
 # Front page statistics
 
 sub recent_fixed {
@@ -168,9 +180,9 @@ sub timeline {
     return $rs->search(
         {
             -or => {
-                created  => { '>=', \"ms_current_timestamp()-'7 days'::interval" },
-                confirmed => { '>=', \"ms_current_timestamp()-'7 days'::interval" },
-                whensent  => { '>=', \"ms_current_timestamp()-'7 days'::interval" },
+                created  => { '>=', \"current_timestamp-'7 days'::interval" },
+                confirmed => { '>=', \"current_timestamp-'7 days'::interval" },
+                whensent  => { '>=', \"current_timestamp-'7 days'::interval" },
             }
         },
         {
@@ -198,7 +210,10 @@ sub unique_users {
     return $rs->search( {
         state => [ FixMyStreet::DB::Result::Problem->visible_states() ],
     }, {
-        select => [ { count => { distinct => 'user_id' } } ],
+        select => [ { distinct => 'user_id' } ],
+        as     => [ 'user_id' ]
+    } )->as_subselect_rs->search( undef, {
+        select => [ { count => 'user_id' } ],
         as     => [ 'count' ]
     } )->first->get_column('count');
 }
@@ -235,8 +250,8 @@ sub send_reports {
     my $site = $site_override || CronFns::site($base_url);
 
     my $states = [ 'confirmed', 'fixed' ];
-    $states = [ 'unconfirmed', 'confirmed', 'in progress', 'planned', 'closed' ] if $site eq 'zurich';
-    my $unsent = FixMyStreet::App->model("DB::Problem")->search( {
+    $states = [ 'unconfirmed', 'confirmed', 'in progress', 'planned', 'closed', 'investigating' ] if $site eq 'zurich';
+    my $unsent = $rs->search( {
         state => $states,
         whensent => undef,
         bodies_str => { '!=', undef },
@@ -320,15 +335,19 @@ sub send_reports {
             $cobrand->process_additional_metadata_for_email($row, \%h);
         }
 
-        # XXX Needs locks!
-        # XXX Only copes with at most one missing body
-        my ($bodies, $missing) = $row->bodies_str =~ /^([\d,]+)(?:\|(\d+))?/;
-        my @bodies = split(/,/, $bodies);
-        $bodies = FixMyStreet::App->model("DB::Body")->search(
-            { id => \@bodies },
+        my $bodies = FixMyStreet::App->model("DB::Body")->search(
+            { id => $row->bodies_str_ids },
             { order_by => 'name' },
         );
-        $missing = FixMyStreet::App->model("DB::Body")->find($missing) if $missing;
+
+        my $missing;
+        if ($row->bodies_missing) {
+            my @missing = FixMyStreet::App->model("DB::Body")->search(
+                { id => [ split /,/, $row->bodies_missing ] },
+                { order_by => 'name' }
+            )->get_column('name')->all;
+            $missing = join(' / ', @missing) if @missing;
+        }
 
         my @dear;
         my %reporters = ();
@@ -337,7 +356,7 @@ sub send_reports {
             my $sender = "FixMyStreet::SendReport::" . $sender_info->{method};
 
             if ( ! exists $senders->{ $sender } ) {
-                warn "No such sender [ $sender ] for body $body->name ( $body->id )";
+                warn sprintf "No such sender [ $sender ] for body %s ( %d )", $body->name, $body->id;
                 next;
             }
             $reporters{ $sender } ||= $sender->new();
@@ -400,7 +419,7 @@ sub send_reports {
         $h{missing} = '';
         if ($missing) {
             $h{missing} = '[ '
-              . sprintf(_('We realise this problem might be the responsibility of %s; however, we don\'t currently have any contact details for them. If you know of an appropriate contact address, please do get in touch.'), $missing->name)
+              . sprintf(_('We realise this problem might be the responsibility of %s; however, we don\'t currently have any contact details for them. If you know of an appropriate contact address, please do get in touch.'), $missing)
               . " ]\n\n";
         }
 
@@ -433,8 +452,8 @@ sub send_reports {
 
         unless ($result) {
             $row->update( {
-                whensent => \'ms_current_timestamp()',
-                lastupdate => \'ms_current_timestamp()',
+                whensent => \'current_timestamp',
+                lastupdate => \'current_timestamp',
             } );
             if ( $cobrand->report_sent_confirmation_email && !$h{anonymous_report}) {
                 _send_report_sent_email( $row, \%h, $nomail, $cobrand );
@@ -468,7 +487,7 @@ sub send_reports {
             }
         }
         my $sending_errors = '';
-        my $unsent = FixMyStreet::App->model("DB::Problem")->search( {
+        my $unsent = $rs->search( {
             state => [ 'confirmed', 'fixed' ],
             whensent => undef,
             bodies_str => { '!=', undef },
@@ -499,7 +518,7 @@ sub _send_report_sent_email {
             _template_ => $template,
             _parameters_ => $h,
             To => $row->user->email,
-            From => mySociety::Config::get('CONTACT_EMAIL'),
+            From => [ mySociety::Config::get('CONTACT_EMAIL'), $cobrand->contact_name ],
         },
         mySociety::Config::get('CONTACT_EMAIL'),
         $nomail,

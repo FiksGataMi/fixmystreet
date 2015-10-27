@@ -45,15 +45,6 @@ sub country {
     return '';
 }
 
-=head1 problems_clause
-
-Returns a hash for a query to be used by problems (and elsewhere in joined
-queries) to restrict results for a cobrand.
-
-=cut
-
-sub problems_clause {}
-
 =head1 problems
 
 Returns a ResultSet of Problems, restricted to a subset if we're on a cobrand
@@ -66,20 +57,20 @@ sub problems {
     return $self->{c}->model('DB::Problem');
 }
 
-=head1 site_restriction
+=head1 body_restriction
 
-Return a site key and a hash of extra query parameters if the cobrand uses a
-subset of the FixMyStreet data. Parameter is any extra data the cobrand needs.
-Returns a site key of 0 and an empty hash if the cobrand uses all the data.
+Return an extra query parameter to restrict reports to those sent to a
+particular body.
 
 =cut
 
-sub site_restriction { return {}; }
+sub body_restriction {}
+
 sub site_key { return 0; }
 
 =head2 restriction
 
-Return a restriction to pull out data saved while using the cobrand site.
+Return a restriction to data saved while using this specific cobrand site.
 
 =cut
 
@@ -117,7 +108,8 @@ sub base_url { FixMyStreet->config('BASE_URL') }
 =head2 base_url_for_report
 
 Return the base url for a report (might be different in a two-tier county, but
-most of the time will be same as base_url).
+most of the time will be same as base_url). Report may be an object, or a
+hashref.
 
 =cut
 
@@ -919,6 +911,50 @@ sub get_country_for_ip_address {
 sub jurisdiction_id_example {
     my $self = shift;
     return $self->moniker;
+}
+
+=head2 body_details_data
+
+Returns a list of bodies to create with ensure_body.  These
+are mostly just passed to ->find_or_create, but there is some
+pre-processing so that you can enter:
+
+    area_id => 123,
+    parent => 'Big Town',
+
+instead of
+
+    body_areas => [ { area_id => 123 } ],
+    parent => { name => 'Big Town' },
+
+For example:
+
+    return (
+        {
+            name => 'Big Town',
+        },
+        {
+            name => 'Small town',
+            parent => 'Big Town',
+            area_id => 1234,
+        },
+
+
+=cut
+
+sub body_details_data {
+    return ();
+}
+
+=head2 contact_details_data
+
+Returns a list of contact_data to create with setup_contacts.
+See Zurich for an example.
+
+=cut
+
+sub contact_details_data {
+    return ()
 }
 
 1;

@@ -99,23 +99,30 @@ sub load_problem_or_display_error : Private {
     my $problem
       = ( !$id || $id =~ m{\D} ) # is id non-numeric?
       ? undef                    # ...don't even search
-      : $c->cobrand->problems->find( { id => $id } );
+      : $c->cobrand->problems->find( { id => $id } )
+          or $c->detach( '/page_error_404_not_found', [ _('Unknown problem ID') ] );
 
     # check that the problem is suitable to show.
-    if ( !$problem || ($problem->state eq 'unconfirmed' && !$c->cobrand->show_unconfirmed_reports) || $problem->state eq 'partial' ) {
+    # hidden_states includes partial and unconfirmed, but they have specific handling,
+    # so we check for them first.
+    if ( $problem->state eq 'partial' ) {
         $c->detach( '/page_error_404_not_found', [ _('Unknown problem ID') ] );
     }
-    elsif ( $problem->state eq 'hidden' ) {
+    elsif ( $problem->state eq 'unconfirmed' ) {
+        $c->detach( '/page_error_404_not_found', [ _('Unknown problem ID') ] )
+            unless $c->cobrand->show_unconfirmed_reports ;
+    }
+    elsif ( $problem->hidden_states->{ $problem->state } or 
+            (($problem->get_extra_metadata('closure_status')||'') eq 'hidden')) {
         $c->detach(
             '/page_error_410_gone',
             [ _('That report has been removed from FixMyStreet.') ]    #
         );
     } elsif ( $problem->non_public ) {
         if ( !$c->user || $c->user->id != $problem->user->id ) {
-            my $site_name = Utils::trim_text($c->render_fragment('site-name.html'));
             $c->detach(
                 '/page_error_403_access_denied',
-                [ sprintf(_('That report cannot be viewed on %s.'), $site_name) ]    #
+                [ sprintf(_('That report cannot be viewed on %s.'), $c->stash->{site_name}) ]
             );
         }
     }
@@ -242,7 +249,7 @@ sub delete :Local :Args(1) {
     return $c->res->redirect($uri) unless $p->bodies->{$body->id};
 
     $p->state('hidden');
-    $p->lastupdate( \'ms_current_timestamp()' );
+    $p->lastupdate( \'current_timestamp' );
     $p->update;
 
     $c->model('DB::AdminLog')->create( {
