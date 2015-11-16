@@ -165,6 +165,7 @@ sub delete_user {
         $a->delete;
     }
     $_->delete for $user->comments;
+    $_->delete for $user->admin_logs;
     $user->delete;
 
     return 1;
@@ -220,6 +221,24 @@ sub get_email {
     $mech->email_count_is(1) || return undef;
     return $emails[0];
 }
+
+=head2 get_first_email
+
+    $email = $mech->get_first_email(@emails);
+
+Returns first email in queue as a string and fails a test if the mail doesn't have a date and epoch-containing Message-ID header.
+
+=cut
+
+sub get_first_email {
+    my $mech = shift;
+    my $email = shift or do { fail 'No email retrieved'; return };
+    my $email_as_string = $email->as_string;
+    ok $email_as_string =~ s{\s+Date:\s+\S.*?$}{}xmsg, "Found and stripped out date";
+    ok $email_as_string =~ s{\s+Message-ID:\s+\S.*?$}{}xmsg, "Found and stripped out message ID (contains epoch)";
+    return $email_as_string;
+}
+
 
 =head2 page_errors
 
@@ -383,7 +402,7 @@ sub extract_update_metas {
 
     my $result = scraper {
         process 'div#updates div.problem-update p em', 'meta[]', 'TEXT';
-        process '.update-text .meta-2', 'meta[]', 'TEXT';
+        process '.item-list__update-text .meta-2', 'meta[]', 'TEXT';
     }
     ->scrape( $mech->response );
 
@@ -404,7 +423,7 @@ sub extract_problem_list {
     my $mech = shift;
 
     my $result = scraper {
-        process 'ul.issue-list-a li a h4', 'problems[]', 'TEXT';
+        process 'ul.item-list--reports li a h4', 'problems[]', 'TEXT';
     }->scrape( $mech->response );
 
     return $result->{ problems } || [];
@@ -631,7 +650,7 @@ sub create_problems_for_body {
             latitude           => '51.5016605453401',
             longitude          => '-0.142497580865087',
             user_id            => $user->id,
-            photo              => 1,
+            photo              => $mech->get_photo_data,
         };
 
         my %report_params = ( %$default_params, %$params );
@@ -644,6 +663,15 @@ sub create_problems_for_body {
     }
 
     return @problems;
+}
+
+sub get_photo_data {
+    my $mech = shift;
+    return $mech->{sample_photo} ||= do {
+        my $sample_file = FixMyStreet->path_to( 't/app/controller/sample.jpg' );
+        $mech->builder->ok( -f "$sample_file", "sample file $sample_file exists" );
+        $sample_file->slurp(iomode => '<:raw');
+    };
 }
 
 1;

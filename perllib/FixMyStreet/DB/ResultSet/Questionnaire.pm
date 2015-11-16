@@ -22,7 +22,7 @@ sub send_questionnaires_period {
         whensent => [
             '-and',
             { '!=', undef },
-            { '<', \"ms_current_timestamp() - '$period'::interval" },
+            { '<', \"current_timestamp - '$period'::interval" },
         ],
         send_questionnaire => 1,
     };
@@ -34,7 +34,7 @@ sub send_questionnaires_period {
     } else {
         $q_params->{'-or'} = [
             '(select max(whensent) from questionnaire where me.id=problem_id)' => undef,
-            '(select max(whenanswered) from questionnaire where me.id=problem_id)' => { '<', \"ms_current_timestamp() - '$period'::interval" }
+            '(select max(whenanswered) from questionnaire where me.id=problem_id)' => { '<', \"current_timestamp - '$period'::interval" }
         ];
     }
 
@@ -70,7 +70,7 @@ sub send_questionnaires_period {
 
         my $questionnaire = FixMyStreet::App->model('DB::Questionnaire')->create( {
             problem_id => $row->id,
-            whensent => \'ms_current_timestamp()',
+            whensent => \'current_timestamp',
         } );
 
         # We won't send another questionnaire unless they ask for it (or it was
@@ -84,9 +84,6 @@ sub send_questionnaires_period {
         } );
         $h{url} = $cobrand->base_url($row->cobrand_data) . '/Q/' . $token->token;
 
-        my $sender = FixMyStreet->config('DO_NOT_REPLY_EMAIL');
-        my $sender_name = _($cobrand->contact_name);
-
         print "Sending questionnaire " . $questionnaire->id . ", problem "
             . $row->id . ", token " . $token->token . " to "
             . $row->user->email . "\n"
@@ -97,9 +94,8 @@ sub send_questionnaires_period {
                 _template_ => $template,
                 _parameters_ => \%h,
                 To => [ [ $row->user->email, $row->name ] ],
-                From => [ $sender, $sender_name ],
             },
-            $sender,
+            undef,
             $params->{nomail},
             $cobrand
         );
@@ -117,32 +113,36 @@ sub send_questionnaires_period {
 sub timeline {
     my ( $rs, $restriction ) = @_;
 
-    return $rs->search(
-        {
-            -or => {
-                whenanswered => { '>=', \"ms_current_timestamp()-'7 days'::interval" },
-                'me.whensent'  => { '>=', \"ms_current_timestamp()-'7 days'::interval" },
-            },
-            %{ $restriction },
-        },
-        {
+    my $attrs;
+    if (%$restriction) {
+        $attrs = {
             -select => [qw/me.*/],
             prefetch => [qw/problem/],
         }
+    }
+    return $rs->search(
+        {
+            -or => {
+                whenanswered => { '>=', \"current_timestamp-'7 days'::interval" },
+                'me.whensent'  => { '>=', \"current_timestamp-'7 days'::interval" },
+            },
+            %{ $restriction },
+        },
+        $attrs
     );
 }
 
 sub summary_count {
     my ( $rs, $restriction ) = @_;
 
-    return $rs->search(
-        $restriction,
-        {
-            group_by => [ \'whenanswered is not null' ],
-            select   => [ \'(whenanswered is not null)', { count => 'me.id' } ],
-            as       => [qw/answered questionnaire_count/],
-            join     => 'problem'
-        }
-    );
+    my $params = {
+        group_by => [ \'whenanswered is not null' ],
+        select => [ \'(whenanswered is not null)', { count => 'me.id' } ],
+        as => [qw/answered questionnaire_count/],
+    };
+    if (%$restriction) {
+        $params->{join} = 'problem';
+    }
+    return $rs->search($restriction, $params);
 }
 1;

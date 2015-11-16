@@ -31,8 +31,9 @@ __PACKAGE__->add_columns(
   "created",
   {
     data_type     => "timestamp",
-    default_value => \"ms_current_timestamp()",
+    default_value => \"current_timestamp",
     is_nullable   => 0,
+    original      => { default_value => \"now()" },
   },
   "confirmed",
   { data_type => "timestamp", is_nullable => 1 },
@@ -88,8 +89,8 @@ __PACKAGE__->belongs_to(
 );
 
 
-# Created by DBIx::Class::Schema::Loader v0.07035 @ 2014-07-31 15:59:43
-# DO NOT MODIFY THIS OR ANYTHING ABOVE! md5sum:08AtJ6CZFyUe7qKMF50MHg
+# Created by DBIx::Class::Schema::Loader v0.07035 @ 2015-08-13 16:33:38
+# DO NOT MODIFY THIS OR ANYTHING ABOVE! md5sum:ZR+YNA1Jej3s+8mr52iq6Q
 #
 
 __PACKAGE__->load_components("+FixMyStreet::DB::RABXColumn");
@@ -144,7 +145,7 @@ sub confirm {
     my $self = shift;
 
     $self->state( 'confirmed' );
-    $self->confirmed( \'ms_current_timestamp()' );
+    $self->confirmed( \'current_timestamp' );
 }
 
 =head2 get_photo_params

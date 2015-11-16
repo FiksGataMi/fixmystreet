@@ -31,16 +31,12 @@ sub my : Path : Args(0) {
     $c->forward( '/reports/stash_report_filter_status' );
 
     my $pins = [];
-    my $problems = {};
+    my $problems = [];
 
     my $states = $c->stash->{filter_problem_states};
     my $params = {
         state => [ keys %$states ],
     };
-    $params = {
-        %{ $c->cobrand->problems_clause },
-        %$params
-    } if $c->cobrand->problems_clause;
 
     my $category = $c->get_param('filter_category');
     if ( $category ) {
@@ -48,7 +44,9 @@ sub my : Path : Args(0) {
         $c->stash->{filter_category} = $category;
     }
 
-    my $rs = $c->user->problems->search( $params, {
+    my $rs = $c->user->problems
+        ->to_body($c->cobrand->body_restriction)
+        ->search( $params, {
         order_by => { -desc => 'confirmed' },
         rows => 50
     } )->page( $p_page );
@@ -62,9 +60,7 @@ sub my : Path : Args(0) {
             id        => $problem->id,
             title     => $problem->title,
         };
-        my $state = $problem->is_fixed ? 'fixed' : $problem->is_closed ? 'closed' : 'confirmed';
-        push @{ $problems->{$state} }, $problem;
-        push @{ $problems->{all} }, $problem;
+        push @$problems, $problem;
     }
     $c->stash->{problems_pager} = $rs->pager;
     $c->stash->{problems} = $problems;

@@ -353,7 +353,7 @@ for my $test (
             'submit update'
         );
 
-        $mech->content_contains('Nearly Done! Now check your email');
+        $mech->content_contains('Nearly done! Now check your email');
 
         my $email = $mech->get_email;
         ok $email, "got an email";
@@ -1007,7 +1007,7 @@ subtest 'submit an update for a registered user, creating update by email' => su
         },
     }, 'submit update' );
 
-    $mech->content_contains('Nearly Done! Now check your email');
+    $mech->content_contains('Nearly done! Now check your email');
 
     # No change to user yet.
     $user->discard_changes;
@@ -1339,7 +1339,7 @@ foreach my $test (
                 {
                     problem_id    => $report_id,
                     ever_reported => 'y',
-                    whensent      => \'ms_current_timestamp()',
+                    whensent      => \'current_timestamp',
                 }
               );
 
@@ -1481,7 +1481,7 @@ for my $test (
                 {
                     problem_id    => $report_id,
                     ever_reported => 'y',
-                    whensent      => \'ms_current_timestamp()',
+                    whensent      => \'current_timestamp',
                 }
               );
 

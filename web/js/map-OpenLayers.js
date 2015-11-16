@@ -59,14 +59,6 @@ function fixmystreet_activate_drag() {
     fixmystreet.drag.activate();
 }
 
-// Need to try and fake the 'centre' being 75% from the left
-function fixmystreet_midpoint() {
-    var $content = $('.content'), mb = $('#map_box'),
-        q = ( $content.offset().left - mb.offset().left + $content.width() ) / 2,
-        mid_point = q < 0 ? 0 : q;
-    return mid_point;
-}
-
 function fixmystreet_zoomToBounds(bounds) {
     if (!bounds) { return; }
     var center = bounds.getCenterLonLat();
@@ -560,12 +552,9 @@ OpenLayers.Format.FixMyStreet = OpenLayers.Class(OpenLayers.Format.JSON, {
         } else {
             obj = json;
         }
-        var current, current_near;
+        var current;
         if (typeof(obj.current) != 'undefined' && (current = document.getElementById('current'))) {
             current.innerHTML = obj.current;
-        }
-        if (typeof(obj.current_near) != 'undefined' && (current_near = document.getElementById('current_near'))) {
-            current_near.innerHTML = obj.current_near;
         }
         return fms_markers_list( obj.pins, false );
     },
@@ -659,7 +648,7 @@ OpenLayers.Control.Click = OpenLayers.Class(OpenLayers.Control, {
                     fixmystreet.map.getProjectionObject()
                 );
                 var p = fixmystreet.map.getViewPortPxFromLonLat(lonlat);
-                p.x -= ( o.left - bo.left + w ) / 2;
+                p.x -= midpoint_box_excluding_column(o, w, bo, $map_boxx.width());
                 lonlat = fixmystreet.map.getLonLatFromViewPortPx(p);
                 fixmystreet.map.panTo(lonlat);
             }
