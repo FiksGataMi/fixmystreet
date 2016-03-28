@@ -3,6 +3,14 @@
 
 $image-sprite: '/cobrands/fixmystreet/images/sprite.png' !default;
 
+.internal-link-fixed-header {
+    display: block;
+    /* 5em is roughly the height of .nav-wrapper-2 (4em) plus the border-top on
+    .nav-wrapper-2 (4px), plus the padding-top on .item-list__item (0.5em). */
+    padding-top: 5em;
+    margin-top: -5em;
+}
+
 //hacks for desk/mob only stuff
 .desk-only {
     display: block;
@@ -654,7 +662,7 @@ body.authpage {
 }
 .iel8 #sub_map_links #map_links_toggle {
     height: 1.75em;
-    background: #000 url('images/ie_sub_map_links_sprite.gif') center -143px no-repeat;
+    background: #000 url('/cobrands/fixmystreet/images/ie_sub_map_links_sprite.gif') center -143px no-repeat;
     &.closed {
       background-position: center -183px;
     }

@@ -40,6 +40,60 @@ We've extracted all of the mobile apps from this repository into the
 
 ## Releases
 
+* v1.8.1 (23rd March 2016)
+    - Front end improvements:
+          - Remember user's last anonymous state. #150
+          - Remove auto-scrolling of sidebar on pin hover. #1344
+          - Better multiple image display for reports/updates. #1325
+          - Improve accessibility of pretty radio buttons and photo inputs.
+    - Bugfixes:
+          - Make sure preview image doesn't hide error. #1361
+          - Don't double-decode geocoded addresses. #1359
+          - Ensure top of reporting form is shown. #787
+          - Other updates for Perl 5.20/5.22. #1358
+    - Development improvements:
+          - Add cobrand-specific custom reporting fields. #1352
+
+* v1.8 (2nd March 2016)
+    - New features:
+        - Facebook login. #1146
+        - Multiple photo upload support, with new UI. #190 #825 #1300
+    - Front end improvements:
+        - Pad internal update links so they are in view. #1308
+        - Move alert page "recent photos" out of sidebar. #1168
+        - Clearer relationship between map pins/list items. #1094
+        - Consistent styling for updates on /report and /my pages. #1312
+        - Stop a top banner overlapping header contents/improve CSS. #1306
+        - Improve design of some error pages.
+    - Performance improvements:
+        - Reduce memory usage. #1285
+    - Bugfixes:
+        - Default the Google map view to hybrid. #1293
+        - Prevent SVG chevron being stretched in Firefox. #1256
+        - Better display/internationalisation of numbers. #1297
+        - Fix cobrand restriction of My/Nearby. #1289
+        - If app user logged in, perform alert signup. #1321
+        - Spot media_url in Open311 GetServiceRequestUpdate. #1315
+        - Improve disabled input behaviour (no hover, ensure faded).
+        - Fix co-ordinate swapping bug in Google geocoder.
+        - Exclude update alerts from summary alert counts.
+        - Skip sending if any body marks it for skipping.
+        - Upgrade Net::SMTP::SSL to fix email sending issue.
+    - Development improvements:
+        - Add generic static route handler. #1235
+        - Store reports summary data by cobrand. #1290
+        - Better handling replies to bounce addresses. #85
+        - Combine more base/fixmystreet templates.
+        - Add OpenStreetMap URL to report email.
+    - Admin improvements:
+        - Don't allow blank email/name to be submitted. #1294
+        - Handle multiple photo rotation/removal in admin. #1300
+        - Fix typo in admin body form checked status.
+    - UK only
+        - Make sure front page error is visible. #1336
+        - Don't show app next step if used app. #1305
+        - House Rules. #890 #1311
+
 * v1.7 (23rd October 2015)
     - Front end improvements:
         - Add right-to-left design option. #1209

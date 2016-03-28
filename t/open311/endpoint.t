@@ -6,12 +6,11 @@ use Test::MockTime ':all';
 
 use Open311::Endpoint;
 use Data::Dumper;
-use JSON;
+use JSON::MaybeXS;
 
 use t::open311::endpoint::Endpoint1;
 
 my $endpoint = t::open311::endpoint::Endpoint1->new;
-my $json = JSON->new;
 
 subtest "GET Service List" => sub {
     my $res = $endpoint->run_test_request( GET => '/services.xml' );
@@ -43,7 +42,7 @@ CONTENT
 
     $res = $endpoint->run_test_request( GET => '/services.json' );
     ok $res->is_success, 'json success';
-    is_deeply $json->decode($res->content),
+    is_deeply decode_json($res->content),
         [ {
                "keywords" => "deep,hole,wow",
                "group" => "highways",
@@ -90,16 +89,16 @@ subtest "GET Service Definition" => sub {
       <required>false</required>
       <values>
         <value>
-          <name>Triangle</name>
-          <key>triangle</key>
-        </value>
-        <value>
           <name>Circle</name>
           <key>circle</key>
         </value>
         <value>
           <name>Square</name>
           <key>square</key>
+        </value>
+        <value>
+          <name>Triangle</name>
+          <key>triangle</key>
         </value>
       </values>
       <variable>true</variable>
@@ -111,7 +110,7 @@ CONTENT
 
     $res = $endpoint->run_test_request( GET => '/services/POT.json' );
     ok $res->is_success, 'json success';
-    is_deeply $json->decode($res->content),
+    is_deeply decode_json($res->content),
         {
             "service_code" => "POT",
             "attributes" => [
@@ -134,17 +133,17 @@ CONTENT
                     "datatype" => "singlevaluelist",
                     "values" => [
                         {
-                            "name" => "Triangle",
-                            "key" => "triangle"
-                        },
-                        {
                             "name" => "Circle",
                             "key" => "circle"
                         },
                         {
                             "name" => "Square",
                             "key" => "square"
-                        }
+                        },
+                        {
+                            "name" => "Triangle",
+                            "key" => "triangle"
+                        },
                     ],
                }
             ],
@@ -209,7 +208,7 @@ subtest "POST Service Request valid test" => sub {
     ok $res->is_success, 'valid request'
         or diag $res->content;
 
-    is_deeply $json->decode($res->content),
+    is_deeply decode_json($res->content),
         [ {
             "service_notice" => "This is a test service",
             "service_request_id" => 0

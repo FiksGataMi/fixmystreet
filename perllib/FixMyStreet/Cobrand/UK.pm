@@ -1,6 +1,7 @@
 package FixMyStreet::Cobrand::UK;
 use base 'FixMyStreet::Cobrand::Default';
 
+use JSON::MaybeXS;
 use mySociety::MaPit;
 use mySociety::VotingArea;
 
@@ -26,7 +27,7 @@ sub disambiguate_location {
     };
 }
 
-sub process_extras {
+sub process_open311_extras {
     my $self    = shift;
     my $ctx     = shift;
     my $body_id = shift;

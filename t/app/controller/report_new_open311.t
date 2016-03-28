@@ -45,7 +45,9 @@ foreach my $test (
         fields => {
             title         => '',
             detail        => '',
-            photo         => '',
+            photo1        => '',
+            photo2        => '',
+            photo3        => '',
             name          => '',
             may_show_name => '1',
             email         => '',
@@ -129,6 +131,7 @@ foreach my $test (
         my $new_values = {
             %{ $test->{fields} },     # values added to form
             %{ $test->{changes} },    # changes we expect
+            gender => undef,
         };
         is_deeply $mech->visible_form_values, $new_values,
           "values correctly changed";

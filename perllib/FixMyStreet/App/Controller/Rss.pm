@@ -218,7 +218,7 @@ sub query_main : Private {
         . ($alert_type->head_table ? $alert_type->head_table . '_id=? and ' : '')
         . $alert_type->item_where . ' order by '
         . $alert_type->item_order;
-    my $rss_limit = mySociety::Config::get('RSS_LIMIT');
+    my $rss_limit = FixMyStreet->config('RSS_LIMIT');
     $query .= " limit $rss_limit" unless $c->stash->{type} =~ /^all/;
 
     my $q = $c->model('DB::Alert')->result_source->storage->dbh->prepare($query);
@@ -260,9 +260,9 @@ sub add_row : Private {
         $row->{confirmed} =~ s/^(\d+)/ordinal($1)/e if $c->stash->{lang_code} eq 'en-gb';
     }
 
-    (my $title = _($alert_type->item_title)) =~ s/{{(.*?)}}/$row->{$1}/g;
-    (my $link = $alert_type->item_link) =~ s/{{(.*?)}}/$row->{$1}/g;
-    (my $desc = _($alert_type->item_description)) =~ s/{{(.*?)}}/$row->{$1}/g;
+    (my $title = _($alert_type->item_title)) =~ s/\{\{(.*?)}}/$row->{$1}/g;
+    (my $link = $alert_type->item_link) =~ s/\{\{(.*?)}}/$row->{$1}/g;
+    (my $desc = _($alert_type->item_description)) =~ s/\{\{(.*?)}}/$row->{$1}/g;
 
     my $base_url = $c->cobrand->base_url_for_report($row);
     my $url = $base_url . $link;
@@ -317,9 +317,9 @@ sub add_parameters : Private {
         $row->{$_} = $c->stash->{title_params}->{$_};
     }
 
-    (my $title = _($alert_type->head_title)) =~ s/{{(.*?)}}/$row->{$1}/g;
-    (my $link = $alert_type->head_link) =~ s/{{(.*?)}}/$row->{$1}/g;
-    (my $desc = _($alert_type->head_description)) =~ s/{{(.*?)}}/$row->{$1}/g;
+    (my $title = _($alert_type->head_title)) =~ s/\{\{(.*?)}}/$row->{$1}/g;
+    (my $link = $alert_type->head_link) =~ s/\{\{(.*?)}}/$row->{$1}/g;
+    (my $desc = _($alert_type->head_description)) =~ s/\{\{(.*?)}}/$row->{$1}/g;
 
     $c->stash->{rss}->channel(
         title       => ent($title),

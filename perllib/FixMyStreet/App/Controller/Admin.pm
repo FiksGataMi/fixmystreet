@@ -84,14 +84,14 @@ sub index : Path : Args(0) {
         for ( FixMyStreet::DB::Result::Problem->visible_states() );
     $c->stash->{total_problems_users} = $c->cobrand->problems->unique_users;
 
-    my $comments = $c->model('DB::Comment')->summary_count( $c->cobrand->body_restriction );
+    my $comments = $c->cobrand->updates->summary_count;
 
     my %comment_counts =
       map { $_->state => $_->get_column('state_count') } $comments->all;
 
     $c->stash->{comments} = \%comment_counts;
 
-    my $alerts = $c->model('DB::Alert')->summary_count( $c->cobrand->restriction );
+    my $alerts = $c->model('DB::Alert')->summary_report_alerts( $c->cobrand->restriction );
 
     my %alert_counts =
       map { $_->confirmed => $_->get_column('confirmed_count') } $alerts->all;
@@ -171,7 +171,7 @@ sub timeline : Path( 'timeline' ) : Args(0) {
         push @{$time{$_->whenanswered->epoch}}, { type => 'quesAnswered', date => $_->whenanswered, obj => $_ } if $_->whenanswered;
     }
 
-    my $updates = $c->model('DB::Comment')->timeline( $c->cobrand->body_restriction );
+    my $updates = $c->cobrand->updates->timeline;
 
     foreach ($updates->all) {
         push @{$time{$_->created->epoch}}, { type => 'update', date => $_->created, obj => $_} ;
@@ -622,9 +622,7 @@ sub reports : Path('reports') {
         }
 
         if (@$query) {
-            my $updates = $c->model('DB::Comment')
-                ->to_body($c->cobrand->body_restriction)
-                ->search(
+            my $updates = $c->cobrand->updates->search(
                 {
                     -or => $query,
                 },
@@ -685,7 +683,7 @@ sub report_edit : Path('report_edit') : Args(1) {
     }
 
     if (my $rotate_photo_param = $self->_get_rotate_photo_param($c)) {
-        $self->rotate_photo($c,  @$rotate_photo_param);
+        $self->rotate_photo($c, $problem, @$rotate_photo_param);
         if ( $c->cobrand->moniker eq 'zurich' ) {
             # Clicking the photo rotation buttons should do nothing
             # except for rotating the photo, so return the user
@@ -792,11 +790,12 @@ sub report_edit : Path('report_edit') : Args(1) {
         }
 
         # Deal with photos
-        if ( $c->get_param('remove_photo') ) {
-            $problem->photo(undef);
+        my $remove_photo_param = $self->_get_remove_photo_param($c);
+        if ($remove_photo_param) {
+            $self->remove_photo($c, $problem, $remove_photo_param);
         }
 
-        if ( $c->get_param('remove_photo') || $new_state eq 'hidden' ) {
+        if ( $remove_photo_param || $new_state eq 'hidden' ) {
             unlink glob FixMyStreet->path_to( 'web', 'photo', $problem->id . '.*' );
         }
 
@@ -967,9 +966,7 @@ sub users: Path('users') : Args(0) {
 sub update_edit : Path('update_edit') : Args(1) {
     my ( $self, $c, $id ) = @_;
 
-    my $update = $c->model('DB::Comment')
-        ->to_body($c->cobrand->body_restriction)
-        ->search({ id => $id })->first;
+    my $update = $c->cobrand->updates->search({ id => $id })->first;
 
     $c->detach( '/page_error_404_not_found' )
       unless $update;
@@ -977,6 +974,11 @@ sub update_edit : Path('update_edit') : Args(1) {
     $c->forward('get_token');
 
     $c->stash->{update} = $update;
+
+    if (my $rotate_photo_param = $self->_get_rotate_photo_param($c)) {
+        $self->rotate_photo($c, $update, @$rotate_photo_param);
+        return 1;
+    }
 
     $c->forward('check_email_for_abuse', [ $update->user->email ] );
 
@@ -1007,13 +1009,14 @@ sub update_edit : Path('update_edit') : Args(1) {
           || $c->get_param('anonymous') ne $update->anonymous
           || $c->get_param('text') ne $update->text ) {
               $edited = 1;
-          }
-
-        if ( $c->get_param('remove_photo') ) {
-            $update->photo(undef);
         }
 
-        if ( $c->get_param('remove_photo') || $new_state eq 'hidden' ) {
+        my $remove_photo_param = $self->_get_remove_photo_param($c);
+        if ($remove_photo_param) {
+            $self->remove_photo($c, $update, $remove_photo_param);
+        }
+
+        if ( $remove_photo_param || $new_state eq 'hidden' ) {
             unlink glob FixMyStreet->path_to( 'web', 'photo', 'c', $update->id . '.*' );
         }
 
@@ -1076,16 +1079,18 @@ sub user_add : Path('user_edit') : Args(0) {
     $c->forward('get_token');
     $c->forward('fetch_all_bodies');
 
-    return 1 unless $c->get_param('submit');
+    return unless $c->get_param('submit');
 
     $c->forward('check_token');
 
-    if ( $c->cobrand->moniker eq 'zurich' and $c->get_param('email') eq '' ) {
+    unless ($c->get_param('email')) {
         $c->stash->{field_errors}->{email} = _('Please enter a valid email');
-        return 1;
+        return;
     }
-
-    return unless $c->get_param('name') && $c->get_param('email');
+    unless ($c->get_param('name')) {
+        $c->stash->{field_errors}->{name} = _('Please enter a name');
+        return;
+    }
 
     my $user = $c->model('DB::User')->find_or_create( {
         name => $c->get_param('name'),
@@ -1133,12 +1138,16 @@ sub user_edit : Path('user_edit') : Args(1) {
         $user->from_body( $c->get_param('body') || undef );
         $user->flagged( $c->get_param('flagged') || 0 );
 
-        if ( $c->cobrand->moniker eq 'zurich' and $user->email eq '' ) {
+        unless ($user->email) {
             $c->stash->{field_errors}->{email} = _('Please enter a valid email');
-            return 1;
+            return;
         }
-        $user->update;
+        unless ($user->name) {
+            $c->stash->{field_errors}->{name} = _('Please enter a name');
+            return;
+        }
 
+        $user->update;
         if ($edited) {
             $c->forward( 'log_edit', [ $id, 'user', 'edit' ] );
         }
@@ -1316,9 +1325,9 @@ Generate a token based on user and secret
 sub get_token : Private {
     my ( $self, $c ) = @_;
 
-    my $secret = $c->model('DB::Secret')->search()->first;
+    my $secret = $c->model('DB::Secret')->get;
     my $user = $c->forward('get_user');
-    my $token = sha1_hex($user . $secret->secret);
+    my $token = sha1_hex($user . $secret);
     $c->stash->{token} = $token;
 
     return 1;
@@ -1486,22 +1495,48 @@ sub _get_rotate_photo_param {
     my $key = first { /^rotate_photo/ } keys %{ $c->req->params } or return;
     my ($index) = $key =~ /(\d+)$/;
     my $direction = $c->get_param($key);
-    return [ $index || 0, $key, $direction ];
+    return [ $index || 0, $direction ];
 }
 
 sub rotate_photo : Private {
-    my ( $self, $c, $index, $key, $direction ) = @_;
+    my ( $self, $c, $object, $index, $direction ) = @_;
 
     return unless $direction eq _('Rotate Left') or $direction eq _('Rotate Right');
 
-    my $problem = $c->stash->{problem};
-    my $fileid = $problem->get_photoset($c)->rotate_image(
+    my $fileid = $object->get_photoset->rotate_image(
         $index,
         $direction eq _('Rotate Left') ? -90 : 90
     ) or return;
 
-    $problem->update({ photo => $fileid });
+    $object->update({ photo => $fileid });
 
+    return 1;
+}
+
+=head2 remove_photo
+
+Remove a photo from a report
+
+=cut
+
+# Returns index of photo(s) to remove, if any
+sub _get_remove_photo_param {
+    my ($self, $c) = @_;
+
+    return 'ALL' if $c->get_param('remove_photo');
+
+    my @keys = map { /(\d+)$/ } grep { /^remove_photo_/ } keys %{ $c->req->params } or return;
+    return \@keys;
+}
+
+sub remove_photo : Private {
+    my ($self, $c, $object, $keys) = @_;
+    if ($keys eq 'ALL') {
+        $object->photo(undef);
+    } else {
+        my $fileids = $object->get_photoset->remove_images($keys);
+        $object->photo($fileids);
+    }
     return 1;
 }
 

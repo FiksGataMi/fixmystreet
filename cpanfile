@@ -1,11 +1,16 @@
 # setenv script
-requires 'List::MoreUtils';
+requires 'List::MoreUtils', '0.402';
 requires 'local::lib';
 requires 'Class::Unload';
 
 # Interesting installation issues, see end of this file
 requires 'ExtUtils::MakeMaker', '6.72'; # [1]
 # requires 'MooseX::NonMoose'; # [2]
+
+# Minimum versions of dependencies to upgrade for bugfixes
+requires 'Guard', '1.023';
+requires 'PadWalker', '2.2';
+requires 'aliased', '0.34';
 
 # Catalyst itself, and modules/plugins used
 requires 'Catalyst', '5.80031';
@@ -59,19 +64,22 @@ requires 'HTML::Entities';
 requires 'HTTP::Request::Common';
 requires 'Image::Size';
 requires 'IO::String';
-requires 'JSON';
-requires 'JSON::XS';
+requires 'JSON::MaybeXS';
 requires 'Locale::gettext';
 requires 'LWP::Simple';
 requires 'LWP::UserAgent';
 requires 'Math::Trig';
 requires 'Module::Pluggable';
 requires 'Moose';
+requires 'MooX::Types::MooseLike';
 requires 'namespace::autoclean';
 requires 'Net::DNS::Resolver';
 requires 'Net::Domain::TLD';
-requires 'Net::SMTP::SSL';
+requires 'Net::Facebook::Oauth2';
+requires 'Net::OAuth';
+requires 'Net::SMTP::SSL', '1.03';
 requires 'Net::SMTP::TLS';
+requires 'Net::Twitter::Lite::WithAPIv1_1';
 requires 'Path::Class';
 requires 'POSIX';
 requires 'Readonly';
@@ -79,9 +87,9 @@ requires 'Regexp::Common';
 requires 'Scalar::Util';
 requires 'Statistics::Distributions';
 requires 'Storable';
-requires 'Template::Plugin::Comma';
+requires 'Template::Plugin::Number::Format';
 requires 'Text::CSV';
-requires 'URI';
+requires 'URI', '1.71';
 requires 'URI::Escape';
 requires 'URI::QueryParam';
 requires 'XML::RSS';
@@ -98,8 +106,8 @@ feature 'open311-endpoint', 'Open311::Endpoint specific requirements' => sub {
     requires 'Data::Rx';
     requires 'MooX::HandlesVia';
     requires 'Types::Standard';
-    requires 'LWP::Protocol::PSGI'; # for testing end-to-end
     requires 'DateTime::Format::Oracle'; # for EXOR
+    requires 'Convert::NLS_DATE_FORMAT', '0.06'; # Perl 5.22 upgrade
 };
 
 feature 'zurich', 'Zueri wie neu specific requirements' => sub {
@@ -115,14 +123,12 @@ requires 'File::ChangeNotify';
 requires 'Path::Tiny';
 requires 'File::Find::Rule';
 
-feature 'run-tests', 'Spin up a test database and config to run tests' => sub {
-    requires 'Test::PostgreSQL';
-};
-
 # Modules used by the test suite
+requires 'Test::PostgreSQL';
 requires 'CGI::Simple';
 requires 'HTTP::Headers';
 requires 'HTTP::Response';
+requires 'LWP::Protocol::PSGI';
 requires 'Sort::Key';
 requires 'Sub::Override';
 requires 'Test::Exception';
@@ -132,6 +138,7 @@ requires 'Test::More', '0.88';
 requires 'Test::Warn';
 requires 'Test::WWW::Mechanize::Catalyst';
 requires 'Web::Scraper';
+requires 'Web::Simple';
 
 #################################################################
 #

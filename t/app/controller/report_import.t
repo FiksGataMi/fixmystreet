@@ -3,7 +3,7 @@ use warnings;
 use Test::More;
 use LWP::Protocol::PSGI;
 
-use t::MapIt;
+use t::Mock::MapIt;
 use FixMyStreet::TestMech;
 use FixMyStreet::App;
 use Web::Scraper;
@@ -92,7 +92,7 @@ subtest "Test creating bad partial entries" => sub {
 };
 
 subtest "Submit a correct entry" => sub {
-    LWP::Protocol::PSGI->register(t::MapIt->run_if_script, host => 'mapit.uk');
+    LWP::Protocol::PSGI->register(t::Mock::MapIt->run_if_script, host => 'mapit.uk');
 
     $mech->get_ok('/import');
 
@@ -153,10 +153,13 @@ subtest "Submit a correct entry" => sub {
         name          => 'Test User',
         title         => 'Test report',
         detail        => 'This is a test report',
-        photo         => '',
+        photo1        => '',
+        photo2        => '',
+        photo3        => '',
         phone         => '',
         may_show_name => '1',
         category      => '-- Pick a category --',
+        gender => undef,
       },
       "check imported fields are shown";
 
@@ -187,10 +190,13 @@ subtest "Submit a correct entry" => sub {
         name          => 'Test User',
         title         => 'Test report',
         detail        => 'This is a test report',
-        photo         => '',
+        photo1        => '',
+        photo2        => '',
+        photo3        => '',
         phone         => '',
         may_show_name => '1',
         category      => '-- Pick a category --',
+        gender => undef,
       },
       "check imported fields are shown";
 
@@ -275,10 +281,13 @@ subtest "Submit a correct entry (with location)" => sub {
         name          => 'Test User ll',
         title         => 'Test report ll',
         detail        => 'This is a test report ll',
-        photo         => '',
+        photo1        => '',
+        photo2        => '',
+        photo3        => '',
         phone         => '',
         may_show_name => '1',
         category      => '-- Pick a category --',
+        gender => undef,
       },
       "check imported fields are shown";
 

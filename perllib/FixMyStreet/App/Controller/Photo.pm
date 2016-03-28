@@ -4,11 +4,9 @@ use namespace::autoclean;
 
 BEGIN {extends 'Catalyst::Controller'; }
 
-use DateTime::Format::HTTP;
-use Digest::SHA qw(sha1_hex);
+use JSON::MaybeXS;
 use File::Path;
 use File::Slurp;
-use Path::Class;
 use FixMyStreet::App::Model::PhotoSet;
 use if !$ENV{TRAVIS}, 'Image::Magick';
 
@@ -35,16 +33,12 @@ sub during :LocalRegex('^([0-9a-f]{40})\.(temp|fulltemp)\.jpeg$') {
     my ( $self, $c ) = @_;
     my ( $hash, $size ) = @{ $c->req->captures };
 
-    my $file = file( $c->config->{UPLOAD_DIR}, "$hash.jpeg" );
-    my $photo = $file->slurp;
+    my $photoset = FixMyStreet::App::Model::PhotoSet->new({
+        data_items => [ $hash ]
+    });
 
-    if ( $size eq 'temp' ) {
-        if ( $c->cobrand->default_photo_resize ) {
-            $photo = _shrink( $photo, $c->cobrand->default_photo_resize );
-        } else {
-            $photo = _shrink( $photo, '250x250' );
-        }
-    }
+    $size = $size eq 'temp' ? 'default' : 'full';
+    my $photo = $photoset->get_image_data(size => $size, default => $c->cobrand->default_photo_resize);
 
     $c->forward( 'output', [ $photo ] );
 }
@@ -61,15 +55,9 @@ sub index :LocalRegex('^(c/)?(\d+)(?:\.(\d+))?(?:\.(full|tn|fp))?\.jpeg$') {
             photo => { '!=', undef },
         } );
     } else {
-        # GoogleBot-Image is doing this for some reason?
-        if ( $id =~ m{ ^(\d+) \D .* $ }x ) {
-            return $c->res->redirect( $c->uri_with( { id => $1 } ), 301 );
-        }
-
-        $c->detach( 'no_photo' ) if $id =~ /\D/;
         ($item) = $c->cobrand->problems->search( {
             id => $id,
-            state => [ FixMyStreet::DB::Result::Problem->visible_states(), 'partial' ],
+            state => [ FixMyStreet::DB::Result::Problem->visible_states() ],
             photo => { '!=', undef },
         } );
     }
@@ -79,29 +67,9 @@ sub index :LocalRegex('^(c/)?(\d+)(?:\.(\d+))?(?:\.(full|tn|fp))?\.jpeg$') {
     $c->detach( 'no_photo' ) unless $c->cobrand->allow_photo_display($item); # Should only be for reports, not updates
 
     my $photo;
-    if ($item->can('get_photoset')) {
-        $photo = $item->get_photoset( $c )
-            ->get_image_data( num => $photo_number, size => $size )
+    $photo = $item->get_photoset
+        ->get_image_data( num => $photo_number, size => $size, default => $c->cobrand->default_photo_resize )
         or $c->detach( 'no_photo' );
-    } else {
-        $photo = $item->photo;
-        # If photo field contains a hash
-        if (length($photo) == 40) {
-            my $file = file( $c->config->{UPLOAD_DIR}, "$photo.jpeg" );
-            $photo = $file->slurp;
-        }
-
-        if ( $size eq 'tn' ) {
-            $photo = _shrink( $photo, 'x100' );
-        } elsif ( $size eq 'fp' ) {
-            $photo = _crop( $photo );
-        } elsif ( $size eq 'full' ) {
-        } elsif ( $c->cobrand->default_photo_resize ) {
-            $photo = _shrink( $photo, $c->cobrand->default_photo_resize );
-        } else {
-            $photo = _shrink( $photo, '250x250' );
-        }
-    }
 
     $c->forward( 'output', [ $photo ] );
 }
@@ -122,32 +90,30 @@ sub no_photo : Private {
     $c->detach( '/page_error_404_not_found', [ 'No photo' ] );
 }
 
-# Shrinks a picture to the specified size, but keeping in proportion.
-sub _shrink {
-    my ($photo, $size) = @_;
-    my $image = Image::Magick->new;
-    $image->BlobToImage($photo);
-    my $err = $image->Scale(geometry => "$size>");
-    throw Error::Simple("resize failed: $err") if "$err";
-    $image->Strip();
-    my @blobs = $image->ImageToBlob();
-    undef $image;
-    return $blobs[0];
-}
+sub upload : Local {
+    my ( $self, $c ) = @_;
+    my @items = (
+        ( map {
+            /^photo/ ? # photo, photo1, photo2 etc.
+                ($c->req->upload($_)) : ()
+        } sort $c->req->upload),
+    );
+    my $photoset = FixMyStreet::App::Model::PhotoSet->new({
+        c => $c,
+        data_items => \@items,
+    });
 
-# Shrinks a picture to 90x60, cropping so that it is exactly that.
-sub _crop {
-    my ($photo) = @_;
-    my $image = Image::Magick->new;
-    $image->BlobToImage($photo);
-    my $err = $image->Resize( geometry => "90x60^" );
-    throw Error::Simple("resize failed: $err") if "$err";
-    $err = $image->Extent( geometry => '90x60', gravity => 'Center' );
-    throw Error::Simple("resize failed: $err") if "$err";
-    $image->Strip();
-    my @blobs = $image->ImageToBlob();
-    undef $image;
-    return $blobs[0];
+    my $fileid = $photoset->data;
+    my $out;
+    if ($c->stash->{photo_error} || !$fileid) {
+        $c->res->status(500);
+        $out = { error => $c->stash->{photo_error} || _('Unknown error') };
+    } else {
+        $out = { id => $fileid };
+    }
+
+    $c->res->content_type('application/json; charset=utf-8');
+    $c->res->body(encode_json($out));
 }
 
 =head2 process_photo

@@ -47,24 +47,45 @@ sub country {
 
 =head1 problems
 
-Returns a ResultSet of Problems, restricted to a subset if we're on a cobrand
-that only wants some of the data.
+Returns a ResultSet of Problems, potentially restricted to a subset if we're on
+a cobrand that only wants some of the data.
 
 =cut
 
 sub problems {
     my $self = shift;
-    return $self->{c}->model('DB::Problem');
+    return $self->problems_restriction($self->{c}->model('DB::Problem'));
 }
 
-=head1 body_restriction
+=head1 updates
 
-Return an extra query parameter to restrict reports to those sent to a
-particular body.
+Returns a ResultSet of Comments, potentially restricted to a subset if we're on
+a cobrand that only wants some of the data.
 
 =cut
 
-sub body_restriction {}
+sub updates {
+    my $self = shift;
+    return $self->updates_restriction($self->{c}->model('DB::Comment'));
+}
+
+=head1 problems_restriction/updates_restriction
+
+Used to restricts reports and updates in a cobrand in a particular way. Do
+nothing by default.
+
+=cut
+
+sub problems_restriction {
+    my ($self, $rs) = @_;
+    return $rs;
+}
+
+sub updates_restriction {
+    my ($self, $rs) = @_;
+    return $rs;
+}
+
 
 sub site_key { return 0; }
 
@@ -682,7 +703,7 @@ sub get_body_sender {
 
     if ( $body->can_be_devolved ) {
         # look up via category
-        my $config = FixMyStreet::App->model("DB::Contact")->search( { body_id => $body->id, category => $category } )->first;
+        my $config = $body->result_source->schema->resultset("Contact")->search( { body_id => $body->id, category => $category } )->first;
         if ( $config->send_method ) {
             return { method => $config->send_method, config => $config };
         } else {
@@ -733,7 +754,18 @@ If set to an arrayref, will plot those area ID(s) from mapit on all the /around 
 
 sub areas_on_around { []; }
 
-sub process_extras {}
+=head2
+
+A list of extra fields we wish to save to the database in the 'extra' column of
+problems based on variables passed in by the form. Return a list of hashrefs
+of values we wish to save, e.g.
+( { name => 'address', required => 1 }, { name => 'passport', required => 0 } )
+
+=cut
+
+sub report_form_extras {}
+
+sub process_open311_extras {}
 
 =head 2 pin_colour
 

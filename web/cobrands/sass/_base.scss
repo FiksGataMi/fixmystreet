@@ -6,6 +6,9 @@ $heading-font: 'Museo300-display', MuseoSans, Helmet, Freesans, sans-serif !defa
 $image-sprite: '/cobrands/fixmystreet/images/sprite.png' !default;
 $menu-image: 'menu-white' !default;
 
+$itemlist_item_background: #f6f6f6 !default;
+$itemlist_item_background_hover: #e6e6e6 !default;
+
 @import "_mixins";
 @import "_report_list";
 
@@ -316,6 +319,9 @@ label{
     font-size:1.25em;
     margin:0.5em 0;
   }
+  h2 {
+    margin: 0 0 0.5em;
+  }
   h5 {
     margin:0 0 1em;
     font: {
@@ -536,8 +542,17 @@ p.label-valid {
 .wrapper {
   width:100%;
   display:table;
-  caption-side:bottom;
+  // The 'caption' at large widths will be top, moving the menu up magically
+  caption-side: bottom;
+  // This is so absolutely positioned header stuff doesn't overlap banner...
+  position: relative;
 }
+// ...however position: relative stops the map being clickable (?), so better
+// revert it there
+body.mappage .wrapper {
+  position: static;
+}
+
 // this is the user's logged in details or the login link etc
 #user-meta {
   p {
@@ -729,6 +744,33 @@ input.final-submit {
   float: $right;
 }
 
+.btn--facebook {
+    @include button-reset(#3b5998, darken(#3b5998, 10%), #3b5998, #fff, darken(#3b5998, 5%), darken(#3b5998, 10%), #3b5998, #fff);
+
+    &:visited {
+        color: #fff;
+    }
+
+    img {
+        margin-right: 0.5em;
+        vertical-align: -0.2em;
+        height: 1.3em;
+        width: auto;
+    }
+}
+
+// Under the button to override its text transform and width
+.btn--social {
+    display: block;
+    width: 100%;
+    text-transform: none;
+    text-align: center;
+}
+
+.js #js-social-email-hide {
+    display: none;
+}
+
 .button-fwd {
   padding: flip(1em 3em 1em 1em, 1em 1em 1em 3em);
   background: inline-image("../fixmystreet/images/chevron-grey-#{$right}.svg") $right 50% no-repeat;
@@ -842,15 +884,11 @@ input.final-submit {
   margin: 0 0 1em;
   padding: 0;
   border-bottom: 0.25em solid $primary;
-  .update-img {
-    float: $right;
-    margin: flip(0.5em 0 0.5em 1em, 0.5em 1em 0.5em 0); // gutter between text and floated image
-  }
 }
 
 .item-list__item {
   list-style: none;
-  background-color: #f6f6f6;
+  background-color: $itemlist_item_background;
   margin: 0.25em 0 0;
   padding: 0.5em 1em;
   display: block;
@@ -871,8 +909,8 @@ input.final-submit {
     display: block;
     padding: 0.5em 1em;
   }
-  a:hover, a:focus {
-    background-color: #e6e6e6;
+  a:hover, a:focus, &.hovered a {
+    background-color: $itemlist_item_background_hover;
     text-decoration: none;
   }
 }
@@ -921,6 +959,35 @@ input.final-submit {
   }
 }
 
+.problem-header .update-img,
+.item-list .update-img {
+    float: $right;
+    margin: flip(0.3em 0 0.5em 1em, 0.3em 1em 0.5em 0); // gutter between text and floated image
+    width: 33%;
+}
+.questionnaire-report-reminder .update-img {
+    float: $left;
+    margin: flip(0.1em 1em 1em 0, 0.1em 0 1em 1em);
+    width: 120px;
+}
+
+// A wrapper that's put around .update-imgs if there are more than 1 in a row
+.update-img-set {
+    text-align: center;
+    margin: 0 0 1em;
+
+    .update-img {
+        float: none;
+        display: inline-block;
+        margin: 0;
+        width: 31%;
+    }
+
+    .update-img + .update-img {
+        margin: flip(0 0 0 0.5em, 0 0.5em 0 0);
+    }
+}
+
 // fancybox gallery images have a magnifying glass in the corner
 .update-img {
   a {
@@ -946,12 +1013,7 @@ input.final-submit {
 }
 
 .problem-header {
-  margin-bottom:1em;
-}
-.problem-header .update-img {
-    float: $right;
-    margin-#{$left}: 0.5em;
-    margin-bottom: 0.5em;
+  margin-bottom: 1em;
 }
 
 .report_meta_info,
@@ -1566,6 +1628,26 @@ table.nicetable {
     }
 }
 
+.alerts__nearby-activity {
+    background-color: #f6f6f6;
+    margin: 1em -1em;
+    padding: 1em;
+
+    & > :first-child {
+        margin-top: 0;
+    }
+}
+
+.alerts__nearby-activity__photos {
+    white-space: nowrap;
+    overflow: hidden;
+
+    a {
+        margin-right: 0.5em;
+        text-decoration: none; // avoid underline showing between images
+    }
+}
+
 .confirmation-header {
   padding: 140px 0 2em;
   text-align: center;
@@ -1628,12 +1710,6 @@ table.nicetable {
   border-radius: 3px;
   padding: 1em 1em 1px 1em; // basically no padding-bottom, as children have their own margin-bottom instead
   margin-bottom: 2em;
-
-  .update-img {
-    width: 120px;
-    float: left;
-    margin: 0.1em 1em 1em 0;
-  }
 }
 
 .questionnaire-report-reminder__report-title {
@@ -1665,7 +1741,8 @@ table.nicetable {
   display: flex; // fancy full-width buttons for browsers that support flexbox
 
   input {
-    display: none;
+    position: absolute;
+    left: -999px;
   }
 
   label {
@@ -1755,3 +1832,4 @@ table.nicetable {
 
 @import "_admin";
 @import "_fixedthead";
+@import "_dropzone";

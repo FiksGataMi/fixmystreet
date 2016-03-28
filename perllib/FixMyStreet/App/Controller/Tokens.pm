@@ -34,6 +34,7 @@ sub confirm_problem : Path('/P') {
             title => 'Title of Report',
             bodies_str => 'True',
             url => '/report/123',
+            service => $c->get_param('service'),
         };
         return;
     }
@@ -104,6 +105,7 @@ sub confirm_problem : Path('/P') {
         $problem->user->phone( $data->{phone} ) if $data->{phone};
         $problem->user->password( $data->{password}, 1 ) if $data->{password};
         $problem->user->title( $data->{title} ) if $data->{title};
+        $problem->user->facebook_id( $data->{facebook_id} ) if $data->{facebook_id};
         $problem->user->update;
     }
     $c->authenticate( { email => $problem->user->email }, 'no_password' );
@@ -229,6 +231,7 @@ sub confirm_update : Path('/C') {
     if ( $data->{name} || $data->{password} ) {
         $comment->user->name( $data->{name} ) if $data->{name};
         $comment->user->password( $data->{password}, 1 ) if $data->{password};
+        $comment->user->facebook_id( $data->{facebook_id} ) if $data->{facebook_id};
         $comment->user->update;
     }
 
@@ -323,11 +326,7 @@ sub load_auth_token : Private {
         }
     );
 
-    unless ( $token ) {
-        $c->stash->{template} = 'errors/generic.html';
-        $c->stash->{message} = _("I'm afraid we couldn't validate that token. If you've copied the URL from an email, please check that you copied it exactly.\n");
-        $c->detach;
-    }
+    $c->detach('token_too_old') unless $token;
 
     return $token;
 }

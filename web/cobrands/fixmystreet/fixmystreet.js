@@ -80,6 +80,10 @@ $(function(){
 
     var cobrand = $('meta[name="cobrand"]').attr('content');
 
+    if (typeof variation !== 'undefined' && variation === 1) {
+        $('input[name=variant]').val(1);
+    }
+
     // Deal with switching between mobile and desktop versions on resize
     var last_type;
     $(window).resize(function(){
@@ -130,7 +134,9 @@ $(function(){
                 var banner_text = translation_strings.report_problem_heading;
                 if (cobrand !== 'oxfordshire') {
                     $('#site-header').show();
-                    banner_text = translation_strings.report_problem_heading;
+                }
+                if (typeof variation !== 'undefined' && variation === 1) {
+                    banner_text = 'Click map to request a fix';
                 }
                 $('.big-green-banner')
                     .removeClass('mobile-map-banner')
@@ -180,6 +186,84 @@ $(function(){
     //move 'skip this step' link on mobile
     $('.mobile #skip-this-step').addClass('chevron').wrap('<li>').parent().appendTo('#key-tools');
 
+    // Set up the Dropzone image uploader
+    if('Dropzone' in window){
+      Dropzone.autoDiscover = false;
+    }
+    if('Dropzone' in window && $('#form_photo').length){
+      var $originalLabel = $('[for="form_photo"]');
+      var $originalInput = $('#form_photos');
+      var $dropzone = $('<div>').addClass('dropzone');
+
+      $originalLabel.removeAttr('for');
+      $originalInput.hide();
+
+      $dropzone.insertAfter($originalInput);
+      var photodrop = new Dropzone($dropzone[0], {
+        url: '/photo/upload',
+        paramName: 'photo',
+        maxFiles: 3,
+        addRemoveLinks: true,
+        thumbnailHeight: 150,
+        thumbnailWidth: 150,
+        acceptedFiles: 'image/jpeg,image/pjpeg',
+        dictDefaultMessage: translation_strings.upload_default_message,
+        dictCancelUploadConfirmation: translation_strings.upload_cancel_confirmation,
+        dictInvalidFileType: translation_strings.upload_invalid_file_type,
+        dictMaxFilesExceeded: translation_strings.upload_max_files_exceeded,
+
+        fallback: function(){
+          $dropzone.remove();
+          $originalLabel.attr('for', 'form_photo');
+          $originalInput.show();
+        },
+        init: function(){
+          this.on("addedfile", function(file){
+            $('input[type=submit]').prop("disabled", true).removeClass('green-btn');
+          });
+          this.on("queuecomplete", function(){
+            $('input[type=submit]').removeAttr('disabled').addClass('green-btn');
+          });
+          this.on("success", function(file, xhrResponse) {
+            var ids = $('input[name=upload_fileid]').val().split(','),
+                id = (file.server_id = xhrResponse.id),
+                l = ids.push(id),
+                newstr = ids.join(',');
+            $('input[name=upload_fileid]').val(newstr);
+          });
+          this.on("error", function(file, errorMessage, xhrResponse){
+          });
+          this.on("removedfile", function(file){
+            var ids = $('input[name=upload_fileid]').val().split(','),
+                newstr = $.grep(ids, function(n){ return (n!=file.server_id); }).join(',');
+            $('input[name=upload_fileid]').val(newstr);
+          });
+          this.on("maxfilesexceeded", function(file){
+            this.removeFile(file);
+            var $message = $('<div class="dz-message dz-error-message">');
+            $message.text(translation_strings.upload_max_files_exceeded);
+            $message.prependTo(this.element);
+            setTimeout(function(){
+              $message.slideUp(250, function(){
+                $message.remove();
+              });
+            }, 2000);
+          });
+        }
+      });
+
+      $.each($('input[name=upload_fileid]').val().split(','), function(i, f) {
+        if (!f) {
+            return;
+        }
+        var mockFile = { name: f, server_id: f };
+        photodrop.emit("addedfile", mockFile);
+        photodrop.createThumbnailFromUrl(mockFile, '/photo/' + f + '.temp.jpeg');
+        photodrop.emit("complete", mockFile);
+        photodrop.options.maxFiles -= 1;
+      });
+    }
+
     /*
      * Tabs
      */
@@ -222,6 +306,20 @@ $(function(){
         $('.form-focus-trigger').on('focus', function(){
             $('.form-focus-hidden').fadeIn(500);
         });
+    }
+
+    /* Log in with email button */
+    var email_form = $('#js-social-email-hide'),
+        button = $('<button class="btn btn--social btn--social-email">Log in with email</button>'),
+        form_box = $('<div class="form-box"></div>');
+    button.click(function(e){
+        e.preventDefault();
+        email_form.fadeIn(500);
+        form_box.hide();
+    });
+    form_box.append(button).insertBefore(email_form);
+    if ($('.form-error').length) {
+        button.click();
     }
 
     /*
@@ -434,8 +532,8 @@ $.fn.drawer = function(id, ajax) {
         }).fadeOut(500);
     });
 
-    $('#message_close').live('click', function() {
-        $('#country_banner').hide();
+    $('.top_banner__close').live('click', function() {
+        $('.top_banner--country').hide();
         $.cookie('has_seen_country_message', 1, {expires: 365, path: '/'});
     });
 
@@ -445,9 +543,8 @@ $.fn.drawer = function(id, ajax) {
                 url: '/country_message',
                 success: function(data) {
                     if ( data ) {
-                        $('#site-header').css('position', 'relative');
                         $('body').prepend(data);
-                        $('#country_banner').slideDown('slow');
+                        $('.top_banner--country').slideDown('slow');
                     }
                 }
             });

@@ -22,11 +22,6 @@ sub path_to_web_templates {
     ];
 }
 
-sub body_restriction {
-    my $self = shift;
-    return $self->council_id;
-}
-
 sub site_key {
     my $self = shift;
     return $self->council_url;
@@ -36,14 +31,19 @@ sub restriction {
     return { cobrand => shift->moniker };
 }
 
-sub problems {
-    my $self = shift;
-    return $self->{c}->model('DB::Problem')->to_body($self->council_id);
+sub problems_restriction {
+    my ($self, $rs) = @_;
+    return $rs->to_body($self->council_id);
+}
+
+sub updates_restriction {
+    my ($self, $rs) = @_;
+    return $rs->to_body($self->council_id);
 }
 
 sub base_url {
     my $self = shift;
-    my $base_url = mySociety::Config::get('BASE_URL');
+    my $base_url = FixMyStreet->config('BASE_URL');
     my $u = $self->council_url;
     if ( $base_url !~ /$u/ ) {
         # council cobrands are not https so transform to http as well
@@ -113,7 +113,7 @@ sub owns_problem {
     if (ref $report eq 'HASH') {
         return unless $report->{bodies_str};
         @bodies = split /,/, $report->{bodies_str};
-        @bodies = FixMyStreet::App->model('DB::Body')->search({ id => \@bodies })->all;
+        @bodies = FixMyStreet::DB->resultset('Body')->search({ id => \@bodies })->all;
     } else { # Object
         @bodies = values %{$report->bodies};
     }
