@@ -102,13 +102,16 @@ sub remove_redundant_areas {
 
 sub short_name {
     my $self = shift;
-    my ($area, $info) = @_;
+    my ($body) = @_;
 
-    my $name = $area->{name} || $area->name;
+    my $name = $body->{name} || $body->name;
 
     if ($name =~ /^(Os|Nes|V\xe5ler|Sande|B\xf8|Her\xf8y)$/) {
-        my $parent = $info->{$area->{parent_area}}->{name};
-        return URI::Escape::uri_escape_utf8("$name, $parent");
+        my $area_id = $body->body_areas->first->area_id || $body->{id} || $body->id;
+        my $area    = mySociety::MaPit::call('area', $area_id);
+        my $parent  = mySociety::MaPit::call('area', $area->{parent_area});
+
+        $name .= ", " . $parent->{name};
     }
 
     $name =~ s/ & / and /;
@@ -134,7 +137,7 @@ sub council_rss_alert_options {
     }
 
     if ( $fylke->{id} == 3 ) {    # Oslo
-        my $short_name = $self->short_name($fylke, $all_councils);
+        my $short_name = $self->short_name($fylke);
         ( my $id_name = $short_name ) =~ tr/+/_/;
 
         push @options,
@@ -148,10 +151,10 @@ sub council_rss_alert_options {
           };
     }
     else {
-        my $short_kommune_name = $self->short_name($kommune, $all_councils);
+        my $short_kommune_name = $self->short_name($kommune);
         ( my $id_kommune_name = $short_kommune_name ) =~ tr/+/_/;
 
-        my $short_fylke_name = $self->short_name($fylke, $all_councils);
+        my $short_fylke_name = $self->short_name($fylke);
         ( my $id_fylke_name = $short_fylke_name ) =~ tr/+/_/;
 
         push @options,
@@ -200,34 +203,38 @@ sub council_rss_alert_options {
 }
 
 sub reports_body_check {
-    my ( $self, $c, $council ) = @_;
+    my ( $self, $c, $code ) = @_;
 
-    if ($council eq 'Oslo') {
-
+    if ($code eq 'Oslo') {
         # There are two Oslos (kommune and fylke), we only want one of them.
-        $c->stash->{council} = mySociety::MaPit::call('area', 3);
+        my @bodies = $c->model('DB::Body')->search( { id => 3 } )->all;
+        $c->stash->{body} = $bodies[0];
         return 1;
+    }
 
-    } elsif ($council =~ /,/) {
-
+    if ($code =~ /,/) {
         # Some kommunes have the same name, use the fylke name to work out which.
-        my ($kommune, $fylke) = split /\s*,\s*/, $council;
+        my ($kommune, $fylke) = split /\s*,\s*/, $code;
         my $area_types = $c->cobrand->area_types;
         my $areas_k = mySociety::MaPit::call('areas', $kommune, type => $area_types);
         my $areas_f = mySociety::MaPit::call('areas', $fylke, type => $area_types);
+
         if (keys %$areas_f == 1) {
             ($fylke) = values %$areas_f;
             foreach (values %$areas_k) {
                 if ($_->{name} eq $kommune && $_->{parent_area} == $fylke->{id}) {
-                    $c->stash->{council} = $_;
+                    my @bodies = $c->model('DB::Body')->search( { id => $_->{id} } )->all;
+                    $c->stash->{body} = $bodies[0];
                     return 1;
                 }
             }
         }
+
         # If we're here, we've been given a bad name.
         $c->detach( 'redirect_index' );
-
     }
+
+    return;
 }
 
 sub jurisdiction_id_example {
