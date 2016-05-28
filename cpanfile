@@ -51,7 +51,6 @@ requires 'Digest::SHA';
 requires 'Email::MIME';
 requires 'Email::Send';
 requires 'Email::Send::SMTP';
-requires 'Email::Simple';
 requires 'Email::Valid';
 requires 'Error';
 requires 'FCGI';
@@ -97,7 +96,7 @@ requires 'XML::Simple';
 requires 'YAML';
 
 feature 'uk', 'FixMyStreet.com specific requirements' => sub {
-    # East Hampshire
+    # East Hampshire & Angus
     requires 'SOAP::Lite';
 };
 

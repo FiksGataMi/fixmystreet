@@ -206,7 +206,7 @@ $(function(){
         addRemoveLinks: true,
         thumbnailHeight: 150,
         thumbnailWidth: 150,
-        acceptedFiles: 'image/jpeg,image/pjpeg',
+        acceptedFiles: 'image/jpeg,image/pjpeg,image/gif,image/tiff,image/png',
         dictDefaultMessage: translation_strings.upload_default_message,
         dictCancelUploadConfirmation: translation_strings.upload_cancel_confirmation,
         dictInvalidFileType: translation_strings.upload_invalid_file_type,
@@ -258,7 +258,7 @@ $(function(){
         }
         var mockFile = { name: f, server_id: f };
         photodrop.emit("addedfile", mockFile);
-        photodrop.createThumbnailFromUrl(mockFile, '/photo/' + f + '.temp.jpeg');
+        photodrop.createThumbnailFromUrl(mockFile, '/photo/temp.' + f);
         photodrop.emit("complete", mockFile);
         photodrop.options.maxFiles -= 1;
       });
@@ -531,25 +531,6 @@ $.fn.drawer = function(id, ajax) {
             queue:false
         }).fadeOut(500);
     });
-
-    $('.top_banner__close').live('click', function() {
-        $('.top_banner--country').hide();
-        $.cookie('has_seen_country_message', 1, {expires: 365, path: '/'});
-    });
-
-    if ( cobrand == 'fixmystreet' && $('body.frontpage').length ) {
-        if (!$.cookie('has_seen_country_message')) {
-            $.ajax({
-                url: '/country_message',
-                success: function(data) {
-                    if ( data ) {
-                        $('body').prepend(data);
-                        $('.top_banner--country').slideDown('slow');
-                    }
-                }
-            });
-        }
-    }
 
     /*
      * Fancybox fullscreen images

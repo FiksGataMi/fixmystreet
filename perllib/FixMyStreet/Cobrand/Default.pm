@@ -20,7 +20,7 @@ use mySociety::PostcodeUtil;
     $path = $cobrand->path_to_web_templates(  );
 
 Returns the path to the templates for this cobrand - by default
-"templates/web/$moniker" and "templates/web/fixmystreet"
+"templates/web/$moniker" (and then base in Web.pm).
 
 =cut
 
@@ -28,7 +28,6 @@ sub path_to_web_templates {
     my $self = shift;
     my $paths = [
         FixMyStreet->path_to( 'templates/web', $self->moniker )->stringify,
-        FixMyStreet->path_to( 'templates/web/fixmystreet' )->stringify,
     ];
     return $paths;
 }
@@ -625,6 +624,7 @@ sub short_name {
     my ($area) = @_;
 
     my $name = $area->{name} || $area->name;
+    $name =~ tr{/}{_};
     $name = URI::Escape::uri_escape_utf8($name);
     $name =~ s/%20/+/g;
     return $name;
@@ -934,10 +934,6 @@ sub updates_as_hashref {
     my $ctx = shift;
 
     return {};
-}
-
-sub get_country_for_ip_address {
-    return 0;
 }
 
 sub jurisdiction_id_example {

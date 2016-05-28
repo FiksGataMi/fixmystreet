@@ -83,7 +83,7 @@ sub send(;$) {
         $h{phone_line} = $h{phone} ? _('Phone:') . " $h{phone}\n\n" : '';
         if ($row->photo) {
             $h{has_photo} = _("This web page also contains a photo of the problem, provided by the user.") . "\n\n";
-            $h{image_url} = $email_base_url . '/photo/' . $row->id . '.full.jpeg';
+            $h{image_url} = $email_base_url . $row->photos->[0]->{url_full};
         } else {
             $h{has_photo} = '';
             $h{image_url} = '';
@@ -145,7 +145,7 @@ sub send(;$) {
                 $skip = 1;
                 debug_print("skipped by sender " . $sender_info->{method} . " (might be due to previous failed attempts?)", $row->id) if $debug_mode;
             } else {
-                debug_print("OK, adding recipient body " . $body->id . ":" . $body->name . ", " . $body->send_method, $row->id) if $debug_mode;
+                debug_print("OK, adding recipient body " . $body->id . ":" . $body->name . ", " . $sender_info->{method}, $row->id) if $debug_mode;
                 push @dear, $body->name;
                 $reporters{ $sender }->add_body( $body, $sender_info->{config} );
             }
@@ -203,7 +203,7 @@ sub send(;$) {
 
         if (FixMyStreet->config('STAGING_SITE') && !FixMyStreet->config('SEND_REPORTS_ON_STAGING')) {
             # on a staging server send emails to ourselves rather than the bodies
-            %reporters = map { $_ => $reporters{$_} } grep { /FixMyStreet::SendReport::(Email|EmptyHomes)/ } keys %reporters;
+            %reporters = map { $_ => $reporters{$_} } grep { /FixMyStreet::SendReport::Email/ } keys %reporters;
             unless (%reporters) {
                 %reporters = ( 'FixMyStreet::SendReport::Email' => FixMyStreet::SendReport::Email->new() );
             }

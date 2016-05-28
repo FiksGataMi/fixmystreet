@@ -82,7 +82,7 @@
       [% IF upload_fileid %]
         <p>[% loc('You have already attached photos to this update.  Note that you can attach a maximum of 3 to this update (if you try to upload more, the oldest will be removed).') %]</p>
         [% FOREACH id IN upload_fileid.split(',') %]
-        <img align="right" src="/photo/[% id %].temp.jpeg" alt="">
+        <img align="right" src="/photo/temp.[% id %]" alt="">
         [% END %]
     [% END %]
         <input type="file" name="photo1" id="form_photo">
@@ -93,7 +93,6 @@
     </div>
 [% END %]
 
-[% IF c.cobrand.moniker != 'emptyhomes' %]
 <div class="js-another-questionnaire">
     <p>[% loc('Would you like to receive another questionnaire in 4 weeks, reminding you to check the status?') %]</p>
     <p class="radio-segmented-control">
@@ -103,7 +102,6 @@
         <label class="inline" for="another_no">[% loc('No') %]</label>
     </p>
 </div>
-[% END %]
 
 <p><input type="submit" name="submit" value="[% loc('Submit questionnaire') %]"></p>
 

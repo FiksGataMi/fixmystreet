@@ -13,7 +13,7 @@
       [% IF upload_fileid %]
         <p>[% loc('You have already attached photos to this update.  Note that you can attach a maximum of 3 to this update (if you try to upload more, the oldest will be removed).') %]</p>
         [% FOREACH id IN upload_fileid.split(',') %]
-        <img align="right" src="/photo/[% id %].temp.jpeg" alt="">
+        <img align="right" src="/photo/temp.[% id %]" alt="">
         [% END %]
     [% END %]
         <input type="file" name="photo1" id="form_photo">
@@ -38,7 +38,7 @@
     ['in progress', loc('In Progress')], ['duplicate', loc('Duplicate')],
     ['unable to fix', loc('Unable to fix')], ['not responsible', loc('Not Responsible')],
     ['fixed', loc('Fixed')] ] %]
-        <option [% 'selected ' IF state.0 == problem.state %] value="[% state.0 %]">[% state.1 %]</option>
+        <option [% 'selected ' IF state.0 == problem.state_display %] value="[% state.0 %]">[% state.1 %]</option>
     [% END %]
     </select>
 [% ELSE %]

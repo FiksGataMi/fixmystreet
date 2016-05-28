@@ -8,6 +8,7 @@ $menu-image: 'menu-white' !default;
 
 $itemlist_item_background: #f6f6f6 !default;
 $itemlist_item_background_hover: #e6e6e6 !default;
+$col_big_numbers: #ccc !default;
 
 @import "_mixins";
 @import "_report_list";
@@ -111,7 +112,7 @@ ol.big-numbers {
       position: absolute;
       #{$left}: 0;
       top:-0.2em;
-      color:#ccc;
+      color:$col_big_numbers;
       line-height:1;
       font: {
         family: $meta-font;
@@ -353,7 +354,7 @@ label{
     color: #666;
     padding-#{$left}: 20px;
     background: transparent url(/cobrands/fixmystreet/images/wrong-location.png) $left 50% no-repeat;
-    border-#{$left}: solid 4px #fff;
+    border-#{$left}: solid 4px transparent;
     margin-top: -0.5em;
 }
 
@@ -759,6 +760,21 @@ input.final-submit {
     }
 }
 
+.btn--twitter {
+    @include button-reset(#55acee, darken(#55acee, 10%), #55acee, #fff, darken(#55acee, 5%), darken(#55acee, 10%), #55acee, #fff);
+
+    &:visited {
+        color: #fff;
+    }
+
+    img {
+        margin-right: 0.5em;
+        vertical-align: -0.2em;
+        height: 1.3em;
+        width: auto;
+    }
+}
+
 // Under the button to override its text transform and width
 .btn--social {
     display: block;
@@ -902,7 +918,7 @@ input.final-submit {
   margin-bottom: 0.5em;
 }
 
-.item-list__item--link {
+%item-list__item--link {
   padding: 0;
   a {
     color: #222222;
@@ -916,11 +932,11 @@ input.final-submit {
 }
 
 .item-list--wards__item {
-  @extend .item-list__item--link;
+  @extend %item-list__item--link;
 }
 
 .item-list--reports__item {
-  @extend .item-list__item--link;
+  @extend %item-list__item--link;
   a {
     @include clearfix;
     padding: flip(0 0 0 1em, 0 1em 0 0);
@@ -931,15 +947,18 @@ input.final-submit {
     height: auto;
     margin-#{$left}: 1em;
   }
-  h4 {
-    padding-top: 0.25em;
-    margin: 0;
-  }
   small {
     color: #666;
     display: block;
     padding: 0.25em 0;
   }
+}
+.item-list__heading {
+  font-size: 1em;
+  font-weight: normal;
+  line-height: 1.5;
+  padding-top: 0.25em;
+  margin: 0;
 }
 
 .item-list__item--empty p {
@@ -1372,7 +1391,7 @@ label .muted {
     padding-#{$left}: 16px;
     list-style: none;
     background: transparent url(/cobrands/fixmystreet/images/tick-10px-8px.png) $left 5px no-repeat;
-    border-#{$left}: solid 4px #fff;
+    border-#{$left}: solid 4px transparent;
   }
 
   .do {
@@ -1387,9 +1406,12 @@ label .muted {
       background-image: url(/cobrands/fixmystreet/images/cross-7px-7px.png);
       background-position: $left 6px;
       padding-#{$left}: 14px;
-      border-#{$left}: solid 6px #fff;
+      border-#{$left}: solid 6px transparent;
     }
   }
+}
+.description_tips__heading--inline {
+  display: inline-block;
 }
 
 #problem_form > label:first-child {
