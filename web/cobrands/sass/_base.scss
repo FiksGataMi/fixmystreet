@@ -444,7 +444,7 @@ p.label-valid {
 #site-header{
   border-top: 0.25em solid $primary;
   height: 3em;
-  @include background(linear-gradient(#000, #222 10%, #222 90%, #000));
+  @include linear-gradient(#000, #222 10%, #222 90%, #000);
   .container {
     min-height:4em;
   }
@@ -1045,6 +1045,18 @@ input.final-submit {
 
   p + & {
     margin-top: -0.6em; // partly counteract margin-bottom on previous paragraph
+  }
+}
+
+.moderate-edit {
+  display: none; // gets shown by javascript
+
+  :disabled {
+    background: #ddd;
+  }
+
+  h1 input {
+    border-width: (0.125em/2); // compensate for 2em font-size on h1s
   }
 }
 
@@ -1819,7 +1831,11 @@ table.nicetable {
     margin: 3em;
   }
 
-  #main-nav,
+  // Firefox leaves a big blanking gap if the content is floated...
+  .content { float: none !important; }
+
+  .shadow-wrap,
+  .nav-wrapper,
   #nav-link,
   .admin-nav,
   .olControlAttribution,

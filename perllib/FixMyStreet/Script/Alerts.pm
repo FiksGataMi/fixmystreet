@@ -7,7 +7,7 @@ use DateTime::Format::Pg;
 use IO::String;
 
 use mySociety::DBHandle qw(dbh);
-use mySociety::Gaze;
+use FixMyStreet::Gaze;
 use mySociety::Locale;
 use mySociety::MaPit;
 use RABX;
@@ -175,10 +175,10 @@ sub send() {
 
         my $longitude = $alert->parameter;
         my $latitude  = $alert->parameter2;
-        my $d = mySociety::Gaze::get_radius_containing_population($latitude, $longitude, 200000);
+        my $d = FixMyStreet::Gaze::get_radius_containing_population($latitude, $longitude);
         # Convert integer to GB locale string (with a ".")
         $d = mySociety::Locale::in_gb_locale {
-            sprintf("%f", int($d*10+0.5)/10);
+            sprintf("%f", $d);
         };
         my $states = "'" . join( "', '", FixMyStreet::DB::Result::Problem::visible_states() ) . "'";
         my %data = (
@@ -248,8 +248,6 @@ sub _send_aggregated_alert_email(%) {
     } );
     $data{unsubscribe_url} = $cobrand->base_url( $data{cobrand_data} ) . '/A/' . $token->token;
 
-    my $template = FixMyStreet->get_email_template($cobrand->moniker, $data{lang}, "$data{template}.txt");
-
     my $sender = sprintf('<fms-%s@%s>',
         FixMyStreet::Email::generate_verp_token('alert', $data{alert_id}),
         FixMyStreet->config('EMAIL_DOMAIN')
@@ -257,9 +255,9 @@ sub _send_aggregated_alert_email(%) {
 
     my $result = FixMyStreet::Email::send_cron(
         $data{schema},
+        "$data{template}.txt",
+        \%data,
         {
-            _template_ => $template,
-            _parameters_ => \%data,
             To => $data{alert_email},
         },
         $sender,
