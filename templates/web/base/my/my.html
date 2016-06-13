@@ -21,9 +21,7 @@
     c.uri_for('/') ) %]
 [% END %]
 
-[% IF c.cobrand.moniker == 'fixmybarangay' %]
-    [% INCLUDE '_barangay_buttons.html' %]
-[% ELSIF c.cobrand.moniker == 'hart' %]
+[% IF c.cobrand.moniker == 'hart' %]
     [% INCLUDE '_hart_hants_note.html' %]
 [% END %]
 
@@ -46,11 +44,21 @@
         <ul class="item-list item-list--updates full-width">
     [% END %]
 
-    <li>&ldquo;[% u.text | html %]&rdquo;
-    &ndash; <a href="[% c.uri_for( '/report', u.problem_id ) %]#update_[% u.id %]">[% u.problem.title | html %]</a>.
-        <p><small class="council_sent_info">
-        [% tprintf( loc("Added %s"), prettify_dt( u.confirmed, 'date' ) ) %]
-        </small></p>
+    <li class="item-list__item item-list__item--updates">
+        <div class="item-list__update-wrap">
+            [% INCLUDE 'report/photo.html' object=u %]
+            <div class="item-list__update-text">
+                [% add_links( u.text ) | html_para %]
+
+                <p class="meta-2">
+                    [% tprintf( loc("Added %s"), prettify_dt( u.confirmed, 'date' ) ) %]
+                    &ndash;
+                    <a href="[% c.uri_for( '/report', u.problem_id ) %]#update_[% u.id %]">
+                        [% u.problem.title | html %]
+                    </a>
+                </p>
+            </div>
+        </div>
     </li>
     [% "</ul>" IF loop.last %]
 [% END %]

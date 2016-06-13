@@ -3,9 +3,11 @@
 use utf8;
 use strict;
 use warnings;
+use File::Temp 'tempdir';
+use Path::Tiny;
 use Test::More;
 use Test::Warn;
-use FixMyStreet::App;
+use FixMyStreet::DB;
 use CGI::Simple;
 use HTTP::Response;
 use DateTime;
@@ -24,11 +26,11 @@ EOT
 is $o->_process_error( $err_text ), "400: Service Code cannot be null -- can't proceed with the request.\n", 'error text parsing';
 is $o->_process_error( '503 - service unavailable' ), 'unknown error', 'error text parsing of bad error';
 
-my $o2 = Open311->new( endpoint => 'http://192.168.50.1/open311/', jurisdiction => 'example.org' );
+my $o2 = Open311->new( endpoint => 'http://127.0.0.1/open311/', jurisdiction => 'example.org' );
 
-my $u = FixMyStreet::App->model('DB::User')->new( { email => 'test@example.org', name => 'A User' } );
+my $u = FixMyStreet::DB->resultset('User')->new( { email => 'test@example.org', name => 'A User' } );
 
-my $p = FixMyStreet::App->model('DB::Problem')->new( {
+my $p = FixMyStreet::DB->resultset('Problem')->new( {
     latitude => 1,
     longitude => 1,
     title => 'title',
@@ -45,12 +47,12 @@ warning_like {$o2->send_service_request( $p, { url => 'http://example.com/' }, 1
 
 my $dt = DateTime->now();
 
-my $user = FixMyStreet::App->model('DB::User')->new( {
+my $user = FixMyStreet::DB->resultset('User')->new( {
     name => 'Test User',
     email => 'test@example.com',
 } );
 
-my $problem = FixMyStreet::App->model('DB::Problem')->new( {
+my $problem = FixMyStreet::DB->resultset('Problem')->new( {
     id => 80,
     external_id => 81,
     state => 'confirmed',
@@ -207,7 +209,7 @@ for my $test (
 }
 
 
-my $comment = FixMyStreet::App->model('DB::Comment')->new( {
+my $comment = FixMyStreet::DB->resultset('Comment')->new( {
     id => 38362,
     user => $user,
     problem => $problem,
@@ -258,16 +260,26 @@ subtest 'extended request update post parameters' => sub {
 };
 
 subtest 'check media url set' => sub {
-    $comment->photo(1);
+    my $UPLOAD_DIR = tempdir( CLEANUP => 1 );
+
+    my $image_path = path('t/app/controller/sample.jpg');
+    $image_path->copy( path( $UPLOAD_DIR, '0123456789012345678901234567890123456789.jpeg' ) );
+
+    $comment->photo("0123456789012345678901234567890123456789");
     $comment->cobrand('fixmystreet');
 
-    my $results = make_update_req( $comment, '<?xml version="1.0" encoding="utf-8"?><service_request_updates><request_update><update_id>248</update_id></request_update></service_request_updates>' );
+    FixMyStreet::override_config {
+        UPLOAD_DIR => $UPLOAD_DIR,
+    }, sub {
+        my $results = make_update_req( $comment, '<?xml version="1.0" encoding="utf-8"?><service_request_updates><request_update><update_id>248</update_id></request_update></service_request_updates>' );
 
-    is $results->{ res }, 248, 'got update id';
+        is $results->{ res }, 248, 'got update id';
 
-    my $c = CGI::Simple->new( $results->{ req }->content );
-    my $expected_path = '/c/' . $comment->id . '.full.jpeg';
-    like $c->param('media_url'), qr/$expected_path/, 'image url included';
+        my $c = CGI::Simple->new( $results->{ req }->content );
+        my $expected_path = '/c/' . $comment->id . '.0.full.jpeg';
+        like $c->param('media_url'), qr/$expected_path/, 'image url included';
+    };
+    $comment->photo(undef);
 };
 
 foreach my $test (
@@ -394,7 +406,7 @@ for my $test (
 my $dt2 = $dt->clone;
 $dt2->add( 'minutes' => 1 );
 
-my $comment2 = FixMyStreet::App->model('DB::Comment')->new( {
+my $comment2 = FixMyStreet::DB->resultset('Comment')->new( {
     id => 38363,
     user => $user,
     problem => $problem,

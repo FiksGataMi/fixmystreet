@@ -3,7 +3,7 @@ use Moose;
 use namespace::autoclean;
 
 use HTTP::Negotiate;
-use JSON;
+use JSON::MaybeXS;
 
 BEGIN { extends 'Catalyst::Controller'; }
 
@@ -27,6 +27,9 @@ sub index_json : Path('/status.json') : Args(0) {
 sub index : Path : Args(0) {
     my ($self, $c, $format) = @_;
 
+    # Workaround that the admin summary page is only displayed to Zurich
+    # superusers. It doesn't have anything sensitive
+    $c->stash->{admin_type} = 'super';
     # Fetch summary stats from admin front page
     $c->forward('/admin/index');
 
@@ -55,7 +58,7 @@ sub index : Path : Args(0) {
             alerts_unconfirmed => $c->stash->{alerts}{0},
             questionnaires_sent => $c->stash->{questionnaires}{total},
             questionnaires_answered => $c->stash->{questionnaires}{1},
-            bodies => $c->stash->{total_bodies},
+            bodies => scalar @{$c->stash->{bodies}},
             contacts => $c->stash->{contacts}{total},
         };
         my $body = JSON->new->utf8(1)->pretty->encode($data);

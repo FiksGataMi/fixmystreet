@@ -164,6 +164,12 @@ RSS_LIMIT: '20'
 # How many reports to show per page on the All Reports pages
 ALL_REPORTS_PER_PAGE: 100
 
+# Social networking
+FACEBOOK_APP_ID: ''
+FACEBOOK_APP_SECRET: ''
+TWITTER_KEY: ''
+TWITTER_SECRET: ''
+
 # If you wish to send email through a SMTP server elsewhere, change these
 # variables. SMTP_TYPE should be one of '', 'ssl' or 'tls'.
 SMTP_SMARTHOST: 'localhost'
@@ -174,7 +180,7 @@ SMTP_PASSWORD: ''
 
 # Gaze is a world-wide service for population density lookups. You can leave
 # this as is.
-GAZE_URL: 'http://gaze.mysociety.org/gaze'
+GAZE_URL: 'https://gaze.mysociety.org/gaze'
 
 # Should problem reports link to the council summary pages?
 AREA_LINKS_FROM_PROBLEMS: '0'

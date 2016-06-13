@@ -59,7 +59,8 @@ noindex:-o-prefocus, #site-header {
   font-family: sans-serif;
 }
 
-h3, h4 {
+h3, h4,
+.item-list__heading {
     font-weight: bold;
 }
 
@@ -73,7 +74,7 @@ h3, h4 {
 
 .nav-menu--main {
     a:hover {
-        @include background(linear-gradient(#000, #444 10%, #444 95%, #111));
+        @include linear-gradient(#000, #444 10%, #444 95%, #111);
     }
 }
 
@@ -87,7 +88,7 @@ h3, h4 {
 body.mappage {
     .nav-wrapper {
         .nav-wrapper-2 {
-            @include background(linear-gradient(#000, #222 10%, #222 90%, #000));
+            @include linear-gradient(#000, #222 10%, #222 90%, #000);
         }
     }
 }
@@ -175,6 +176,12 @@ body.frontpage {
                 background-color: white;
                 width: auto;
             }
+            > .form-error {
+                margin-top: -4em;
+            }
+            > .form-error + .tablewrapper {
+                margin-top: 0;
+            }
         }
         footer {
             .bordered {
@@ -197,41 +204,6 @@ body.twothirdswidthpage {
                 }
             }
         }
-    }
-}
-
-#footer-nav {
-    display: block;
-    border: 0px;
-    border-top: 0.25em solid #ffd000;
-    border-image: url(images/tile-y.jpg) 30 0 repeat;
-
-    .tablewrapper {
-      max-width: 60em;
-      margin: 0 auto;
-      background: $base_bg;
-      ul {
-        @include list-reset-soft;
-        float: $left;
-        li {
-          display: inline;
-          float: $left;
-          a, span {
-            display: block;
-            color: $nav_fg;
-            background: none;
-            border-bottom: none;
-            padding: 0.75em;
-            font-size: 0.9em;
-          }
-        }
-      }
-      #footer-main-nav {
-        display: block;
-      }
-      #footer-help-nav {
-        float: $right;
-      }
     }
 }
 
@@ -260,6 +232,10 @@ body.twothirdswidthpage {
   p {
     line-height: 1.4em;
   }
+}
+
+.next-steps--two .next-steps__step {
+  width: 50%;
 }
 
 body.unresponsive-council {
@@ -310,5 +286,156 @@ body.unresponsive-council {
     @media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
         background-image: url(images/unresponsive-council-cta-arrow@2.png);
         background-size: 60px;
+    }
+}
+
+// FMS.com has a slightly different version of the
+// footer-help / footer-marketing widgets that appear
+// at the bottom of pages with `pagefooter` set.
+#footer-help {
+  border: none;
+
+  ul {
+    margin: 0 auto;
+
+    li {
+      max-width: 19em;
+
+      &:last-child {
+        border: none;
+        padding-left: 3em;
+      }
+    }
+  }
+}
+
+.mysoc-footer {
+  margin-top: 3em;
+}
+body.mappage .mysoc-footer {
+    display: none;
+}
+
+.variant1 {
+    body {
+        background: #fad52a url(/cobrands/fixmystreet.com/images/friendly-homepage.jpg) top center no-repeat;
+        background-size: 100%;
+    }
+
+    #site-logo {
+        background-image: url(/cobrands/fixmystreet.com/images/friendly-logo-mobile.png);
+
+        @media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+            background-image: url(/cobrands/fixmystreet.com/images/friendly-logo-mobile@2.png);
+            background-size: 175px 40px;
+        }
+    }
+
+    body.frontpage {
+        background-image: url(/cobrands/fixmystreet.com/images/friendly-homepage.jpg);
+
+        #site-logo {
+            background: transparent url(/cobrands/fixmystreet.com/images/friendly-logo-home.png) 0 0 no-repeat;
+
+            @media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+                background-image: url(/cobrands/fixmystreet.com/images/friendly-logo-home@2.png);
+                background-size: 300px 60px;
+            }
+        }
+    }
+
+    #front-main {
+        background: rgba(255, 255, 255, 0.3);
+        margin-top: 1em;
+
+        #postcodeForm {
+            background: transparent;
+
+            label {
+                margin: 1em 0;
+            }
+        }
+
+        a#geolocate_link {
+            height: auto;
+            padding: 0.5em 0 0.5em 1.5em;
+            margin-top: 0.5em;
+            font-weight: bold;
+            font-size: 1em;
+            background-size: 16px;
+            background-position: 0% 50%;
+        }
+    }
+
+    body.twothirdswidthpage #front-main,
+    body.fullwidthpage #front-main {
+        padding: 3em 2em 6em 2em;
+    }
+
+    #site-header {
+        background: transparent;
+    }
+
+    .nav-menu a,
+    .nav-menu span {
+        color: #222;
+    }
+
+    .nav-menu--main {
+        font-weight: bold;
+        span {
+            color: inherit;
+        }
+
+        a {
+            &:hover,
+            &:focus {
+                background: rgba(255, 255, 255, 0.2);
+            }
+        }
+
+        a.report-a-problem-btn {
+            background-color: #fff;
+            color: mix(#fad52a, #000, 50%);
+            padding: 0.25em 0.5em;
+        }
+    }
+
+    .nav-wrapper .nav-wrapper-2 {
+        border-top-color: #fff;
+        border-image: none;
+    }
+
+    body.mappage .nav-wrapper .nav-wrapper-2 {
+        background: darken(#fad52a, 5%);
+    }
+
+    body.twothirdswidthpage .container .content footer .tablewrapper {
+        color: #222;
+        background: #fad52a;
+    }
+    body.fullwidthpage .container .content footer .tablewrapper {
+        color: #222;
+        background: transparent;
+    }
+
+    .nav-menu--mysoc {
+        background: #fff;
+    }
+
+    #footer-help a {
+        color: inherit;
+        text-decoration: underline;
+    }
+
+    #mysoc-logo {
+        background-image: url(/cobrands/fixmystreet.com/images/friendly-mysoc-logo.png);
+        background-position: 50% 0%;
+        background-size: 90px auto;
+
+        @media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+            background-image: url(/cobrands/fixmystreet.com/images/friendly-mysoc-logo@2.png);
+            background-size: 90px auto;
+        }
     }
 }

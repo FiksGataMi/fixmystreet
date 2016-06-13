@@ -1,12 +1,10 @@
-#!/usr/bin/perl
-
 use strict;
 use warnings;
 
 use Test::More;
 
 use FixMyStreet;
-use FixMyStreet::App;
+use FixMyStreet::DB;
 
 my %tests = (
     nested_hash => { foo => 'bar', and => [ 'baz', 'bundy' ] },
@@ -14,7 +12,7 @@ my %tests = (
     scalar => 123,
 );
 
-my $token_rs = FixMyStreet::App->model('DB::Token');
+my $token_rs = FixMyStreet::DB->resultset('Token');
 
 foreach my $test_data_name ( sort keys %tests ) {
     my $test_data = $tests{$test_data_name};

@@ -6,26 +6,40 @@
 
 @import "../sass/h5bp";
 @import "_colours";
-@import "compass";
 @import "../sass/base";
 
-#footer-nav {
+.top_banner {
+    color: $primary_text;
+    background: $primary;
+    p {
+        margin: auto;
+        padding: 0.5em 2em;
+        max-width: 50em;
+        text-align: center;
+    }
+    a {
+        color: $primary_text;
+        text-decoration: underline;
+    }
+}
+
+.top_banner--donate {
+    background: #bef;
+}
+
+// The banner interferes with the map moving/placement on mobile, and the top
+// bar navigation on desktop (which both assume that .wrapper is at the top of
+// the page) so hide there for now
+.mappage .top_banner--donate {
     display: none;
 }
 
-#country_banner {
+// This banner is only shown via JavaScript AJAX call
+.top_banner--country {
     display: none;
-    color: $primary_text;
-    background: $primary;
-    p#international_message {
-        margin: auto;
-        padding: 0.5em 2em;
-        max-width: 40em;
-        text-align: center;
-    }
-    #message_close {
-        float: $right;
-    }
+}
+.top_banner__close {
+    float: $right;
 }
 
 #site-logo {
@@ -59,7 +73,7 @@
 }
 
 .next-steps__step__cta {
-  @include pie-clearfix;
+  @include clearfix;
   padding-top: 0.4em; // extra padding between buttons and previous paragraph
 
   a {
@@ -83,7 +97,7 @@
 }
 
 .next-steps__step--goodies {
-  @include pie-clearfix;
+  @include clearfix;
 
   .goodies-preview {
     float: $right;
@@ -167,3 +181,160 @@
     }
 }
 
+.variant1 {
+    #site-header {
+        border-top-color: #fff;
+        background: #fad52a;
+    }
+
+    #report-cta {
+        border: none;
+        background-color: #fff;
+        color: mix(#fad52a, #000, 50%);
+        padding: 0.5em 0.5em 0.4em 0.5em;
+    }
+
+    #site-logo {
+        background-image: url(/cobrands/fixmystreet.com/images/friendly-logo-mobile.png);
+
+        @media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+            background-image: url(/cobrands/fixmystreet.com/images/friendly-logo-mobile@2.png);
+            background-size: 175px 40px;
+        }
+    }
+
+    &.frontpage {
+        background: #fad52a url(/cobrands/fixmystreet.com/images/friendly-homepage-mobile.jpg) top center no-repeat;
+        background-size: 100%;
+
+        #site-header {
+            border-top-color: #fff;
+            background: transparent;
+        }
+    }
+
+    #front-main #postcodeForm {
+        background: rgba(255,255,255,0.3);
+
+        input#sub {
+            @include linear-gradient(#49c0ff, #1091d5);
+
+            &:hover, &:focus {
+                @include linear-gradient(darken(#49c0ff, 10%), darken(#1091d5, 10%));
+            }
+        }
+    }
+
+    #front-main a#geolocate_link {
+        background: transparent;
+        color: inherit;
+    }
+
+    #front-main + .container {
+        background: transparent;
+    }
+}
+
+// Avoid double border between mobile nav and footer
+.nav-menu--main > :last-child a {
+  border-bottom: none;
+}
+
+
+$mysoc-footer-background-color: #222;
+$mysoc-footer-text-color: #acacac;
+$mysoc-footer-site-name-text-color: #fff;
+
+$mysoc-footer-link-text-color: #fff;
+$mysoc-footer-link-hover-text-color: #fff;
+
+$mysoc-footer-border-top: 0.25em solid $primary;
+
+$mysoc-footer-divider-color: #4b4b4b;
+
+$mysoc-footer-donate-background-color: #333;
+$mysoc-footer-donate-text-color: #fff;
+$mysoc-footer-donate-button-background-color: $primary;
+$mysoc-footer-donate-button-text-color: #000;
+
+$mysoc-footer-legal-text-color: #9a9a9a;
+
+$mysoc-footer-image-path: 'images/mysoc-footer/';
+$mysoc-footer-breakpoint-sm: 48em;
+
+$grid-max-width: 60em;
+$grid-gutter: 2em;
+$grid-breakpoint-sm: $mysoc-footer-breakpoint-sm;
+
+@import "mysoc_footer";
+
+.mysoc-footer {
+  li {
+    list-style: none;
+  }
+
+  .container {
+    margin: 0 auto;
+  }
+
+  .container {
+    margin-right: auto;
+    margin-left: auto;
+    padding-left: $grid-gutter / 2;
+    padding-right: $grid-gutter / 2;
+    max-width: $grid-max-width;
+  }
+
+  .row {
+    @include clearfix;
+    margin-left: $grid-gutter / -2;
+    margin-right: $grid-gutter / -2;
+  }
+
+  %col {
+    padding-left: $grid-gutter / 2;
+    padding-right: $grid-gutter / 2;
+  }
+
+  @for $i from 1 through 12 {
+    .col-sm-#{$i} {
+      @extend %col;
+    }
+  }
+
+  @media(min-width: $grid-breakpoint-sm) {
+    %col-float {
+      float: left;
+    }
+
+    @for $i from 1 through 12 {
+      .col-sm-#{$i} {
+        @extend %col-float;
+        width: 100% / 12 * $i;
+      }
+    }
+  }
+}
+
+.mysoc-footer__org__logo--fms-platform {
+  width: 205px;
+  background: transparent url('#{$mysoc-footer-image-path}logo-fms-platform.png') 0 0 no-repeat;
+  background-size: 205px 32px;
+  @media ($high-dpi-screen) {
+    background-image: url('#{$mysoc-footer-image-path}logo-fms-platform@2x.png');
+  }
+  background-image: url('#{$mysoc-footer-image-path}logo-fms-platform.svg'), none;
+}
+
+.fms-app-badges {
+  margin: 1em 0;
+
+  a {
+    text-decoration: none;
+  }
+
+  img {
+    border: none;
+    margin-right: 0.5em;
+  }
+}

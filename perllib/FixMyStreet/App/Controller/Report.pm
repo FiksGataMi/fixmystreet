@@ -2,6 +2,8 @@ package FixMyStreet::App::Controller::Report;
 
 use Moose;
 use namespace::autoclean;
+use JSON::MaybeXS;
+
 BEGIN { extends 'Catalyst::Controller'; }
 
 =head1 NAME
@@ -128,6 +130,17 @@ sub load_problem_or_display_error : Private {
     }
 
     $c->stash->{problem} = $problem;
+    if ( $c->user_exists && $c->user->has_permission_to(moderate => $problem->bodies_str) ) {
+        $c->stash->{problem_original} = $problem->find_or_new_related(
+            moderation_original_data => {
+                title => $problem->title,
+                detail => $problem->detail,
+                photo => $problem->photo,
+                anonymous => $problem->anonymous,
+            }
+        );
+    }
+
     return 1;
 }
 
@@ -184,7 +197,7 @@ sub format_problem_for_display : Private {
 
     if ( $c->stash->{ajax} ) {
         $c->res->content_type('application/json; charset=utf-8');
-        my $content = JSON->new->utf8(1)->encode(
+        my $content = encode_json(
             {
                 report => $c->cobrand->problem_as_hashref( $problem, $c ),
                 updates => $c->cobrand->updates_as_hashref( $problem, $c ),
@@ -228,7 +241,7 @@ to moderation, however we'd need to inform all the other
 users too about this change, at which point we can delete:
 
  - this method
- - the call to it in templates/web/fixmystreet/report/display.html
+ - the call to it in templates/web/base/report/display_tools.html
  - the users_can_hide cobrand method, in favour of user->has_permission_to
 
 =cut

@@ -1,6 +1,7 @@
 package FixMyStreet::Cobrand::UK;
 use base 'FixMyStreet::Cobrand::Default';
 
+use JSON::MaybeXS;
 use mySociety::MaPit;
 use mySociety::VotingArea;
 
@@ -26,7 +27,7 @@ sub disambiguate_location {
     };
 }
 
-sub process_extras {
+sub process_open311_extras {
     my $self    = shift;
     my $ctx     = shift;
     my $body_id = shift;
@@ -108,7 +109,7 @@ sub short_name {
     $name =~ s/ (Borough|City|District|County) Council$//;
     $name =~ s/ Council$//;
     $name =~ s/ & / and /;
-    $name =~ s{/}{_}g;
+    $name =~ tr{/}{_};
     $name = URI::Escape::uri_escape_utf8($name);
     $name =~ s/%20/+/g;
     return $name;

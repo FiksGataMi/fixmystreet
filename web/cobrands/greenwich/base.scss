@@ -2,7 +2,6 @@
 @import "./_colours";
 @import "./_fonts";
 @import "../sass/mixins";
-@import "compass";
 
 @import "../sass/base";
 
@@ -35,10 +34,6 @@ body.frontpage #site-logo,
 
 label[for=pc] {
     color: $greenwich_dark_red;
-}
-
-ol.big-numbers > li:before {
-    color: $primary;
 }
 
 #front-howto #front_stats {

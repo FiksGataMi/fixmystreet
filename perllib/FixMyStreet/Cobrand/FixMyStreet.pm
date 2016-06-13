@@ -1,6 +1,5 @@
 package FixMyStreet::Cobrand::FixMyStreet;
 use base 'FixMyStreet::Cobrand::UK';
-use mySociety::Gaze;
 
 use constant COUNCIL_ID_BROMLEY => 2482;
 
@@ -9,7 +8,6 @@ sub path_to_web_templates {
     my $self = shift;
     return [
         FixMyStreet->path_to( 'templates/web/fixmystreet.com' )->stringify,
-        FixMyStreet->path_to( 'templates/web/fixmystreet' )->stringify
     ];
 }
 
@@ -52,11 +50,25 @@ sub extra_contact_validation {
     return %errors;
 }
 
-sub get_country_for_ip_address {
-    my $self = shift;
-    my $ip = shift;
+sub report_form_extras {
+    ( { name => 'gender', required => 0 }, { name => 'variant', required => 0 } )
+}
 
-    return mySociety::Gaze::get_country_from_ip($ip);
+sub ask_gender_question {
+    my $self = shift;
+
+    return 1 unless $self->{c}->user;
+
+    my $reports = $self->{c}->model('DB::Problem')->search({
+        user_id => $self->{c}->user->id,
+        extra => { like => '%gender%' }
+    }, { order_by => { -desc => 'id' } });
+
+    while (my $report = $reports->next) {
+        my $gender = $report->get_extra_metadata('gender');
+        return 0 if $gender =~ /female|male|other|unknown/;
+    }
+    return 1;
 }
 
 1;

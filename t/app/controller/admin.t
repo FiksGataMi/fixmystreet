@@ -6,18 +6,11 @@ use FixMyStreet::TestMech;
 
 my $mech = FixMyStreet::TestMech->new;
 
-my $secret = FixMyStreet::App->model('DB::Secret')->search();
-
-# don't explode if there's nothing in the secret table
-if ( $secret == 0 ) {
-    diag "You need to put an entry in the secret table for the admin tests to run";
-    plan skip_all => 'No entry in secret table';
-}
-
 my $user =
   FixMyStreet::App->model('DB::User')
-  ->find_or_create( { email => 'test@example.com', name => 'Test User' } );
+  ->find_or_create( { email => 'test@example.com' } );
 ok $user, "created test user";
+$user->update({ name => 'Test User' });
 
 my $user2 =
   FixMyStreet::App->model('DB::User')
@@ -70,8 +63,8 @@ my $report = FixMyStreet::App->model('DB::Problem')->find_or_create(
 
 my $alert = FixMyStreet::App->model('DB::Alert')->find_or_create(
     {
-        alert_type => 'new_updates',
-        parameter => $report->id,
+        alert_type => 'area_problems',
+        parameter => 2482,
         confirmed => 1,
         user => $user,
     },
@@ -111,9 +104,9 @@ subtest 'check summary counts' => sub {
     $mech->content_contains( "$q_count questionnaires sent" );
 
     FixMyStreet::override_config {
-        ALLOWED_COBRANDS => [ 'barnet' ],
+        ALLOWED_COBRANDS => [ 'oxfordshire' ],
     }, sub {
-        ok $mech->host('barnet.fixmystreet.com');
+        ok $mech->host('oxfordshire.fixmystreet.com');
 
         $mech->get_ok('/admin');
         $mech->title_like(qr/Summary/);
@@ -122,11 +115,11 @@ subtest 'check summary counts' => sub {
         my ($num_alerts) = $mech->content =~ /(\d+) confirmed alerts/;
         my ($num_qs) = $mech->content =~ /(\d+) questionnaires sent/;
 
-        $report->bodies_str(2489);
-        $report->cobrand('barnet');
+        $report->bodies_str(2237);
+        $report->cobrand('oxfordshire');
         $report->update;
 
-        $alert->cobrand('barnet');
+        $alert->cobrand('oxfordshire');
         $alert->update;
 
         $mech->get_ok('/admin');
@@ -178,6 +171,7 @@ subtest 'check contact creation' => sub {
         email      => 'test@example.com',
         note       => 'test note',
         non_public => undef,
+        confirmed  => 0,
     } } );
 
     $mech->content_contains( 'test category' );
@@ -1240,9 +1234,7 @@ subtest "Check admin_base_url" => sub {
     my $rs = FixMyStreet::App->model('DB::Problem');
     my $cobrand = FixMyStreet::Cobrand->get_class_for_moniker($report->cobrand)->new();
 
-    is (FixMyStreet::App->model('DB::Problem')->get_admin_url(
-            $cobrand,
-            $report),
+    is ($report->admin_url($cobrand),
         (sprintf 'https://secure.mysociety.org/admin/bci/report_edit/%d', $report_id),
         'get_admin_url OK');
 };

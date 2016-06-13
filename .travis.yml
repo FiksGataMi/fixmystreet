@@ -11,7 +11,10 @@ notifications:
 
 language: perl
 perl:
-  - "5.14"
+  - "5.14" # wheezy, precise
+  - "5.18" # trusty
+  - "5.20" # jessie, vivid, wily
+  - "5.22" # stretch, xenial
 
 env:
   global:
@@ -24,9 +27,7 @@ before_install:
 install:
   - .travis/install
 before_script:
-  - ./bin/make_po FixMyStreet-EmptyHomes
-  - ./bin/emptyhomes/make_welsh_po
   - commonlib/bin/gettext-makemo FixMyStreet
 script: "bin/run-tests t"
-after_script:
+after_success:
   - .travis/after_script

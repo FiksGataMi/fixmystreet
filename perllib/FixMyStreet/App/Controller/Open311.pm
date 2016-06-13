@@ -4,7 +4,7 @@ use utf8;
 use Moose;
 use namespace::autoclean;
 
-use JSON;
+use JSON::MaybeXS;
 use XML::Simple;
 use DateTime::Format::W3CDTF;
 
@@ -284,7 +284,7 @@ sub output_requests : Private {
         my $display_photos = $c->cobrand->allow_photo_display($problem);
         if ($display_photos && $problem->photo) {
             my $url = $c->cobrand->base_url();
-            my $imgurl = $url . "/photo/$id.full.jpeg";
+            my $imgurl = $url . $problem->photos->[0]->{url_full};
             $request->{'media_url'} = [ $imgurl ];
         }
         push(@problemlist, $request);

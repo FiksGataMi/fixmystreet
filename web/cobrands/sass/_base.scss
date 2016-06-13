@@ -6,6 +6,10 @@ $heading-font: 'Museo300-display', MuseoSans, Helmet, Freesans, sans-serif !defa
 $image-sprite: '/cobrands/fixmystreet/images/sprite.png' !default;
 $menu-image: 'menu-white' !default;
 
+$itemlist_item_background: #f6f6f6 !default;
+$itemlist_item_background_hover: #e6e6e6 !default;
+$col_big_numbers: #ccc !default;
+
 @import "_mixins";
 @import "_report_list";
 
@@ -108,7 +112,7 @@ ol.big-numbers {
       position: absolute;
       #{$left}: 0;
       top:-0.2em;
-      color:#ccc;
+      color:$col_big_numbers;
       line-height:1;
       font: {
         family: $meta-font;
@@ -316,6 +320,9 @@ label{
     font-size:1.25em;
     margin:0.5em 0;
   }
+  h2 {
+    margin: 0 0 0.5em;
+  }
   h5 {
     margin:0 0 1em;
     font: {
@@ -347,7 +354,7 @@ label{
     color: #666;
     padding-#{$left}: 20px;
     background: transparent url(/cobrands/fixmystreet/images/wrong-location.png) $left 50% no-repeat;
-    border-#{$left}: solid 4px #fff;
+    border-#{$left}: solid 4px transparent;
     margin-top: -0.5em;
 }
 
@@ -437,7 +444,7 @@ p.label-valid {
 #site-header{
   border-top: 0.25em solid $primary;
   height: 3em;
-  @include background(linear-gradient(#000, #222 10%, #222 90%, #000));
+  @include linear-gradient(#000, #222 10%, #222 90%, #000);
   .container {
     min-height:4em;
   }
@@ -536,8 +543,17 @@ p.label-valid {
 .wrapper {
   width:100%;
   display:table;
-  caption-side:bottom;
+  // The 'caption' at large widths will be top, moving the menu up magically
+  caption-side: bottom;
+  // This is so absolutely positioned header stuff doesn't overlap banner...
+  position: relative;
 }
+// ...however position: relative stops the map being clickable (?), so better
+// revert it there
+body.mappage .wrapper {
+  position: static;
+}
+
 // this is the user's logged in details or the login link etc
 #user-meta {
   p {
@@ -729,6 +745,48 @@ input.final-submit {
   float: $right;
 }
 
+.btn--facebook {
+    @include button-reset(#3b5998, darken(#3b5998, 10%), #3b5998, #fff, darken(#3b5998, 5%), darken(#3b5998, 10%), #3b5998, #fff);
+
+    &:visited {
+        color: #fff;
+    }
+
+    img {
+        margin-right: 0.5em;
+        vertical-align: -0.2em;
+        height: 1.3em;
+        width: auto;
+    }
+}
+
+.btn--twitter {
+    @include button-reset(#55acee, darken(#55acee, 10%), #55acee, #fff, darken(#55acee, 5%), darken(#55acee, 10%), #55acee, #fff);
+
+    &:visited {
+        color: #fff;
+    }
+
+    img {
+        margin-right: 0.5em;
+        vertical-align: -0.2em;
+        height: 1.3em;
+        width: auto;
+    }
+}
+
+// Under the button to override its text transform and width
+.btn--social {
+    display: block;
+    width: 100%;
+    text-transform: none;
+    text-align: center;
+}
+
+.js #js-social-email-hide {
+    display: none;
+}
+
 .button-fwd {
   padding: flip(1em 3em 1em 1em, 1em 1em 1em 3em);
   background: inline-image("../fixmystreet/images/chevron-grey-#{$right}.svg") $right 50% no-repeat;
@@ -842,15 +900,11 @@ input.final-submit {
   margin: 0 0 1em;
   padding: 0;
   border-bottom: 0.25em solid $primary;
-  .update-img {
-    float: $right;
-    margin: flip(0.5em 0 0.5em 1em, 0.5em 1em 0.5em 0); // gutter between text and floated image
-  }
 }
 
 .item-list__item {
   list-style: none;
-  background-color: #f6f6f6;
+  background-color: $itemlist_item_background;
   margin: 0.25em 0 0;
   padding: 0.5em 1em;
   display: block;
@@ -864,25 +918,25 @@ input.final-submit {
   margin-bottom: 0.5em;
 }
 
-.item-list__item--link {
+%item-list__item--link {
   padding: 0;
   a {
     color: #222222;
     display: block;
     padding: 0.5em 1em;
   }
-  a:hover, a:focus {
-    background-color: #e6e6e6;
+  a:hover, a:focus, &.hovered a {
+    background-color: $itemlist_item_background_hover;
     text-decoration: none;
   }
 }
 
 .item-list--wards__item {
-  @extend .item-list__item--link;
+  @extend %item-list__item--link;
 }
 
 .item-list--reports__item {
-  @extend .item-list__item--link;
+  @extend %item-list__item--link;
   a {
     @include clearfix;
     padding: flip(0 0 0 1em, 0 1em 0 0);
@@ -893,15 +947,18 @@ input.final-submit {
     height: auto;
     margin-#{$left}: 1em;
   }
-  h4 {
-    padding-top: 0.25em;
-    margin: 0;
-  }
   small {
     color: #666;
     display: block;
     padding: 0.25em 0;
   }
+}
+.item-list__heading {
+  font-size: 1em;
+  font-weight: normal;
+  line-height: 1.5;
+  padding-top: 0.25em;
+  margin: 0;
 }
 
 .item-list__item--empty p {
@@ -919,6 +976,35 @@ input.final-submit {
   .img {
     height: 60px;
   }
+}
+
+.problem-header .update-img,
+.item-list .update-img {
+    float: $right;
+    margin: flip(0.3em 0 0.5em 1em, 0.3em 1em 0.5em 0); // gutter between text and floated image
+    width: 33%;
+}
+.questionnaire-report-reminder .update-img {
+    float: $left;
+    margin: flip(0.1em 1em 1em 0, 0.1em 0 1em 1em);
+    width: 120px;
+}
+
+// A wrapper that's put around .update-imgs if there are more than 1 in a row
+.update-img-set {
+    text-align: center;
+    margin: 0 0 1em;
+
+    .update-img {
+        float: none;
+        display: inline-block;
+        margin: 0;
+        width: 31%;
+    }
+
+    .update-img + .update-img {
+        margin: flip(0 0 0 0.5em, 0 0.5em 0 0);
+    }
 }
 
 // fancybox gallery images have a magnifying glass in the corner
@@ -946,12 +1032,7 @@ input.final-submit {
 }
 
 .problem-header {
-  margin-bottom:1em;
-}
-.problem-header .update-img {
-    float: $right;
-    margin-#{$left}: 0.5em;
-    margin-bottom: 0.5em;
+  margin-bottom: 1em;
 }
 
 .report_meta_info,
@@ -964,6 +1045,18 @@ input.final-submit {
 
   p + & {
     margin-top: -0.6em; // partly counteract margin-bottom on previous paragraph
+  }
+}
+
+.moderate-edit {
+  display: none; // gets shown by javascript
+
+  :disabled {
+    background: #ddd;
+  }
+
+  h1 input {
+    border-width: (0.125em/2); // compensate for 2em font-size on h1s
   }
 }
 
@@ -1310,7 +1403,7 @@ label .muted {
     padding-#{$left}: 16px;
     list-style: none;
     background: transparent url(/cobrands/fixmystreet/images/tick-10px-8px.png) $left 5px no-repeat;
-    border-#{$left}: solid 4px #fff;
+    border-#{$left}: solid 4px transparent;
   }
 
   .do {
@@ -1325,9 +1418,12 @@ label .muted {
       background-image: url(/cobrands/fixmystreet/images/cross-7px-7px.png);
       background-position: $left 6px;
       padding-#{$left}: 14px;
-      border-#{$left}: solid 6px #fff;
+      border-#{$left}: solid 6px transparent;
     }
   }
+}
+.description_tips__heading--inline {
+  display: inline-block;
 }
 
 #problem_form > label:first-child {
@@ -1566,6 +1662,26 @@ table.nicetable {
     }
 }
 
+.alerts__nearby-activity {
+    background-color: #f6f6f6;
+    margin: 1em -1em;
+    padding: 1em;
+
+    & > :first-child {
+        margin-top: 0;
+    }
+}
+
+.alerts__nearby-activity__photos {
+    white-space: nowrap;
+    overflow: hidden;
+
+    a {
+        margin-right: 0.5em;
+        text-decoration: none; // avoid underline showing between images
+    }
+}
+
 .confirmation-header {
   padding: 140px 0 2em;
   text-align: center;
@@ -1628,12 +1744,6 @@ table.nicetable {
   border-radius: 3px;
   padding: 1em 1em 1px 1em; // basically no padding-bottom, as children have their own margin-bottom instead
   margin-bottom: 2em;
-
-  .update-img {
-    width: 120px;
-    float: left;
-    margin: 0.1em 1em 1em 0;
-  }
 }
 
 .questionnaire-report-reminder__report-title {
@@ -1665,7 +1775,8 @@ table.nicetable {
   display: flex; // fancy full-width buttons for browsers that support flexbox
 
   input {
-    display: none;
+    position: absolute;
+    left: -999px;
   }
 
   label {
@@ -1720,7 +1831,11 @@ table.nicetable {
     margin: 3em;
   }
 
-  #main-nav,
+  // Firefox leaves a big blanking gap if the content is floated...
+  .content { float: none !important; }
+
+  .shadow-wrap,
+  .nav-wrapper,
   #nav-link,
   .admin-nav,
   .olControlAttribution,
@@ -1755,3 +1870,4 @@ table.nicetable {
 
 @import "_admin";
 @import "_fixedthead";
+@import "_dropzone";

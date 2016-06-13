@@ -6,6 +6,7 @@ BEGIN { extends 'Catalyst::Controller'; }
 
 use FixMyStreet::Map;
 use Encode;
+use JSON::MaybeXS;
 use Utils;
 
 =head1 NAME
@@ -46,7 +47,7 @@ sub index : Path : Args(0) {
     }
 
     # Check to see if the spot is covered by a area - if not show an error.
-    return unless $c->cobrand->moniker eq 'fixmybarangay' || $c->forward('check_location_is_acceptable');
+    return unless $c->forward('check_location_is_acceptable');
 
     # If we have a partial - redirect to /report/new so that it can be
     # completed.
@@ -181,7 +182,7 @@ sub display_location : Private {
 
     # create a list of all the pins
     my @pins;
-    unless ($c->get_param('no_pins') || $c->cobrand->moniker eq 'emptyhomes') {
+    unless ($c->get_param('no_pins')) {
         @pins = map {
             # Here we might have a DB::Problem or a DB::Nearby, we always want the problem.
             my $p = (ref $_ eq 'FixMyStreet::App::Model::DB::Nearby') ? $_->problem : $_;
@@ -306,7 +307,7 @@ sub ajax : Path('/ajax') {
     # JSON encode the response
     my $json = { pins => $pins };
     $json->{current} = $on_map_list_html if $on_map_list_html;
-    my $body = JSON->new->utf8(1)->encode($json);
+    my $body = encode_json($json);
     $c->res->body($body);
 }
 
@@ -350,8 +351,10 @@ sub _geocode : Private {
     } else {
         if ( ref($suggestions) eq 'ARRAY' ) {
             foreach (@$suggestions) {
-                push @addresses, decode_utf8($_->{address});
-                push @locations, { address => decode_utf8($_->{address}), lat => $_->{latitude}, long => $_->{longitude} };
+                my $address = $_->{address};
+                $address = decode_utf8($address) if !utf8::is_utf8($address);
+                push @addresses, $address;
+                push @locations, { address => $address, lat => $_->{latitude}, long => $_->{longitude} };
             }
             $response = { suggestions => \@addresses, locations => \@locations };
         } else {
@@ -363,9 +366,7 @@ sub _geocode : Private {
         $response = \@addresses;
     }
 
-    my $body = JSON->new->utf8(1)->encode(
-        $response
-    );
+    my $body = encode_json($response);
     $c->res->body($body);
 
 }

@@ -587,14 +587,6 @@ sub admin_report_edit {
         #    2) setting $problem->whensent(undef) may make it eligible for generating an email
         #   to the body (internal or external).  See DBRS::Problem->send_reports for Zurich-
         #   specific categories which are eligible for this.
-        #
-        #   It looks like both of these will do:
-        #       a) TT processing of [% ... %] directives, in FMS::App->send_email(_cron)
-        #       b) pseudo-PHP substitution of <?=$values['name']?> which is done as
-        #       naive substitution
-        #       commonlib mySociety::Email
-        #
-        #   So it makes sense to add new parameters as the more powerful TT (a).
 
         my $redirect = 0;
         my $new_cat = $c->get_param('category') || '';
@@ -850,7 +842,7 @@ sub admin_report_edit {
 
             # Add new update from status_update
             if (my $update = $c->get_param('status_update')) {
-                FixMyStreet::App->model('DB::Comment')->create( {
+                $c->model('DB::Comment')->create( {
                     text => $update,
                     user => $c->user->obj,
                     state => 'unconfirmed',
@@ -1010,28 +1002,27 @@ sub _admin_send_email {
 }
 
 sub munge_sendreport_params {
-    my ($self, $c, $row, $h, $params) = @_;
+    my ($self, $row, $h, $params) = @_;
     if ($row->state =~ /^(closed|investigating)$/ && $row->get_extra_metadata('publish_photo')) {
         # we attach images to reports sent to external bodies
-        my $photoset = $row->get_photoset($c);
-        my @images = $photoset->all_images
+        my $photoset = $row->get_photoset();
+        my $num = $photoset->num_images
             or return;
-        my $index = 0;
         my $id = $row->id;
         my @attachments = map {
-            my $i = $index++;
+            my $image = $photoset->get_raw_image($_);
             {
-                body => $_->[1],
+                body => $image->{data},
                 attributes => {
-                    filename => "$id.$i.jpeg",
-                    content_type => 'image/jpeg',
+                    filename => "$id.$_." . $image->{extension},
+                    content_type => $image->{content_type},
                     encoding => 'base64',
                         # quoted-printable ends up with newlines corrupting binary data
-                    name => "$id.$i.jpeg",
+                    name => "$id.$_." . $image->{extension},
                 },
             }
-        } @images;
-        $params->{attachments} = \@attachments;
+        } (0..$num-1);
+        $params->{_attachments_} = \@attachments;
     }
 }
 
@@ -1117,9 +1108,41 @@ sub admin_stats {
                 ]
             }
         );
-        my $body = "Report ID,Created,Sent to Agency,Last Updated,E,N,Category,Status,UserID,External Body,Time Spent,Title,Detail,Media URL,Interface Used,Council Response\n";
+        my @fields = (
+            'Report ID',
+            'Created',
+            'Sent to Agency',
+            'Last Updated',
+            'E',
+            'N',
+            'Category',
+            'Status',
+            'Closure Status',
+            'UserID',
+            'External Body',
+            'Time Spent',
+            'Title',
+            'Detail',
+            'Media URL',
+            'Interface Used',
+            'Council Response',
+            'Strasse',
+            'Mast-Nr.',
+            'Haus-Nr.',
+            'Hydranten-Nr.',
+        );
+
+        my $body = "";
         require Text::CSV;
         my $csv = Text::CSV->new({ binary => 1 });
+
+        if ($csv->combine(@fields)) {
+            $body .= $csv->string . "\n";
+        }
+        else {
+            $body .= sprintf "{{error emitting CSV line: %s}}\n", $csv->error_diag;
+        }
+
         while ( my $report = $problems->next ) {
             my $external_body;
             my $body_name = "";
@@ -1129,13 +1152,18 @@ sub admin_stats {
 
             my $detail = $report->detail;
             my $public_response = $report->get_extra_metadata('public_response') || '';
+            my $metas = $report->get_extra_fields();
+            my %extras;
+            foreach my $field (@$metas) {
+                $extras{$field->{name}} = $field->{value};
+            }
 
             # replace newlines with HTML <br/> element
             $detail =~ s{\r?\n}{ <br/> }g;
             $public_response =~ s{\r?\n}{ <br/> }g if $public_response;
 
             # Assemble photo URL, if report has a photo
-            my $media_url = $report->get_photo_params->{url} ? ($c->cobrand->base_url . $report->get_photo_params->{url}) : '';
+            my $media_url = @{$report->photos} ? ($c->cobrand->base_url . $report->photos->[0]->{url}) : '';
 
             my @columns = (
                 $report->id,
@@ -1143,7 +1171,9 @@ sub admin_stats {
                 $report->whensent,
                 $report->lastupdate,
                 $report->local_coords, $report->category,
-                $report->state,        $report->user_id,
+                $report->state,
+                $report->get_extra_metadata('closure_status') || '',
+                $report->user_id,
                 $body_name,
                 $report->get_column('sum_time_spent') || 0,
                 $report->title,
@@ -1151,6 +1181,10 @@ sub admin_stats {
                 $media_url,
                 $report->service || 'Web interface',
                 $public_response,
+                $extras{'strasse'} || '',
+                $extras{'mast_nr'} || '',
+                $extras{'haus_nr'} || '',
+                $extras{'hydranten_nr'} || ''
             );
             if ($csv->combine(@columns)) {
                 $body .= $csv->string . "\n";

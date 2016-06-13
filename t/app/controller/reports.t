@@ -12,6 +12,7 @@ $mech->create_body_ok(2514, 'Birmingham City Council');
 my $body_edin_id = $mech->create_body_ok(2651, 'City of Edinburgh Council')->id;
 my $body_west_id = $mech->create_body_ok(2504, 'Westminster City Council')->id;
 my $body_fife_id = $mech->create_body_ok(2649, 'Fife Council')->id;
+my $body_slash_id = $mech->create_body_ok(10000, 'Electricity/Gas Council')->id;
 
 $mech->delete_problems_for_body( $body_west_id );
 $mech->delete_problems_for_body( $body_edin_id );
@@ -122,6 +123,10 @@ is scalar @$problems, 5, 'correct number of problems displayed';
 FixMyStreet::override_config {
     MAPIT_URL => 'http://mapit.mysociety.org/',
 }, sub {
+    $mech->get_ok('/reports');
+    $mech->follow_link_ok({ url_regex => qr{/reports/Electricity_Gas\+Council} });
+    is $mech->uri->path, '/reports/Electricity_Gas+Council', 'Path is correct';
+
     $mech->get_ok('/reports/City+of+Edinburgh?t=new');
 };
 $problems = $mech->extract_problem_list;
@@ -190,17 +195,6 @@ $mech->content_lacks('All reports Test 3 for ' . $body_west_id, 'non public prob
 $mech->get_ok('/reports');
 $stats = $mech->extract_report_stats;
 is $stats->{'Westminster City Council'}->[1], 5, 'non public reports included in stats';
-
-subtest "test emptyhomes all reports page" => sub {
-    FixMyStreet::override_config {
-        ALLOWED_COBRANDS => [ 'emptyhomes' ],
-    }, sub {
-        ok $mech->host("reportemptyhomes.com"), 'change host to reportemptyhomes';
-        $mech->get_ok('/reports');
-        # EHA lacks one column the others have
-        $mech->content_lacks('state unknown');
-    };
-};
 
 subtest "test fiksgatami all reports page" => sub {
     FixMyStreet::override_config {

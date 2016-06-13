@@ -38,7 +38,122 @@ add your own issue if not.
 We've extracted all of the mobile apps from this repository into the
 [fixmystreet-mobile repository](https://github.com/mysociety/fixmystreet-mobile).
 
+## Acknowledgements
+
+Thanks to [Browserstack](https://www.browserstack.com/) who let us use their
+web-based cross-browser testing tools for this project.
+
 ## Releases
+
+* v1.8.3 (3rd June 2016)
+    - Admin improvements
+        - Add search boxes to admin index page, and move stats. #1295
+        - Allow change of email in admin to existing entry. #1207
+        - Speed up photo removal. #1400
+        - Improve in-place moderation UI. #1388
+    - Front end improvements:
+        - Improve printing of report page in Firefox. #1394
+        - Fallback if request to Gaze fails. #1286
+    - Bugfixes:
+        - Fix non-working Google Maps layer. #1215
+        - Fix map tap sensitivity on some devices. #911 and openlayers/ol2#1418
+        - Fix lack of removal of cached update photos. #1405
+        - Handle reports/updates by logged in abuse entries.
+        - Fix size of grey chevrons.
+    - Development improvements:
+        - Massive speed increase to CSS compilation. #1414
+        - Use only one templating system for emails. #1410
+        - Move summary string function to template. #694
+        - Consolidate CSS clearfix handling. #1414
+        - Disable auto-CRLF conversion on git checkout.
+        - Support for Debian Jessie/Ubuntu Xenial.
+    - UK only
+        - Add standard mySociety footer. #1385
+
+* v1.8.2 (3rd May 2016)
+    - Security:
+        - Fix vulnerability in image upload that allowed external
+          command execution.
+    - New features
+        - Twitter social login. #1377
+        - PNG image upload support. #1302 #1361
+    - Front end improvements:
+        - Switch list item heading from h4 to h3. #1348
+        - Preserve category when clicking elsewhere on map.
+        - Optimize store logo PNGs.
+    - Admin improvements
+        - Default new category creation to confirmed. #1266
+        - Use better link to reports on admin body page.
+    - Bugfixes:
+        - Show right body user form value for fixed reports. #1369
+        - Cope with a '/' in body name slug. #574
+        - Ignore empty entries in the image upload IDs.
+        - Use transparent border in tips/change_location. #1380
+    - Development improvements:
+        - Allow cobrands to control front page number colours.
+        - Refactor email handling to use Email::MIME alone. #1366
+        - Improve testing on Mac OS X.
+        - Prevent dev sites auto-creating session.
+        - Display used send method in debug line.
+        - Remove unused cobrands. #1383
+        - Finally combine remaining base/fixmystreet templates.
+        - Don't warn on bad photo hashes.
+        - Skip fetched updates if they're out of date range. #1390
+        - Store Open311 error in report on failure. #1391
+
+* v1.8.1 (23rd March 2016)
+    - Front end improvements:
+          - Remember user's last anonymous state. #150
+          - Remove auto-scrolling of sidebar on pin hover. #1344
+          - Better multiple image display for reports/updates. #1325
+          - Improve accessibility of pretty radio buttons and photo inputs.
+    - Bugfixes:
+          - Make sure preview image doesn't hide error. #1361
+          - Don't double-decode geocoded addresses. #1359
+          - Ensure top of reporting form is shown. #787
+          - Other updates for Perl 5.20/5.22. #1358
+    - Development improvements:
+          - Add cobrand-specific custom reporting fields. #1352
+
+* v1.8 (2nd March 2016)
+    - New features:
+        - Facebook login. #1146
+        - Multiple photo upload support, with new UI. #190 #825 #1300
+    - Front end improvements:
+        - Pad internal update links so they are in view. #1308
+        - Move alert page "recent photos" out of sidebar. #1168
+        - Clearer relationship between map pins/list items. #1094
+        - Consistent styling for updates on /report and /my pages. #1312
+        - Stop a top banner overlapping header contents/improve CSS. #1306
+        - Improve design of some error pages.
+    - Performance improvements:
+        - Reduce memory usage. #1285
+    - Bugfixes:
+        - Default the Google map view to hybrid. #1293
+        - Prevent SVG chevron being stretched in Firefox. #1256
+        - Better display/internationalisation of numbers. #1297
+        - Fix cobrand restriction of My/Nearby. #1289
+        - If app user logged in, perform alert signup. #1321
+        - Spot media_url in Open311 GetServiceRequestUpdate. #1315
+        - Improve disabled input behaviour (no hover, ensure faded).
+        - Fix co-ordinate swapping bug in Google geocoder.
+        - Exclude update alerts from summary alert counts.
+        - Skip sending if any body marks it for skipping.
+        - Upgrade Net::SMTP::SSL to fix email sending issue.
+    - Development improvements:
+        - Add generic static route handler. #1235
+        - Store reports summary data by cobrand. #1290
+        - Better handling replies to bounce addresses. #85
+        - Combine more base/fixmystreet templates.
+        - Add OpenStreetMap URL to report email.
+    - Admin improvements:
+        - Don't allow blank email/name to be submitted. #1294
+        - Handle multiple photo rotation/removal in admin. #1300
+        - Fix typo in admin body form checked status.
+    - UK only
+        - Make sure front page error is visible. #1336
+        - Don't show app next step if used app. #1305
+        - House Rules. #890 #1311
 
 * v1.7 (23rd October 2015)
     - Front end improvements:

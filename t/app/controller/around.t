@@ -3,7 +3,7 @@ use warnings;
 use Test::More;
 use LWP::Protocol::PSGI;
 
-use t::MapIt;
+use t::Mock::MapIt;
 use FixMyStreet::TestMech;
 my $mech = FixMyStreet::TestMech->new;
 
@@ -84,7 +84,7 @@ foreach my $test (
   )
 {
     subtest "check lat/lng for '$test->{pc}'" => sub {
-        LWP::Protocol::PSGI->register(t::MapIt->run_if_script, host => 'mapit.uk');
+        LWP::Protocol::PSGI->register(t::Mock::MapIt->run_if_script, host => 'mapit.uk');
 
         $mech->get_ok('/');
         FixMyStreet::override_config {
@@ -124,8 +124,13 @@ subtest 'check non public reports are not displayed on around page' => sub {
     ok $private->update( { non_public => 1 } ), 'problem marked non public';
 
     $mech->get_ok('/');
-    $mech->submit_form_ok( { with_fields => { pc => 'EH99 1SP' } },
-        "good location" );
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => [ { 'fixmystreet' => '.' } ],
+        MAPIT_URL => 'http://mapit.mysociety.org/',
+    }, sub {
+        $mech->submit_form_ok( { with_fields => { pc => 'EH99 1SP' } },
+            "good location" );
+    };
     $mech->content_lacks( 'Around page Test 3 for 2651',
         'problem marked non public is not visible' );
 };

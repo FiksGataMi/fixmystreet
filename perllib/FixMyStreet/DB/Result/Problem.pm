@@ -157,8 +157,7 @@ __PACKAGE__->load_components("+FixMyStreet::DB::RABXColumn");
 __PACKAGE__->rabx_column('extra');
 __PACKAGE__->rabx_column('geocode');
 
-use Image::Size;
-use Moose;
+use Moo;
 use namespace::clean -except => [ 'meta' ];
 use Utils;
 
@@ -363,7 +362,8 @@ around lastupdate => $stz;
 
 around service => sub {
     my ( $orig, $self ) = ( shift, shift );
-    my $s = $self->$orig(@_);
+    # service might be undef if e.g. unsaved code report
+    my $s = $self->$orig(@_) || "";
     $s =~ s/_/ /g;
     return $s;
 };
@@ -462,7 +462,7 @@ sub bodies($) {
     my $self = shift;
     return {} unless $self->bodies_str;
     my $bodies = $self->bodies_str_ids;
-    my @bodies = FixMyStreet::App->model('DB::Body')->search({ id => $bodies })->all;
+    my @bodies = $self->result_source->schema->resultset('Body')->search({ id => $bodies })->all;
     return { map { $_->id => $_ } @bodies };
 }
 
@@ -477,21 +477,9 @@ sub url {
     return "/report/" . $self->id;
 }
 
-=head2 get_photo_params
-
-Returns a hashref of details of the attached photo, if any, for use in templates.
-
-NB: this method doesn't currently support multiple photos gracefully.  
-
-Use get_photoset($c) instead to do the right thing with reports with 0, 1, or more photos.
-
-=cut
-
-sub get_photo_params {
-    # use Carp 'cluck';
-    # cluck "get_photo_params called"; # TEMPORARY die to make sure I've done right thing with Zurich templates
-    my $self = shift;
-    return FixMyStreet::App::get_photo_params($self, 'id');
+sub admin_url {
+    my ($self, $cobrand) = @_;
+    return $cobrand->admin_base_url . '/report_edit/' . $self->id;
 }
 
 =head2 is_open
@@ -543,6 +531,19 @@ sub is_visible {
     return exists $self->visible_states->{ $self->state } ? 1 : 0;
 }
 
+=head2 state_display
+
+Returns a string suitable for display lookup in the update meta section.
+Removes the '- council/user' bit from fixed states.
+
+=cut
+
+sub state_display {
+    my $self = shift;
+    (my $state = $self->state) =~ s/ -.*$//;
+    return $state;
+}
+
 =head2 meta_line
 
 Returns a string to be used on a problem report page, describing some of the
@@ -556,59 +557,48 @@ sub meta_line {
     my $date_time = Utils::prettify_dt( $problem->confirmed );
     my $meta = '';
 
-    # FIXME Should be in cobrand
-    if ($c->cobrand->moniker eq 'emptyhomes') {
-
-        my $category = _($problem->category);
-        utf8::decode($category);
-        $meta = sprintf(_('%s, reported at %s'), $category, $date_time);
-
-    } else {
-
-        if ( $problem->anonymous ) {
-            if (    $problem->service
-                and $problem->category && $problem->category ne _('Other') )
-            {
-                $meta =
-                sprintf( _('Reported via %s in the %s category anonymously at %s'),
-                    $problem->service, $problem->category, $date_time );
-            }
-            elsif ( $problem->service ) {
-                $meta = sprintf( _('Reported via %s anonymously at %s'),
-                    $problem->service, $date_time );
-            }
-            elsif ( $problem->category and $problem->category ne _('Other') ) {
-                $meta = sprintf( _('Reported in the %s category anonymously at %s'),
-                    $problem->category, $date_time );
-            }
-            else {
-                $meta = sprintf( _('Reported anonymously at %s'), $date_time );
-            }
+    if ( $problem->anonymous ) {
+        if (    $problem->service
+            and $problem->category && $problem->category ne _('Other') )
+        {
+            $meta =
+            sprintf( _('Reported via %s in the %s category anonymously at %s'),
+                $problem->service, $problem->category, $date_time );
+        }
+        elsif ( $problem->service ) {
+            $meta = sprintf( _('Reported via %s anonymously at %s'),
+                $problem->service, $date_time );
+        }
+        elsif ( $problem->category and $problem->category ne _('Other') ) {
+            $meta = sprintf( _('Reported in the %s category anonymously at %s'),
+                $problem->category, $date_time );
         }
         else {
-            if (    $problem->service
-                and $problem->category && $problem->category ne _('Other') )
-            {
-                $meta = sprintf(
-                    _('Reported via %s in the %s category by %s at %s'),
-                    $problem->service, $problem->category,
-                    $problem->name,    $date_time
-                );
-            }
-            elsif ( $problem->service ) {
-                $meta = sprintf( _('Reported via %s by %s at %s'),
-                    $problem->service, $problem->name, $date_time );
-            }
-            elsif ( $problem->category and $problem->category ne _('Other') ) {
-                $meta = sprintf( _('Reported in the %s category by %s at %s'),
-                    $problem->category, $problem->name, $date_time );
-            }
-            else {
-                $meta =
-                sprintf( _('Reported by %s at %s'), $problem->name, $date_time );
-            }
+            $meta = sprintf( _('Reported anonymously at %s'), $date_time );
         }
-
+    }
+    else {
+        if (    $problem->service
+            and $problem->category && $problem->category ne _('Other') )
+        {
+            $meta = sprintf(
+                _('Reported via %s in the %s category by %s at %s'),
+                $problem->service, $problem->category,
+                $problem->name,    $date_time
+            );
+        }
+        elsif ( $problem->service ) {
+            $meta = sprintf( _('Reported via %s by %s at %s'),
+                $problem->service, $problem->name, $date_time );
+        }
+        elsif ( $problem->category and $problem->category ne _('Other') ) {
+            $meta = sprintf( _('Reported in the %s category by %s at %s'),
+                $problem->category, $problem->name, $date_time );
+        }
+        else {
+            $meta =
+            sprintf( _('Reported by %s at %s'), $problem->name, $date_time );
+        }
     }
 
     return $meta;
@@ -628,7 +618,7 @@ sub body {
         $body = join( _(' and '),
             map {
                 my $name = $_->name;
-                if ($c and mySociety::Config::get('AREA_LINKS_FROM_PROBLEMS')) {
+                if ($c and FixMyStreet->config('AREA_LINKS_FROM_PROBLEMS')) {
                     '<a href="' . $_->url($c) . '">' . $name . '</a>';
                 } else {
                     $name;
@@ -648,7 +638,7 @@ order of title.
 
 sub response_templates {
     my $problem = shift;
-    return FixMyStreet::App->model('DB::ResponseTemplate')->search(
+    return $problem->result_source->schema->resultset('ResponseTemplate')->search(
         {
             body_id => $problem->bodies_str_ids
         },
@@ -659,47 +649,17 @@ sub response_templates {
 }
 
 # returns true if the external id is the council's ref, i.e., useful to publish it
-# (by way of an example, the barnet send method returns a useful reference when
+# (by way of an example, the Oxfordshire send method returns a useful reference when
 # it succeeds, so that is the ref we should show on the problem report page).
 #     Future: this is installation-dependent so maybe should be using the contact
 #             data to determine if the external id is public on a council-by-council basis.
 #     Note:   this only makes sense when called on a problem that has been sent!
 sub can_display_external_id {
     my $self = shift;
-    if ($self->external_id && $self->send_method_used && $self->bodies_str =~ /2237/) {
+    if ($self->external_id && $self->send_method_used && $self->bodies_str =~ /(2237|2550)/) {
         return 1;
     }
     return 0;    
-}
-
-# TODO Some/much of this could be moved to the template
-
-# either: 
-#   "sent to council 3 mins later"
-#   "[Council name] ref: XYZ"
-# or
-#   "sent to council 3 mins later, their ref: XYZ"
-#
-# Note: some silliness with pronouns and the adjacent comma mean this is
-#       being presented as a single string rather than two
-sub processed_summary_string {
-    my ( $problem, $c ) = @_;
-    my ($duration_clause, $external_ref_clause);
-    if ($problem->whensent) {
-        $duration_clause = $problem->duration_string($c);
-    }
-    if ($problem->can_display_external_id) {
-        if ($duration_clause) {
-            $external_ref_clause = '<strong>' . sprintf(_('Council ref:&nbsp;%s'), $problem->external_id) . '.</strong>';
-        } else {
-            $external_ref_clause = '<strong>' . sprintf(_('%s ref:&nbsp;%s'), $problem->external_body, $problem->external_id) . '.</strong>';
-        }
-    }
-    if ($duration_clause and $external_ref_clause) {
-        return "$duration_clause. $external_ref_clause"
-    } else {
-        return $duration_clause || $external_ref_clause
-    }
 }
 
 sub duration_string {
@@ -754,20 +714,17 @@ sub update_from_open311_service_request {
         $status_notes = $request->{status_notes};
     }
 
-    my $update = FixMyStreet::App->model('DB::Comment')->new(
-        {
-            problem_id => $self->id,
-            state      => 'confirmed',
-            created    => $updated || \'current_timestamp',
-            confirmed => \'current_timestamp',
-            text      => $status_notes,
-            mark_open => 0,
-            mark_fixed => 0,
-            user => $system_user,
-            anonymous => 0,
-            name => $body->name,
-        }
-    );
+    my $update = $self->new_related(comments => {
+        state => 'confirmed',
+        created => $updated || \'current_timestamp',
+        confirmed => \'current_timestamp',
+        text => $status_notes,
+        mark_open => 0,
+        mark_fixed => 0,
+        user => $system_user,
+        anonymous => 0,
+        name => $body->name,
+    });
 
     my $w3c = DateTime::Format::W3CDTF->new;
     my $req_time = $w3c->parse_datetime( $request->{updated_datetime} );
@@ -833,7 +790,7 @@ sub as_hashref {
         state_t   => _( $self->state ),
         used_map  => $self->used_map,
         is_fixed  => $self->fixed_states->{ $self->state } ? 1 : 0,
-        photo     => $self->get_photo_params,
+        photos    => [ map { $_->{url} } @{$self->photos} ],
         meta      => $self->confirmed ? $self->meta_line( $c ) : '',
         confirmed_pp => $self->confirmed ? $c->cobrand->prettify_dt( $self->confirmed ): '',
         created_pp => $c->cobrand->prettify_dt( $self->created ),
@@ -855,21 +812,42 @@ sub latest_moderation_log_entry {
 
 Return a PhotoSet object for all photos attached to this field
 
-    my $photoset = $obj->get_photoset( $c );
+    my $photoset = $obj->get_photoset;
     print $photoset->num_images;
     return $photoset->get_image_data(num => 0, size => 'full');
 
 =cut
 
 sub get_photoset {
-    my ($self, $c) = @_;
+    my ($self) = @_;
     my $class = 'FixMyStreet::App::Model::PhotoSet';
     eval "use $class";
     return $class->new({
-        c => $c,
-        data => $self->photo,
+        db_data => $self->photo,
         object => $self,
     });
+}
+
+sub photos {
+    my $self = shift;
+    my $photoset = $self->get_photoset;
+    my $i = 0;
+    my $id = $self->id;
+    my @photos = map {
+        my $cachebust = substr($_, 0, 8);
+        my ($hash, $format) = split /\./, $_;
+        {
+            id => $hash,
+            url_temp => "/photo/temp.$hash.$format",
+            url_temp_full => "/photo/fulltemp.$hash.$format",
+            url => "/photo/$id.$i.$format?$cachebust",
+            url_full => "/photo/$id.$i.full.$format?$cachebust",
+            url_tn => "/photo/$id.$i.tn.$format?$cachebust",
+            url_fp => "/photo/$id.$i.fp.$format?$cachebust",
+            idx => $i++,
+        }
+    } $photoset->all_ids;
+    return \@photos;
 }
 
 __PACKAGE__->has_many(
@@ -893,8 +871,5 @@ sub get_time_spent {
         })->single;
     return $admin_logs ? $admin_logs->get_column('sum_time_spent') : 0;
 }
-
-# we need the inline_constructor bit as we don't inherit from Moose
-__PACKAGE__->meta->make_immutable( inline_constructor => 0 );
 
 1;

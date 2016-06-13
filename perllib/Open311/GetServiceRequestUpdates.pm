@@ -1,15 +1,17 @@
 package Open311::GetServiceRequestUpdates;
 
-use Moose;
+use Moo;
 use Open311;
-use FixMyStreet::App;
+use FixMyStreet::DB;
+use FixMyStreet::App::Model::PhotoSet;
 use DateTime::Format::W3CDTF;
 
 has system_user => ( is => 'rw' );
-has start_date => ( is => 'ro', default => undef );
-has end_date => ( is => 'ro', default => undef );
+has start_date => ( is => 'ro', default => sub { undef } );
+has end_date => ( is => 'ro', default => sub { undef } );
 has suppress_alerts => ( is => 'rw', default => 0 );
 has verbose => ( is => 'ro', default => 0 );
+has schema => ( is =>'ro', lazy => 1, default => sub { FixMyStreet::DB->connect } );
 
 Readonly::Scalar my $AREA_ID_BROMLEY     => 2482;
 Readonly::Scalar my $AREA_ID_OXFORDSHIRE => 2237;
@@ -17,7 +19,7 @@ Readonly::Scalar my $AREA_ID_OXFORDSHIRE => 2237;
 sub fetch {
     my $self = shift;
 
-    my $bodies = FixMyStreet::App->model('DB::Body')->search(
+    my $bodies = $self->schema->resultset('Body')->search(
         {
             send_method     => 'Open311',
             send_comments   => 1,
@@ -87,19 +89,24 @@ sub update_comments {
         # what problem it belongs to so just skip
         next unless $request_id;
 
+        my $comment_time = eval {
+            DateTime::Format::W3CDTF->parse_datetime( $request->{updated_datetime} || "" );
+        };
+        next if $@;
+        my $updated = DateTime::Format::W3CDTF->format_datetime($comment_time->clone->set_time_zone('UTC'));
+        next if @args && ($updated lt $args[0] || $updated gt $args[1]);
+
         my $problem;
         my $criteria = {
             external_id => $request_id,
         };
-        $problem = FixMyStreet::App->model('DB::Problem')->to_body($body)->search( $criteria );
+        $problem = $self->schema->resultset('Problem')->to_body($body)->search( $criteria );
 
         if (my $p = $problem->first) {
             my $c = $p->comments->search( { external_id => $request->{update_id} } );
 
             if ( !$c->first ) {
-                my $comment_time = DateTime::Format::W3CDTF->parse_datetime( $request->{updated_datetime} );
-
-                my $comment = FixMyStreet::App->model('DB::Comment')->new(
+                my $comment = $self->schema->resultset('Comment')->new(
                     {
                         problem => $p,
                         user => $self->system_user,
@@ -114,6 +121,18 @@ sub update_comments {
                         state => 'confirmed',
                     }
                 );
+
+                # ref test as XML::Simple will have returned an empty hashref for empty element
+                if ($request->{media_url} && !ref $request->{media_url}) {
+                    my $ua = LWP::UserAgent->new;
+                    my $res = $ua->get($request->{media_url});
+                    if ( $res->is_success && $res->content_type eq 'image/jpeg' ) {
+                        my $photoset = FixMyStreet::App::Model::PhotoSet->new({
+                            data_items => [ $res->decoded_content ],
+                        });
+                        $comment->photo($photoset->data);
+                    }
+                }
 
                 # if the comment is older than the last update
                 # do not change the status of the problem as it's
@@ -137,7 +156,7 @@ sub update_comments {
                 $comment->insert();
 
                 if ( $self->suppress_alerts ) {
-                    my @alerts = FixMyStreet::App->model('DB::Alert')->search( {
+                    my @alerts = $self->schema->resultset('Alert')->search( {
                         alert_type => 'new_updates',
                         parameter  => $p->id,
                         confirmed  => 1,
@@ -145,7 +164,7 @@ sub update_comments {
                     } );
 
                     for my $alert (@alerts) {
-                        my $alerts_sent = FixMyStreet::App->model('DB::AlertSent')->find_or_create( {
+                        my $alerts_sent = $self->schema->resultset('AlertSent')->find_or_create( {
                             alert_id  => $alert->id,
                             parameter => $comment->id,
                         } );

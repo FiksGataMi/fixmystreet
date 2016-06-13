@@ -4,23 +4,25 @@ use strict;
 use warnings;
 use Test::More;
 use CGI::Simple;
+use LWP::Protocol::PSGI;
+use t::Mock::Static;
 
 use_ok( 'Open311' );
 
 use_ok( 'Open311::GetServiceRequestUpdates' );
 use DateTime;
 use DateTime::Format::W3CDTF;
-use FixMyStreet::App;
+use FixMyStreet::DB;
 
-my $user = FixMyStreet::App->model('DB::User')->find_or_create(
+my $user = FixMyStreet::DB->resultset('User')->find_or_create(
     {
         email => 'system_user@example.com'
     }
 );
 
 my %bodies = (
-    2482 => FixMyStreet::App->model("DB::Body")->new({ id => 2482 }),
-    2651 => FixMyStreet::App->model("DB::Body")->new({ id => 2651 }),
+    2482 => FixMyStreet::DB->resultset("Body")->new({ id => 2482 }),
+    2651 => FixMyStreet::DB->resultset("Body")->new({ id => 2651 }),
 );
 
 my $requests_xml = qq{<?xml version="1.0" encoding="utf-8"?>
@@ -36,7 +38,7 @@ UPDATED_DATETIME
 };
 
 
-my $dt = DateTime->now;
+my $dt = DateTime->now(formatter => DateTime::Format::W3CDTF->new);
 
 # basic xml -> perl object tests
 for my $test (
@@ -104,7 +106,7 @@ subtest 'check extended request parsed correctly' => sub {
 
 };
 
-my $problem_rs = FixMyStreet::App->model('DB::Problem');
+my $problem_rs = FixMyStreet::DB->resultset('Problem');
 my $problem = $problem_rs->new(
     {
         postcode     => 'EH99 1SP',
@@ -353,7 +355,7 @@ for my $test (
         is $problem->comments->count, 1, 'comment count';
         $problem->discard_changes;
 
-        my $c = FixMyStreet::App->model('DB::Comment')->search( { external_id => $test->{external_id} } )->first;
+        my $c = FixMyStreet::DB->resultset('Comment')->search( { external_id => $test->{external_id} } )->first;
         ok $c, 'comment exists';
         is $c->text, $test->{description}, 'text correct';
         is $c->mark_fixed, $test->{mark_fixed}, 'mark_closed correct';
@@ -363,6 +365,31 @@ for my $test (
     };
 }
 
+subtest 'Update with media_url includes image in update' => sub {
+    my $guard = LWP::Protocol::PSGI->register(t::Mock::Static->to_psgi_app, host => 'example.com');
+
+    my $local_requests_xml = $requests_xml;
+    my $updated_datetime = sprintf( '<updated_datetime>%s</updated_datetime>', $dt );
+    $local_requests_xml =~ s/UPDATED_DATETIME/$updated_datetime/;
+    $local_requests_xml =~ s#<service_request_id>\d+</service_request_id>#
+        <service_request_id>@{[$problem->external_id]}</service_request_id>
+        <media_url>http://example.com/image.jpeg</media_url>#;
+
+    my $o = Open311->new( jurisdiction => 'mysociety', endpoint => 'http://example.com', test_mode => 1, test_get_returns => { 'servicerequestupdates.xml' => $local_requests_xml } );
+
+    $problem->comments->delete;
+    $problem->lastupdate( DateTime->now()->subtract( days => 1 ) );
+    $problem->state('confirmed');
+    $problem->update;
+
+    my $update = Open311::GetServiceRequestUpdates->new( system_user => $user );
+    $update->update_comments( $o, $bodies{2482} );
+
+    is $problem->comments->count, 1, 'comment count';
+    my $c = $problem->comments->first;
+    is $c->external_id, 638344;
+    is $c->photo, '1cdd4329ceee2234bd4e89cb33b42061a0724687.jpeg', 'photo exists';
+};
 
 foreach my $test (
     {
@@ -527,7 +554,7 @@ subtest 'check that existing comments are not duplicated' => sub {
 
     $problem->comments->delete;
 
-    my $comment = FixMyStreet::App->model('DB::Comment')->new(
+    my $comment = FixMyStreet::DB->resultset('Comment')->new(
         {
             problem => $problem,
             external_id => 638344,
@@ -544,7 +571,8 @@ subtest 'check that existing comments are not duplicated' => sub {
     is $problem->comments->count, 1, 'one comment before fetching updates';
 
     $requests_xml =~ s/UPDATED_DATETIME2/$dt/;
-    $requests_xml =~ s/UPDATED_DATETIME/@{[ $comment->confirmed ]}/;
+    my $confirmed = DateTime::Format::W3CDTF->format_datetime($comment->confirmed);
+    $requests_xml =~ s/UPDATED_DATETIME/$confirmed/;
 
     my $o = Open311->new( jurisdiction => 'mysociety', endpoint => 'http://example.com', test_mode => 1, test_get_returns => { 'servicerequestupdates.xml' => $requests_xml } );
 
@@ -569,12 +597,12 @@ subtest 'check that existing comments are not duplicated' => sub {
 
 foreach my $test ( {
         desc => 'check that closed and then open comment results in correct state',
-        dt1  => $dt->subtract( hours => 1 ),
+        dt1  => $dt->clone->subtract( hours => 1 ),
         dt2  => $dt,
     },
     {
         desc => 'check that old comments do not change problem status',
-        dt1  => $dt->subtract( hours => 2 ),
+        dt1  => $dt->clone->subtract( minutes => 90 ),
         dt2  => $dt,
     }
 ) {
@@ -600,7 +628,7 @@ foreach my $test ( {
 
         $problem->comments->delete;
         $problem->state( 'confirmed' );
-        $problem->lastupdate( $dt->subtract( hours => 3 ) );
+        $problem->lastupdate( $dt->clone->subtract( hours => 3 ) );
         $problem->update;
 
         $requests_xml =~ s/UPDATED_DATETIME/$test->{dt1}/;
@@ -656,11 +684,11 @@ foreach my $test ( {
 
         $problem->comments->delete;
         $problem->state( 'confirmed' );
-        $problem->lastupdate( $dt->subtract( hours => 3 ) );
+        $problem->lastupdate( $dt->clone->subtract( hours => 3 ) );
         $problem->update;
 
         my @alerts = map {
-            my $alert = FixMyStreet::App->model('DB::Alert')->create( {
+            my $alert = FixMyStreet::DB->resultset('Alert')->create( {
                 alert_type => 'new_updates',
                 parameter  => $problem->id,
                 confirmed  => 1,
@@ -680,7 +708,7 @@ foreach my $test ( {
         $update->update_comments( $o, $bodies{2482} );
         $problem->discard_changes;
 
-        my $alerts_sent = FixMyStreet::App->model('DB::AlertSent')->search(
+        my $alerts_sent = FixMyStreet::DB->resultset('AlertSent')->search(
             {
                 alert_id => [ map $_->id, @alerts ],
                 parameter => $problem->comments->first->id,
