@@ -2,6 +2,7 @@
     <ul id="key-tools">
         [% IF c.user_exists AND c.cobrand.users_can_hide AND c.user.belongs_to_body( c.cobrand.council_id ) %]
         <li><form method="post" action="/report/delete/[% problem.id %]" id="remove-from-site-form">
+            <input type="hidden" name="token" value="[% csrf_token %]">
             <input type="submit" id="key-tool-report-abuse" class="abuse" value="Remove from site">
         </form></li>
         [% ELSIF c.cobrand.moniker != 'zurich' %]
@@ -30,16 +31,17 @@
 
 <div id="report-updates-data" class="hidden-js">
     <form action="[% c.uri_for( '/alert/subscribe' ) %]" method="post">
-        <a href="[% c.uri_for( '/rss', problem.id ) %]">
+        <p><a href="[% c.uri_for( '/rss', problem.id ) %]">
             <img src="/i/feed.png" width="16" height="16" title="[% loc('RSS feed') %]" alt="[% loc('RSS feed of updates to this problem' ) %]" border="0">
         </a>
-        <p>[% loc('Receive email when updates are left on this problem.' ) %]</p>
+        [% loc('Receive email when updates are left on this problem.' ) %]</p>
         <fieldset>
         <label class="hidden n" for="alert_rznvy">[% loc('Your email') %]</label>
         <div class="form-txt-submit-box">
             <input type="email" name="rznvy" id="alert_rznvy" value="[% email | html %]" size="30" placeholder="[% loc('Your email') %]">
             <input class="green-btn" type="submit" value="[% loc('Subscribe') %]">
         </div>
+        <input type="hidden" name="token" value="[% csrf_token %]">
         <input type="hidden" name="id" value="[% problem.id %]">
         <input type="hidden" name="type" value="updates">
         </fieldset>
