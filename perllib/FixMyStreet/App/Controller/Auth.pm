@@ -6,8 +6,9 @@ BEGIN { extends 'Catalyst::Controller'; }
 
 use Email::Valid;
 use Net::Domain::TLD;
-use mySociety::AuthToken;
+use Digest::HMAC_SHA1 qw(hmac_sha1);
 use JSON::MaybeXS;
+use MIME::Base64;
 use Net::Facebook::Oauth2;
 use Net::Twitter::Lite::WithAPIv1_1;
 
@@ -37,16 +38,17 @@ sub general : Path : Args(0) {
     # all done unless we have a form posted to us
     return unless $c->req->method eq 'POST';
 
-    # decide which action to take
-    $c->detach('facebook_sign_in') if $c->get_param('facebook_sign_in');
-    $c->detach('twitter_sign_in') if $c->get_param('twitter_sign_in');
-
-    my $clicked_password = $c->get_param('sign_in');
     my $clicked_email = $c->get_param('email_sign_in');
+    my $data_address = $c->get_param('email');
     my $data_password = $c->get_param('password_sign_in');
     my $data_email = $c->get_param('name') || $c->get_param('password_register');
 
+    # decide which action to take
     $c->detach('email_sign_in') if $clicked_email || ($data_email && !$data_password);
+    if (!$data_address && !$data_password && !$data_email) {
+        $c->detach('facebook_sign_in') if $c->get_param('facebook_sign_in');
+        $c->detach('twitter_sign_in') if $c->get_param('twitter_sign_in');
+    }
 
        $c->forward( 'sign_in' )
     && $c->detach( 'redirect_on_signin', [ $c->get_param('r') ] );
@@ -82,6 +84,9 @@ sub sign_in : Private {
         # unless user asked to be remembered limit the session to browser
         $c->set_session_cookie_expire(0)
           unless $remember_me;
+
+        # Regenerate CSRF token as session ID changed
+        $c->forward('get_csrf_token');
 
         return 1;
     }
@@ -414,11 +419,12 @@ sub change_password : Local {
 
     $c->detach( 'redirect' ) unless $c->user;
 
-    # FIXME - CSRF check here
-    # FIXME - minimum criteria for passwords (length, contain number, etc)
+    $c->forward('get_csrf_token');
 
     # If not a post then no submission
     return unless $c->req->method eq 'POST';
+
+    $c->forward('check_csrf_token');
 
     # get the passwords
     my $new = $c->get_param('new_password') // '';
@@ -441,6 +447,38 @@ sub change_password : Local {
     $c->user->obj->update( { password => $new } );
     $c->stash->{password_changed} = 1;
 
+}
+
+sub get_csrf_token : Private {
+    my ( $self, $c ) = @_;
+
+    my $time = $c->stash->{csrf_time} || time();
+    my $hash = hmac_sha1("$time-" . ($c->sessionid || ""), $c->model('DB::Secret')->get);
+    $hash = encode_base64($hash, "");
+    $hash =~ s/=$//;
+    my $token = "$time-$hash";
+    $c->stash->{csrf_token} = $token unless $c->stash->{csrf_time};
+    return $token;
+}
+
+sub check_csrf_token : Private {
+    my ( $self, $c ) = @_;
+
+    my $token = $c->get_param('token') || "";
+    $token =~ s/ /+/g;
+    my ($time) = $token =~ /^(\d+)-[0-9a-zA-Z+\/]+$/;
+    $c->stash->{csrf_time} = $time;
+    $c->detach('no_csrf_token')
+        unless $time
+            && $time > time() - 3600
+            && $token eq $c->forward('get_csrf_token');
+    delete $c->stash->{csrf_time};
+}
+
+sub no_csrf_token : Private {
+    my ($self, $c) = @_;
+    $c->stash->{message} = _('Unknown error');
+    $c->stash->{template} = 'errors/generic.html';
 }
 
 =head2 sign_out
