@@ -1,4 +1,6 @@
-Subject: [% loc('Your FixMyStreet.com account details') %]
+Subject: Bekreft din konto på FiksGataMi.no
+
+Hei,
 
 Vennligst klikk på linken under for å bekrefte din e-post. Når dette
 er gjort vil du lett kunne holde oversikt over dine problemrapporter.
@@ -6,4 +8,3 @@ er gjort vil du lett kunne holde oversikt over dine problemrapporter.
 
 Vennlig hilsen,  
 FiksGataMi-gruppen
-
