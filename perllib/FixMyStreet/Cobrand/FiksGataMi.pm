@@ -28,6 +28,13 @@ sub disambiguate_location {
     };
 }
 
+sub pin_colour {
+    my ( $self, $p, $context ) = @_; 
+    return 'green' if $p->is_fixed || $p->is_closed;
+    return 'red' if $p->state eq 'unconfirmed' || $p->state eq 'confirmed';
+    return 'yellow';
+}
+
 sub area_types {
     my $self = shift;
     return $self->next::method() if FixMyStreet->config('STAGING_SITE') && FixMyStreet->config('SKIP_CHECKS_ON_STAGING');
