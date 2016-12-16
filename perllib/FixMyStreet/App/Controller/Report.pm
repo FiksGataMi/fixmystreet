@@ -231,13 +231,8 @@ sub generate_map_tags : Private {
         latitude  => $problem->latitude,
         longitude => $problem->longitude,
         pins      => $problem->used_map
-        ? [ {
-            latitude  => $problem->latitude,
-            longitude => $problem->longitude,
-            colour    => $c->cobrand->pin_colour($problem, 'report'),
-            type      => 'big',
-          } ]
-        : [],
+            ? [ $problem->pin_data($c, 'report', type => 'big') ]
+            : [],
     );
 
     return 1;
@@ -300,6 +295,7 @@ sub action_router : Path('') : Args(2) {
     my ( $self, $c, $id, $action ) = @_;
 
     $c->go( 'map', [ $id ] ) if $action eq 'map';
+    $c->go( 'nearby_json', [ $id ] ) if $action eq 'nearby.json';
 
     $c->detach( '/page_error_404_not_found', [] );
 }
@@ -312,15 +308,38 @@ sub inspect : Private {
     $c->stash->{categories} = $c->forward('/admin/categories_for_point');
     $c->stash->{report_meta} = { map { $_->{name} => $_ } @{ $c->stash->{problem}->get_extra_fields() } };
 
+    my %category_body = map { $_->category => $_->body_id } map { $_->contacts->all } values %{$problem->bodies};
+
+    my @priorities = $c->model('DB::ResponsePriority')->for_bodies($problem->bodies_str_ids)->all;
+    my $priorities_by_category = {};
+    foreach my $pri (@priorities) {
+        my $any = 0;
+        foreach ($pri->contacts->all) {
+            $any = 1;
+            push @{$priorities_by_category->{$_->category}}, $pri->id . '=' . URI::Escape::uri_escape_utf8($pri->name);
+        }
+        if (!$any) {
+            foreach (grep { $category_body{$_} == $pri->body_id } @{$c->stash->{categories}}) {
+                push @{$priorities_by_category->{$_}}, $pri->id . '=' . URI::Escape::uri_escape_utf8($pri->name);
+            }
+        }
+    }
+    foreach (keys %{$priorities_by_category}) {
+        $priorities_by_category->{$_} = join('&', @{$priorities_by_category->{$_}});
+    }
+
+    $c->stash->{priorities_by_category} = $priorities_by_category;
+
     if ( $c->get_param('save') ) {
         $c->forward('/auth/check_csrf_token');
 
         my $valid = 1;
         my $update_text;
         my $reputation_change = 0;
+        my %update_params = ();
 
         if ($permissions->{report_inspect}) {
-            foreach (qw/detailed_information traffic_information/) {
+            foreach (qw/detailed_information traffic_information duplicate_of/) {
                 $problem->set_extra_metadata( $_ => $c->get_param($_) );
             }
 
@@ -345,13 +364,17 @@ sub inspect : Private {
             if ( $problem->state eq 'hidden' ) {
                 $problem->get_photoset->delete_cached;
             }
+            if ( $problem->state eq 'duplicate' && $old_state ne 'duplicate' ) {
+                # If the report is being closed as duplicate, make sure the
+                # update records this.
+                $update_params{problem_state} = "duplicate";
+            }
+            if ( $problem->state ne 'duplicate' ) {
+                $problem->unset_extra_metadata('duplicate_of');
+            }
             if ( $problem->state ne $old_state ) {
                 $c->forward( '/admin/log_edit', [ $problem->id, 'problem', 'state_change' ] );
             }
-        }
-
-        if ($c->get_param('priority') && ($permissions->{report_inspect} || $permissions->{report_edit_priority})) {
-            $problem->response_priority( $problem->response_priorities->find({ id => $c->get_param('priority') }) );
         }
 
         if ( !$c->forward( '/admin/report_edit_location', [ $problem ] ) ) {
@@ -373,10 +396,16 @@ sub inspect : Private {
             $c->forward('/report/new/set_report_extras', [ \@contacts, $param_prefix ]);
         }
 
+        # Updating priority must come after category, in case category has changed (and so might have priorities)
+        if ($c->get_param('priority') && ($permissions->{report_inspect} || $permissions->{report_edit_priority})) {
+            $problem->response_priority( $problem->response_priorities->find({ id => $c->get_param('priority') }) );
+        }
+
         if ($valid) {
             if ( $reputation_change != 0 ) {
                 $problem->user->update_reputation($reputation_change);
             }
+            $problem->lastupdate( \'current_timestamp' );
             $problem->update;
             if ( defined($update_text) ) {
                 $problem->add_to_comments( {
@@ -388,6 +417,7 @@ sub inspect : Private {
                     state => 'confirmed',
                     mark_fixed => 0,
                     anonymous => 0,
+                    %update_params,
                 } );
             }
             # This problem might no longer be visible on the current cobrand,
@@ -413,6 +443,38 @@ sub map : Private {
     my $image = $c->stash->{problem}->static_map;
     $c->res->content_type($image->{content_type});
     $c->res->body($image->{data});
+}
+
+
+sub nearby_json : Private {
+    my ( $self, $c, $id ) = @_;
+
+    $c->forward( 'load_problem_or_display_error', [ $id ] );
+    my $p = $c->stash->{problem};
+    my $dist = 1000;
+
+    my $nearby = $c->model('DB::Nearby')->nearby(
+        $c, $dist, [ $p->id ], 5, $p->latitude, $p->longitude, undef, [ $p->category ], undef
+    );
+    my @pins = map {
+        my $p = $_->problem;
+        my $colour = $c->cobrand->pin_colour( $p, 'around' );
+        [ $p->latitude, $p->longitude,
+          $colour,
+          $p->id, $p->title_safe, 'small', JSON->false
+        ]
+    } @$nearby;
+
+    my $on_map_list_html = $c->render_fragment(
+        'around/on_map_list_items.html',
+        { on_map => [], around_map => $nearby }
+    );
+
+    my $json = { pins => \@pins };
+    $json->{current} = $on_map_list_html if $on_map_list_html;
+    my $body = encode_json($json);
+    $c->res->content_type('application/json; charset=utf-8');
+    $c->res->body($body);
 }
 
 

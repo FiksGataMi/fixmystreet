@@ -181,6 +181,7 @@ use namespace::clean -except => [ 'meta' ];
 use Utils;
 use FixMyStreet::Map::FMS;
 use LWP::Simple qw($ua);
+use RABX;
 
 my $IM = eval {
     require Image::Magick;
@@ -475,7 +476,7 @@ sub confirm {
 
 sub bodies_str_ids {
     my $self = shift;
-    return unless $self->bodies_str;
+    return [] unless $self->bodies_str;
     my @bodies = split( /,/, $self->bodies_str );
     return \@bodies;
 }
@@ -680,16 +681,7 @@ alphabetical order of name.
 
 sub response_priorities {
     my $self = shift;
-    return $self->result_source->schema->resultset('ResponsePriority')->search(
-        {
-            'me.body_id' => $self->bodies_str_ids,
-            'contact.category' => [ $self->category, undef ],
-        },
-        {
-            order_by => 'name',
-            join => { 'contact_response_priorities' => 'contact' },
-        }
-    );
+    return $self->result_source->schema->resultset('ResponsePriority')->for_bodies($self->bodies_str_ids, $self->category);
 }
 
 # returns true if the external id is the council's ref, i.e., useful to publish it
@@ -941,6 +933,7 @@ sub pin_data {
         id => $self->id,
         title => $opts{private} ? $self->title : $self->title_safe,
         problem => $self,
+        type => $opts{type},
     }
 };
 
@@ -1029,6 +1022,29 @@ has shortlisted_user => (
         my $self = shift;
         my $user = $self->user_planned_reports->active->first;
         return $user->user if $user;
+    },
+);
+
+has duplicate_of => (
+    is => 'ro',
+    lazy => 1,
+    default => sub {
+        my $self = shift;
+        return unless $self->state eq 'duplicate';
+        my $duplicate_of = int($self->get_extra_metadata("duplicate_of") || 0);
+        return unless $duplicate_of;
+        return $self->result_source->schema->resultset('Problem')->search({ id => $duplicate_of })->first;
+    },
+);
+
+has duplicates => (
+    is => 'ro',
+    lazy => 1,
+    default => sub {
+        my $self = shift;
+        my $rabx_id = RABX::serialise( $self->id );
+        my @duplicates = $self->result_source->schema->resultset('Problem')->search({ extra => { like => "\%duplicate_of,$rabx_id%" } })->all;
+        return \@duplicates;
     },
 );
 
