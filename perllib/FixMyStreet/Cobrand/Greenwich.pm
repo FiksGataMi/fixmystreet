@@ -55,4 +55,19 @@ sub contact_email {
     return join( '@', 'fixmystreet', 'royalgreenwich.gov.uk' );
 }
 
+sub reports_per_page { return 20; }
+
+sub on_map_default_max_pin_age {
+    return '21 days';
+}
+
+sub open311_config {
+    my ($self, $row, $h, $params) = @_;
+
+    my $extra = $row->get_extra_fields;
+    # Greenwich doesn't have category metadata to fill this
+    push @$extra, { name => 'external_id', value => $row->id };
+    $row->set_extra_fields( @$extra );
+}
+
 1;

@@ -158,9 +158,28 @@ $right: right;
   flex: $values;
 }
 
+@mixin flex-wrap($wrap) {
+  -webkit-box-wrap: $wrap;
+  -webkit-flex-wrap: $wrap;
+  -ms-flex-wrap: $wrap;
+  flex-wrap: $wrap;
+}
+
 @mixin flex-align($alignment) {
   -webkit-box-align: $alignment;
   -webkit-align-items: $alignment;
   -ms-flex-align: $alignment;
   align-items: $alignment;
+}
+
+@mixin high-dpi-background-image($path) {
+  background-image: url("#{$path}.png");
+
+  @media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+    background-image: url("#{$path}@2x.png");
+  }
+
+  @media screen {
+    background-image: url("#{$path}.svg"), none;
+  }
 }

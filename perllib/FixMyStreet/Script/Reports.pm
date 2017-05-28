@@ -28,7 +28,7 @@ sub send(;$) {
     my $base_url = FixMyStreet->config('BASE_URL');
     my $site = $site_override || CronFns::site($base_url);
 
-    my $states = [ 'confirmed', 'fixed' ];
+    my $states = [ FixMyStreet::DB::Result::Problem::open_states() ];
     $states = [ 'unconfirmed', 'confirmed', 'in progress', 'planned', 'closed', 'investigating' ] if $site eq 'zurich';
     my $unsent = $rs->search( {
         state => $states,
@@ -112,9 +112,7 @@ sub send(;$) {
             $h{user_details} .= sprintf(_('Email: %s'), $row->user->email) . "\n\n";
         }
 
-        if ($cobrand->can('process_additional_metadata_for_email')) {
-            $cobrand->process_additional_metadata_for_email($row, \%h);
-        }
+        $cobrand->call_hook(process_additional_metadata_for_email => $row, \%h);
 
         my $bodies = FixMyStreet::DB->resultset('Body')->search(
             { id => $row->bodies_str_ids },
@@ -211,7 +209,7 @@ sub send(;$) {
               . " ]\n\n";
         }
 
-        if (FixMyStreet->config('STAGING_SITE') && !FixMyStreet->config('SEND_REPORTS_ON_STAGING')) {
+        if (FixMyStreet->staging_flag('send_reports', 0)) {
             # on a staging server send emails to ourselves rather than the bodies
             %reporters = map { $_ => $reporters{$_} } grep { /FixMyStreet::SendReport::Email/ } keys %reporters;
             unless (%reporters) {
@@ -276,7 +274,7 @@ sub send(;$) {
         }
         my $sending_errors = '';
         my $unsent = $rs->search( {
-            state => [ 'confirmed', 'fixed' ],
+            state => [ FixMyStreet::DB::Result::Problem::open_states() ],
             whensent => undef,
             bodies_str => { '!=', undef },
             send_fail_count => { '>', 0 }

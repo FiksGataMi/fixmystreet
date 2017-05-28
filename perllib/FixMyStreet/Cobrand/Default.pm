@@ -209,14 +209,14 @@ sub base_url { FixMyStreet->config('BASE_URL') }
 =head2 base_url_for_report
 
 Return the base url for a report (might be different in a two-tier county, but
-most of the time will be same as base_url). Report may be an object, or a
-hashref.
+most of the time will be same as base_url_with_lang). Report may be an object,
+or a hashref.
 
 =cut
 
 sub base_url_for_report {
     my ( $self, $report ) = @_;
-    return $self->base_url;
+    return $self->base_url_with_lang;
 }
 
 =head2 base_host
@@ -646,27 +646,26 @@ sub admin_pages {
         $pages->{config} = [ _('Configuration'), 9];
     };
     # And some that need special permissions
-    if ( $user->is_superuser || $user->has_body_permission_to('category_edit') ) {
+    if ( $user->has_body_permission_to('category_edit') ) {
         my $page_title = $user->is_superuser ? _('Bodies') : _('Categories');
         $pages->{bodies} = [ $page_title, 1 ];
         $pages->{body} = [ undef, undef ];
     }
-    if ( $user->is_superuser || $user->has_body_permission_to('report_edit') ) {
+    if ( $user->has_body_permission_to('report_edit') ) {
         $pages->{reports} = [ _('Reports'), 2 ];
         $pages->{report_edit} = [ undef, undef ];
         $pages->{update_edit} = [ undef, undef ];
         $pages->{abuse_edit} = [ undef, undef ];
     }
-    if ( $user->is_superuser || $user->has_body_permission_to('template_edit') ) {
+    if ( $user->has_body_permission_to('template_edit') ) {
         $pages->{templates} = [ _('Templates'), 3 ];
         $pages->{template_edit} = [ undef, undef ];
     };
-    if ( $user->is_superuser || $user->has_body_permission_to('responsepriority_edit') ) {
+    if ( $user->has_body_permission_to('responsepriority_edit') ) {
         $pages->{responsepriorities} = [ _('Priorities'), 4 ];
         $pages->{responsepriority_edit} = [ undef, undef ];
     };
-
-    if ( $user->is_superuser || $user->has_body_permission_to('user_edit') ) {
+    if ( $user->has_body_permission_to('user_edit') ) {
         $pages->{users} = [ _('Users'), 6 ];
         $pages->{user_edit} = [ undef, undef ];
     }
@@ -713,6 +712,7 @@ sub available_permissions {
             planned_reports => _("Manage shortlist"),
             contribute_as_another_user => _("Create reports/updates on a user's behalf"),
             contribute_as_body => _("Create reports/updates as the council"),
+            view_body_contribute_details => _("See user detail for reports created as the council"),
 
             # NB this permission is special in that it can be assigned to users
             # without their from_body being set. It's included here for
@@ -873,13 +873,11 @@ sub get_body_sender {
 
     # look up via category
     my $contact = $body->contacts->search( { category => $category } )->first;
-    if ( $body->can_be_devolved ) {
-        if ( $contact->send_method ) {
-            return { method => $contact->send_method, config => $contact, contact => $contact };
-        } else {
-            return { method => $body->send_method, config => $body, contact => $contact };
-        }
-    } elsif ( $body->send_method ) {
+    if ( $body->can_be_devolved && $contact->send_method ) {
+        return { method => $contact->send_method, config => $contact, contact => $contact };
+    }
+
+    if ( $body->send_method ) {
         return { method => $body->send_method, config => $body, contact => $contact };
     }
 
@@ -1186,5 +1184,33 @@ sub category_extra_hidden {
     my ($self, $meta) = @_;
 	return 0;
 }
+
+=head2 reputation_increment_states/reputation_decrement_states
+
+Get a hashref of states that cause the reporting user's reputation to be
+incremented/decremented, if a report is changed to this state upon inspection.
+
+=cut
+
+sub reputation_increment_states { {} };
+sub reputation_decrement_states { {} };
+
+sub traffic_management_options {
+    return [
+        _("Yes"),
+        _("No"),
+    ];
+}
+
+
+=head2 display_days_ago_threshold
+
+Used to control whether a relative 'n days ago' or absolute date is shown
+for problems/updates. If a problem/update's `days_ago` value is <= this figure,
+the 'n days ago' format is used. By default the absolute date is always used.
+
+=cut
+sub display_days_ago_threshold { 0 }
+
 
 1;

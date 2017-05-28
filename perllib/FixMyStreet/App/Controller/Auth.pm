@@ -70,6 +70,7 @@ sub sign_in : Private {
     my ( $self, $c, $email ) = @_;
 
     $email ||= $c->get_param('email') || '';
+    $email = lc $email;
     my $password = $c->get_param('password_sign_in') || '';
     my $remember_me = $c->get_param('remember_me') || 0;
 
@@ -103,7 +104,7 @@ sub sign_in : Private {
 
 Email the user the details they need to sign in. Don't check for an account - if
 there isn't one we can create it when they come back with a token (which
-contains the email addresss).
+contains the email address).
 
 =cut
 
@@ -222,7 +223,7 @@ sub token : Path('/M') : Args(1) {
     $c->authenticate( { email => $user->email }, 'no_password' );
 
     # send the user to their page
-    $c->detach( 'redirect_on_signin', [ $data->{r} ] );
+    $c->detach( 'redirect_on_signin', [ $data->{r}, $data->{p} ] );
 }
 
 =head2 facebook_sign_in
@@ -271,9 +272,8 @@ sub facebook_callback: Path('/auth/Facebook') : Args(0) {
         $access_token = $fb->get_access_token(code => $c->get_param('code'));
     };
     if ($@) {
-        ($c->stash->{message} = $@) =~ s/at [^ ]*Auth.pm.*//;
-        $c->stash->{template} = 'errors/generic.html';
-        $c->detach;
+        (my $message = $@) =~ s/at [^ ]*Auth.pm.*//;
+        $c->detach('/page_error_500_internal_error', [ $message ]);
     }
 
     # save this token in session
@@ -339,9 +339,8 @@ sub twitter_callback: Path('/auth/Twitter') : Args(0) {
         $twitter->request_access_token(verifier => $verifier);
     };
     if ($@) {
-        ($c->stash->{message} = $@) =~ s/at [^ ]*Auth.pm.*//;
-        $c->stash->{template} = 'errors/generic.html';
-        $c->detach;
+        (my $message = $@) =~ s/at [^ ]*Auth.pm.*//;
+        $c->detach('/page_error_500_internal_error', [ $message ]);
     }
 
     my $info = $twitter->verify_credentials();
@@ -412,13 +411,36 @@ Used after signing in to take the person back to where they were.
 
 
 sub redirect_on_signin : Private {
-    my ( $self, $c, $redirect ) = @_;
-    $redirect = 'my' unless $redirect;
-    $redirect = 'my' if $redirect =~ /^admin/ && !$c->user->is_superuser;
+    my ( $self, $c, $redirect, $params ) = @_;
+    unless ( $redirect ) {
+        $c->detach('redirect_to_categories') if $c->user->from_body && scalar @{ $c->user->categories };
+        $redirect = 'my';
+    }
+    $redirect = 'my' if $redirect =~ /^admin/ && !$c->cobrand->admin_allow_user($c->user);
     if ( $c->cobrand->moniker eq 'zurich' ) {
         $redirect = 'admin' if $c->user->from_body;
     }
-    $c->res->redirect( $c->uri_for( "/$redirect" ) );
+    if (defined $params) {
+        $c->res->redirect( $c->uri_for( "/$redirect", $params ) );
+    } else {
+        $c->res->redirect( $c->uri_for( "/$redirect" ) );
+    }
+}
+
+=head2 redirect_to_categories
+
+Redirects the user to their body's reports page, prefiltered to whatever
+categories this user has been assigned to.
+
+=cut
+
+sub redirect_to_categories : Private {
+    my ( $self, $c ) = @_;
+
+    my $categories = join(',', @{ $c->user->categories });
+    my $body_short = $c->cobrand->short_name( $c->user->from_body );
+
+    $c->res->redirect( $c->uri_for( "/reports/" . $body_short, { filter_category => $categories } ) );
 }
 
 =head2 redirect
@@ -518,17 +540,17 @@ sub check_csrf_token : Private {
     $token =~ s/ /+/g;
     my ($time) = $token =~ /^(\d+)-[0-9a-zA-Z+\/]+$/;
     $c->stash->{csrf_time} = $time;
+    my $gen_token = $c->forward('get_csrf_token');
+    delete $c->stash->{csrf_time};
     $c->detach('no_csrf_token')
         unless $time
             && $time > time() - 3600
-            && $token eq $c->forward('get_csrf_token');
-    delete $c->stash->{csrf_time};
+            && $token eq $gen_token;
 }
 
 sub no_csrf_token : Private {
     my ($self, $c) = @_;
-    $c->stash->{message} = _('Unknown error');
-    $c->stash->{template} = 'errors/generic.html';
+    $c->detach('/page_error_400_bad_request', []);
 }
 
 =head2 sign_out

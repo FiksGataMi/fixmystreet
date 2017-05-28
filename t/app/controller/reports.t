@@ -107,7 +107,7 @@ is $stats->{'Fife Council'}->[4], 3, 'correct number of fixed reports for Fife';
 is $stats->{'Fife Council'}->[5], 1, 'correct number of older fixed reports for Fife';
 
 FixMyStreet::override_config {
-    MAPIT_URL => 'http://mapit.mysociety.org/',
+    MAPIT_URL => 'http://mapit.uk/',
 }, sub {
     $mech->follow_link_ok( { text_regex => qr/Birmingham/ } );
     $mech->get_ok('/reports/Westminster');
@@ -121,7 +121,7 @@ my $problems = $mech->extract_problem_list;
 is scalar @$problems, 5, 'correct number of problems displayed';
 
 FixMyStreet::override_config {
-    MAPIT_URL => 'http://mapit.mysociety.org/',
+    MAPIT_URL => 'http://mapit.uk/',
 }, sub {
     $mech->get_ok('/reports');
     $mech->follow_link_ok({ url_regex => qr{/reports/Electricity_Gas\+Council} });
@@ -133,7 +133,7 @@ $problems = $mech->extract_problem_list;
 is scalar @$problems, 2, 'correct number of new problems displayed';
 
 FixMyStreet::override_config {
-    MAPIT_URL => 'http://mapit.mysociety.org/',
+    MAPIT_URL => 'http://mapit.uk/',
 }, sub {
     $mech->get_ok('/reports/City+of+Edinburgh?t=older');
 };
@@ -169,7 +169,7 @@ for my $test (
 ) {
     subtest $test->{desc} => sub {
         FixMyStreet::override_config {
-            MAPIT_URL => 'http://mapit.mysociety.org/',
+            MAPIT_URL => 'http://mapit.uk/',
         }, sub {
             $mech->get_ok('/reports/Fife+Council?t=' . $test->{type});
         };
@@ -183,7 +183,7 @@ my $private = $westminster_problems[2];
 ok $private->update( { non_public => 1 } ), 'problem marked non public';
 
 FixMyStreet::override_config {
-    MAPIT_URL => 'http://mapit.mysociety.org/',
+    MAPIT_URL => 'http://mapit.uk/',
 }, sub {
     $mech->get_ok('/reports/Westminster');
 };
@@ -213,7 +213,7 @@ subtest "test fiksgatami all reports page" => sub {
 subtest "test greenwich all reports page" => sub {
     FixMyStreet::override_config {
         ALLOWED_COBRANDS => [ 'greenwich' ],
-        MAPIT_URL => 'http://mapit.mysociety.org/'
+        MAPIT_URL => 'http://mapit.uk/'
     }, sub {
         my $body = $mech->create_body_ok(2493, 'Royal Borough of Greenwich');
         my $deleted_contact = $mech->create_contact_ok(
@@ -233,5 +233,54 @@ subtest "test greenwich all reports page" => sub {
     }
 };
 
-done_testing();
+subtest "it lists shortlisted reports" => sub {
+    FixMyStreet::override_config {
+        MAPIT_URL => 'http://mapit.uk/'
+    }, sub {
+        my $body = FixMyStreet::App->model('DB::Body')->find( $body_edin_id );
+        my $user = $mech->log_in_ok( 'test@example.com' );
+        $user->update({ from_body => $body });
+        $user->user_body_permissions->find_or_create({
+            body => $body,
+            permission_type => 'planned_reports',
+        });
 
+        my ($shortlisted_problem) = $mech->create_problems_for_body(1, $body_edin_id, 'Shortlisted report');
+        my ($unshortlisted_problem) = $mech->create_problems_for_body(1, $body_edin_id, 'Unshortlisted report');
+        my ($removed_from_shortlist_problem) = $mech->create_problems_for_body(1, $body_edin_id, 'Removed from shortlist report');
+
+        $user->add_to_planned_reports($shortlisted_problem);
+        $user->add_to_planned_reports($removed_from_shortlist_problem);
+        $user->remove_from_planned_reports($removed_from_shortlist_problem);
+
+        $mech->get_ok('/reports/City+of+Edinburgh+Council');
+        $mech->content_contains('<option value="shortlisted">Shortlisted</option>');
+        $mech->content_contains('<option value="unshortlisted">Unshortlisted</option>');
+
+        $mech->get_ok('/reports/City+of+Edinburgh+Council?status=shortlisted');
+
+        $mech->content_contains('Shortlisted report');
+        $mech->content_lacks('Unshortlisted report');
+        $mech->content_lacks('Removed from shortlist report');
+
+        $mech->get_ok('/reports/City+of+Edinburgh+Council?status=shortlisted,open');
+
+        $mech->content_contains('Shortlisted report');
+        $mech->content_lacks('Unshortlisted report');
+        $mech->content_lacks('Removed from shortlist report');
+
+        $mech->get_ok('/reports/City+of+Edinburgh+Council?status=unshortlisted,open');
+
+        $mech->content_contains('Unshortlisted report');
+        $mech->content_contains('Removed from shortlist report');
+        $mech->content_lacks('Shortlisted report');
+
+        $user->admin_user_body_permissions->delete;
+
+        $mech->get_ok('/reports/City+of+Edinburgh+Council');
+        $mech->content_lacks('<option value="shortlisted">Shortlisted</option>');
+        $mech->content_lacks('<option value="unshortlisted">Unshortlisted</option>');
+    };
+};
+
+done_testing();

@@ -76,13 +76,12 @@ sub index : Path : Args(0) {
         $c->stash->{open} = $j->{open};
     };
     if ($@) {
-        $c->stash->{message} = _("There was a problem showing the All Reports page. Please try again later.");
+        my $message = _("There was a problem showing the All Reports page. Please try again later.");
         if ($c->config->{STAGING_SITE}) {
-            $c->stash->{message} .= '</p><p>Perhaps the bin/update-all-reports script needs running. Use: bin/update-all-reports</p><p>'
+            $message .= '</p><p>Perhaps the bin/update-all-reports script needs running. Use: bin/update-all-reports</p><p>'
                 . sprintf(_('The error was: %s'), $@);
         }
-        $c->stash->{template} = 'errors/generic.html';
-        return;
+        $c->detach('/page_error_500_internal_error', [ $message ]);
     }
 
     # Down here so that error pages aren't cached.
@@ -108,6 +107,8 @@ Show the summary page for a particular ward.
 
 sub ward : Path : Args(2) {
     my ( $self, $c, $body, $ward ) = @_;
+
+    $c->forward('/auth/get_csrf_token');
 
     $c->forward( 'body_check', [ $body ] );
     $c->forward( 'ward_check', [ $ward ] )
@@ -136,7 +137,7 @@ sub ward : Path : Args(2) {
     } )->all;
     @categories = map { $_->category } @categories;
     $c->stash->{filter_categories} = \@categories;
-    $c->stash->{filter_category} = [ $c->get_param_list('filter_category', 1) ];
+    $c->stash->{filter_category} = { map { $_ => 1 } $c->get_param_list('filter_category', 1) };
 
     my $pins = $c->stash->{pins};
 
@@ -377,6 +378,25 @@ sub load_and_group_problems : Private {
         non_public => 0,
         state      => [ keys %$states ]
     };
+    my $filter = {
+        order_by => $c->stash->{sort_order},
+        rows => $c->cobrand->reports_per_page,
+    };
+
+    if (defined $c->stash->{filter_status}{shortlisted}) {
+        $where->{'me.id'} = { '=', \"user_planned_reports.report_id"};
+        $where->{'user_planned_reports.removed'} = undef;
+        $filter->{join} = 'user_planned_reports';
+    } elsif (defined $c->stash->{filter_status}{unshortlisted}) {
+        my $shortlisted_ids = $c->cobrand->problems->search({
+            'me.id' => { '=', \"user_planned_reports.report_id"},
+            'user_planned_reports.removed' => undef,
+        }, {
+           join => 'user_planned_reports',
+           columns => ['me.id'],
+        })->as_query;
+        $where->{'me.id'} = { -not_in => $shortlisted_ids };
+    }
 
     my $not_open = [ FixMyStreet::DB::Result::Problem::fixed_states(), FixMyStreet::DB::Result::Problem::closed_states() ];
     if ( $type eq 'new' ) {
@@ -410,13 +430,17 @@ sub load_and_group_problems : Private {
         $problems = $problems->to_body($c->stash->{body});
     }
 
+    if (my $bbox = $c->get_param('bbox')) {
+        my ($min_lon, $min_lat, $max_lon, $max_lat) = split /,/, $bbox;
+        $where->{latitude} = { '>=', $min_lat, '<', $max_lat };
+        $where->{longitude} = { '>=', $min_lon, '<', $max_lon };
+    }
+
     $problems = $problems->search(
         $where,
-        {
-            order_by => $c->stash->{sort_order},
-            rows => $c->cobrand->reports_per_page,
-        }
+        $filter
     )->include_comment_counts->page( $page );
+
     $c->stash->{pager} = $problems->pager;
 
     my ( %problems, @pins );
@@ -499,6 +523,19 @@ sub stash_report_filter_status : Private {
         %filter_problem_states = %$s;
     }
 
+    if ($status{shortlisted}) {
+        $filter_status{shortlisted} = 1;
+    }
+
+    if ($status{unshortlisted}) {
+        $filter_status{unshortlisted} = 1;
+    }
+
+    if (keys %filter_problem_states == 0) {
+      my $s = FixMyStreet::DB::Result::Problem->open_states();
+      %filter_problem_states = (%filter_problem_states, %$s);
+    }
+
     $c->stash->{filter_problem_states} = \%filter_problem_states;
     $c->stash->{filter_status} = \%filter_status;
     return 1;
@@ -514,13 +551,17 @@ sub stash_report_sort : Private {
     );
 
     my $sort = $c->get_param('sort') || $default;
-    $sort = $default unless $sort =~ /^((updated|created)-(desc|asc)|comments-desc)$/;
+    $sort = $default unless $sort =~ /^((updated|created)-(desc|asc)|comments-desc|shortlist)$/;
+    $c->stash->{sort_key} = $sort;
+
+    # Going to do this sorting code-side
+    $sort = 'created-desc' if $sort eq 'shortlist';
+
     $sort =~ /^(updated|created|comments)-(desc|asc)$/;
     my $order_by = $types{$1} || $1;
     my $dir = $2;
     $order_by = { -desc => $order_by } if $dir eq 'desc';
 
-    $c->stash->{sort_key} = $sort;
     $c->stash->{sort_order} = $order_by;
     return 1;
 }
@@ -572,4 +613,3 @@ Licensed under the Affero GPL.
 __PACKAGE__->meta->make_immutable;
 
 1;
-

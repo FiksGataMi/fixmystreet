@@ -56,6 +56,12 @@ __PACKAGE__->belongs_to(
   { is_deferrable => 0, on_delete => "NO ACTION", on_update => "NO ACTION" },
 );
 __PACKAGE__->has_many(
+  "contact_defect_types",
+  "FixMyStreet::DB::Result::ContactDefectType",
+  { "foreign.contact_id" => "self.id" },
+  { cascade_copy => 0, cascade_delete => 0 },
+);
+__PACKAGE__->has_many(
   "contact_response_priorities",
   "FixMyStreet::DB::Result::ContactResponsePriority",
   { "foreign.contact_id" => "self.id" },
@@ -69,8 +75,8 @@ __PACKAGE__->has_many(
 );
 
 
-# Created by DBIx::Class::Schema::Loader v0.07035 @ 2016-09-06 15:33:04
-# DO NOT MODIFY THIS OR ANYTHING ABOVE! md5sum:ocmQGeFJtO3wmvyx6W+EKQ
+# Created by DBIx::Class::Schema::Loader v0.07035 @ 2017-02-13 15:11:11
+# DO NOT MODIFY THIS OR ANYTHING ABOVE! md5sum:f9VepR/oPyr3z6PUpJ4w2A
 
 __PACKAGE__->load_components("+FixMyStreet::DB::RABXColumn");
 __PACKAGE__->rabx_column('extra');
@@ -82,11 +88,12 @@ with 'FixMyStreet::Roles::Extra';
 
 __PACKAGE__->many_to_many( response_templates => 'contact_response_templates', 'response_template' );
 __PACKAGE__->many_to_many( response_priorities => 'contact_response_priorities', 'response_priority' );
+__PACKAGE__->many_to_many( defect_types => 'contact_defect_types', 'defect_type' );
 
 sub get_metadata_for_input {
     my $self = shift;
     my $id_field = $self->id_field;
-    my @metadata = grep { $_->{code} !~ /^(easting|northing|$id_field)$/ } @{$self->get_extra_fields};
+    my @metadata = grep { $_->{code} !~ /^(easting|northing|closest_address|$id_field)$/ } @{$self->get_extra_fields};
 
     # Just in case the extra data is in an old parsed format
     foreach (@metadata) {

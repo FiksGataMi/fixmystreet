@@ -7,7 +7,7 @@ BEGIN { extends 'Catalyst::Controller'; }
 use Path::Class;
 use POSIX qw(strftime strcoll);
 use Digest::SHA qw(sha1_hex);
-use mySociety::EmailUtil qw(is_valid_email);
+use mySociety::EmailUtil qw(is_valid_email is_valid_email_list);
 use mySociety::ArrayUtils;
 use DateTime::Format::Strptime;
 use List::Util 'first';
@@ -78,7 +78,7 @@ sub index : Path : Args(0) {
     $c->forward('stats_by_state');
 
     my @unsent = $c->cobrand->problems->search( {
-        state => [ 'confirmed' ],
+        state => [ FixMyStreet::DB::Result::Problem::open_states() ],
         whensent => undef,
         bodies_str => { '!=', undef },
     } )->all;
@@ -357,10 +357,11 @@ sub update_contacts : Private {
             }
         );
 
-        my $email = $self->trim( $c->get_param('email') );
+        my $email = $c->get_param('email');
+        $email =~ s/\s+//g;
         my $send_method = $c->get_param('send_method') || $contact->send_method || $contact->body->send_method || "";
         unless ( $send_method eq 'Open311' ) {
-            $errors{email} = _('Please enter a valid email') unless is_valid_email($email) || $email eq 'REFUSED';
+            $errors{email} = _('Please enter a valid email') unless is_valid_email_list($email) || $email eq 'REFUSED';
         }
 
         $contact->email( $email );
@@ -732,7 +733,7 @@ sub report_edit : Path('report_edit') : Args(1) {
         }
     }
 
-    $c->stash->{categories} = $c->forward('categories_for_point');
+    $c->forward('categories_for_point');
 
     if ( $c->cobrand->moniker eq 'zurich' ) {
         my $done = $c->cobrand->admin_report_edit();
@@ -789,11 +790,9 @@ sub report_edit : Path('report_edit') : Args(1) {
 
         $c->forward( '/admin/report_edit_category', [ $problem ] );
 
-        if ( $c->get_param('email') ne $problem->user->email ) {
-            my $user = $c->model('DB::User')->find_or_create(
-                { email => $c->get_param('email') }
-            );
-
+        my $email = lc $c->get_param('email');
+        if ( $email ne $problem->user->email ) {
+            my $user = $c->model('DB::User')->find_or_create({ email => $email });
             $user->insert unless $user->in_storage;
             $problem->user( $user );
         }
@@ -910,7 +909,8 @@ sub categories_for_point : Private {
     # Remove the "Pick a category" option
     shift @{$c->stash->{category_options}} if @{$c->stash->{category_options}};
 
-    return $c->stash->{category_options};
+    $c->stash->{categories} = $c->stash->{category_options};
+    $c->stash->{categories_hash} = { map { $_ => 1 } @{$c->stash->{category_options}} };
 }
 
 sub templates : Path('templates') : Args(0) {
@@ -978,6 +978,7 @@ sub template_edit : Path('templates') : Args(2) {
         } else {
             $template->title( $c->get_param('title') );
             $template->text( $c->get_param('text') );
+            $template->state( $c->get_param('state') );
             $template->auto_response( $c->get_param('auto_response') ? 1 : 0 );
             $template->update_or_insert;
 
@@ -1005,10 +1006,9 @@ sub load_template_body : Private {
     my ($self, $c, $body_id) = @_;
 
     my $zurich_user = $c->user->from_body && $c->cobrand->moniker eq 'zurich';
-    my $has_permission = $c->user->has_body_permission_to('template_edit') &&
-                         $c->user->from_body->id eq $body_id;
+    my $has_permission = $c->user->has_body_permission_to('template_edit', $body_id);
 
-    unless ( $c->user->is_superuser || $zurich_user || $has_permission ) {
+    unless ( $zurich_user || $has_permission ) {
         $c->detach( '/page_error_404_not_found', [] );
     }
 
@@ -1117,8 +1117,9 @@ sub update_edit : Path('update_edit') : Args(1) {
         # $update->name can be null which makes ne unhappy
         my $name = $update->name || '';
 
+        my $email = lc $c->get_param('email');
         if ( $c->get_param('name') ne $name
-          || $c->get_param('email') ne $update->user->email
+          || $email ne $update->user->email
           || $c->get_param('anonymous') ne $update->anonymous
           || $c->get_param('text') ne $update->text ) {
               $edited = 1;
@@ -1138,11 +1139,8 @@ sub update_edit : Path('update_edit') : Args(1) {
         $update->anonymous( $c->get_param('anonymous') );
         $update->state( $new_state );
 
-        if ( $c->get_param('email') ne $update->user->email ) {
-            my $user =
-              $c->model('DB::User')
-              ->find_or_create( { email => $c->get_param('email') } );
-
+        if ( $email ne $update->user->email ) {
+            my $user = $c->model('DB::User')->find_or_create({ email => $email });
             $user->insert unless $user->in_storage;
             $update->user($user);
         }
@@ -1207,7 +1205,7 @@ sub user_add : Path('user_edit') : Args(0) {
 
     my $user = $c->model('DB::User')->find_or_create( {
         name => $c->get_param('name'),
-        email => $c->get_param('email'),
+        email => lc $c->get_param('email'),
         phone => $c->get_param('phone') || undef,
         from_body => $c->get_param('body') || undef,
         flagged => $c->get_param('flagged') || 0,
@@ -1217,13 +1215,13 @@ sub user_add : Path('user_edit') : Args(0) {
         key => 'users_email_key'
     } );
     $c->stash->{user} = $user;
+    $c->forward('user_cobrand_extra_fields');
+    $user->update;
 
     $c->forward( 'log_edit', [ $user->id, 'user', 'edit' ] );
 
-    $c->stash->{status_message} =
-      '<p><em>' . _('Updated!') . '</em></p>';
-
-    return 1;
+    $c->flash->{status_message} = _("Updated!");
+    $c->res->redirect( $c->uri_for( 'user_edit', $user->id ) );
 }
 
 sub user_edit : Path('user_edit') : Args(1) {
@@ -1234,7 +1232,7 @@ sub user_edit : Path('user_edit') : Args(1) {
     my $user = $c->cobrand->users->find( { id => $id } );
     $c->detach( '/page_error_404_not_found', [] ) unless $user;
 
-    unless ( $c->user->is_superuser || $c->user->has_body_permission_to('user_edit') || $c->cobrand->moniker eq 'zurich' ) {
+    unless ( $c->user->has_body_permission_to('user_edit') || $c->cobrand->moniker eq 'zurich' ) {
         $c->detach('/page_error_403_access_denied', []);
     }
 
@@ -1247,12 +1245,18 @@ sub user_edit : Path('user_edit') : Args(1) {
     $c->forward('fetch_all_bodies');
     $c->forward('fetch_body_areas', [ $user->from_body ]) if $user->from_body;
 
+    if ( defined $c->flash->{status_message} ) {
+        $c->stash->{status_message} =
+            '<p><em>' . $c->flash->{status_message} . '</em></p>';
+    }
+
     if ( $c->get_param('submit') ) {
         $c->forward('/auth/check_csrf_token');
 
         my $edited = 0;
 
-        if ( $user->email ne $c->get_param('email') ||
+        my $email = lc $c->get_param('email');
+        if ( $user->email ne $email ||
             $user->name ne $c->get_param('name') ||
             ($user->phone || "") ne $c->get_param('phone') ||
             ($user->from_body && $c->get_param('body') && $user->from_body->id ne $c->get_param('body')) ||
@@ -1262,7 +1266,8 @@ sub user_edit : Path('user_edit') : Args(1) {
         }
 
         $user->name( $c->get_param('name') );
-        $user->email( $c->get_param('email') );
+        my $original_email = $user->email;
+        $user->email( $email );
         $user->phone( $c->get_param('phone') ) if $c->get_param('phone');
         $user->flagged( $c->get_param('flagged') || 0 );
         # Only superusers can grant superuser status
@@ -1277,6 +1282,8 @@ sub user_edit : Path('user_edit') : Args(1) {
         } else {
             $user->from_body( undef );
         }
+
+        $c->forward('user_cobrand_extra_fields');
 
         # Has the user's from_body changed since we fetched areas (if we ever did)?
         # If so, we need to re-fetch areas so the UI is up to date.
@@ -1361,19 +1368,24 @@ sub user_edit : Path('user_edit') : Args(1) {
         return if %{$c->stash->{field_errors}};
 
         my $existing_user = $c->model('DB::User')->search({ email => $user->email, id => { '!=', $user->id } })->first;
-        if ($existing_user) {
+        my $existing_user_cobrand = $c->cobrand->users->search({ email => $user->email, id => { '!=', $user->id } })->first;
+        if ($existing_user_cobrand) {
             $existing_user->adopt($user);
             $c->forward( 'log_edit', [ $id, 'user', 'merge' ] );
             $c->res->redirect( $c->uri_for( 'user_edit', $existing_user->id ) );
         } else {
+            if ($existing_user) {
+                # Tried to change email to an existing one lacking permission
+                # so make sure it's switched back
+                $user->email($original_email);
+            }
             $user->update;
             if ($edited) {
                 $c->forward( 'log_edit', [ $id, 'user', 'edit' ] );
             }
+            $c->flash->{status_message} = _("Updated!");
+            $c->res->redirect( $c->uri_for( 'user_edit', $user->id ) );
         }
-
-        $c->stash->{status_message} =
-          '<p><em>' . _('Updated!') . '</em></p>';
     }
 
     if ( $user->from_body ) {
@@ -1393,6 +1405,15 @@ sub user_edit : Path('user_edit') : Args(1) {
     }
 
     return 1;
+}
+
+sub user_cobrand_extra_fields : Private {
+    my ( $self, $c ) = @_;
+
+    my @extra_fields = @{ $c->cobrand->call_hook('user_extra_fields') || [] };
+    foreach ( @extra_fields ) {
+        $c->stash->{user}->set_extra_metadata( $_ => $c->get_param("extra[$_]") );
+    }
 }
 
 sub flagged : Path('flagged') : Args(0) {
@@ -1465,7 +1486,7 @@ sub stats : Path('stats') : Args(0) {
         $selected_body = $c->user->from_body->id;
     }
 
-    if ( $c->cobrand->moniker eq 'seesomething' || $c->cobrand->moniker eq 'zurich' ) {
+    if ( $c->cobrand->moniker eq 'zurich' ) {
         return $c->cobrand->admin_stats();
     }
 
@@ -1612,7 +1633,7 @@ accordingly
 sub ban_user : Private {
     my ( $self, $c ) = @_;
 
-    my $email = $c->get_param('email');
+    my $email = lc $c->get_param('email');
 
     return unless $email;
 
@@ -1639,7 +1660,7 @@ Sets the flag on a user with the given email
 sub flag_user : Private {
     my ( $self, $c ) = @_;
 
-    my $email = $c->get_param('email');
+    my $email = lc $c->get_param('email');
 
     return unless $email;
 
@@ -1667,7 +1688,7 @@ Remove the flag on a user with the given email
 sub remove_user_flag : Private {
     my ( $self, $c ) = @_;
 
-    my $email = $c->get_param('email');
+    my $email = lc $c->get_param('email');
 
     return unless $email;
 

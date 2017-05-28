@@ -3,6 +3,8 @@
 @import "../sass/mixins";
 
 @import "../sass/base";
+@import "../sass/top-banner";
+@import "../sass/report_list_pins";
 
 #site-header {
   background: none;
@@ -86,4 +88,15 @@ dd, p {
         $oxfordshire_button_border,
         #fff
     );
+}
+
+@media print {
+    body {
+        background-color: #fff !important;
+    }
+
+    .mappage #oxford-header,
+    .mappage #side > .extra-text {
+        display: none !important;
+    }
 }

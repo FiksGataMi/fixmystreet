@@ -140,21 +140,22 @@ sub escape_js {
 
 my %version_hash;
 sub version {
-    my ( $self, $c, $file ) = @_;
+    my ( $self, $c, $file, $url ) = @_;
+    $url ||= $file;
     _version_get_mtime($file);
     if ($version_hash{$file} && $file =~ /\.js$/) {
         # See if there's an auto.min.js version and use that instead if there is
         (my $file_min = $file) =~ s/\.js$/.auto.min.js/;
         _version_get_mtime($file_min);
-        $file = $file_min if $version_hash{$file_min} >= $version_hash{$file};
+        $url = $file = $file_min if $version_hash{$file_min} >= $version_hash{$file};
     }
     my $admin = $self->template->context->stash->{admin} ? FixMyStreet->config('ADMIN_BASE_URL') : '';
-    return "$admin$file?$version_hash{$file}";
+    return "$admin$url?$version_hash{$file}";
 }
 
 sub _version_get_mtime {
     my $file = shift;
-    unless ($version_hash{$file} && !FixMyStreet->config('STAGING_SITE')) {
+    unless (defined $version_hash{$file} && !FixMyStreet->config('STAGING_SITE')) {
         my $path = FixMyStreet->path_to('web', $file);
         $version_hash{$file} = ( stat( $path ) )[9] || 0;
     }

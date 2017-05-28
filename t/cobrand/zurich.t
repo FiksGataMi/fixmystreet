@@ -28,12 +28,12 @@ ok $sample_file->exists, "sample file $sample_file exists";
 my $sample_photo = $sample_file->slurp_raw;
 
 # This is a helper method that will send the reports but with the config
-# correctly set - notably SEND_REPORTS_ON_STAGING needs to be true, and
+# correctly set - notably STAGING_FLAGS send_reports needs to be true, and
 # zurich must be allowed cobrand if we want to be able to call cobrand
 # methods on it.
 sub send_reports_for_zurich {
     FixMyStreet::override_config {
-        SEND_REPORTS_ON_STAGING => 1,
+        STAGING_FLAGS => { send_reports => 1 },
         ALLOWED_COBRANDS => ['zurich']
     }, sub {
         # Actually send the report
@@ -82,7 +82,7 @@ $subdivision->endpoint( 'subdivision@example.org' );
 $subdivision->update;
 my $external_body = $mech->create_body_ok( 4, 'External Body' );
 $external_body->send_method( 'Zurich' );
-$external_body->endpoint( 'external_body@example.org' );
+$external_body->endpoint( 'external_body@example.net' );
 $external_body->update;
 
 sub get_export_rows_count {
@@ -563,7 +563,7 @@ subtest "external report triggers email" => sub {
     send_reports_for_zurich();
     $email = $mech->get_email;
     like $email->header('Subject'), qr/Weitergeleitete Meldung/, 'subject looks okay';
-    like $email->header('To'), qr/external_body\@example.org/, 'to line looks correct';
+    like $email->header('To'), qr/external_body\@example.net/, 'to line looks correct';
     like $email->body, qr/External Body/, 'body has right name';
     like $email->body, qr/$EXTERNAL_MESSAGE/, 'external_message was passed on';
     unlike $email->body, qr/test\@example.com/, 'body does not contain email address';
@@ -599,7 +599,7 @@ subtest "external report triggers email" => sub {
         send_reports_for_zurich();
         $email = $mech->get_email;
         like $email->header('Subject'), qr/Weitergeleitete Meldung/, 'subject looks okay';
-        like $email->header('To'), qr/external_body\@example.org/, 'to line looks correct';
+        like $email->header('To'), qr/external_body\@example.net/, 'to line looks correct';
         like $email->body, qr/External Body/, 'body has right name';
         like $email->body, qr/test\@example.com/, 'body does contain email address';
         $mech->clear_emails_ok;
@@ -630,7 +630,7 @@ subtest "external report triggers email" => sub {
         send_reports_for_zurich();
         $email = $mech->get_email;
         like $email->header('Subject'), qr/Weitergeleitete Meldung/, 'subject looks okay';
-        like $email->header('To'), qr/external_body\@example.org/, 'to line looks correct';
+        like $email->header('To'), qr/external_body\@example.net/, 'to line looks correct';
         like $email->body, qr/External Body/, 'body has right name';
         like $email->body, qr/$EXTERNAL_MESSAGE/, 'external_message was passed on';
         like $email->body, qr/test\@example.com/, 'body contains email address';

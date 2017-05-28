@@ -1,5 +1,14 @@
 [% select_status = BLOCK %]
-    <select class="form-control js-multiple" name="status" id="statuses" multiple data-all="[% loc('All reports') %]">
+    <select class="form-control js-multiple" name="status" id="statuses" multiple
+      data-all="[% loc('All reports') %]" data-all-options='["open","closed","fixed"]'
+    [%~ IF c.cobrand.on_map_default_status == 'open' %]
+      data-none="[% loc('Unfixed reports') %]"
+    [%~ END ~%]
+      >
+      [% IF c.user_exists AND c.user.has_body_permission_to('planned_reports') AND !shortlist %]
+        <option value="shortlisted"[% ' selected' IF filter_status.shortlisted %]>[% loc('Shortlisted') %]</option>
+        <option value="unshortlisted"[% ' selected' IF filter_status.unshortlisted %]>[% loc('Unshortlisted') %]</option>
+      [% END %]
         <option value="open"[% ' selected' IF filter_status.open %]>[% loc('Unfixed reports') %]</option>
         <option value="closed"[% ' selected' IF filter_status.closed %]>[% loc('Closed reports') %]</option>
         <option value="fixed"[% ' selected' IF filter_status.fixed %]>[% loc('Fixed reports') %]</option>
@@ -10,7 +19,7 @@
   [% IF filter_categories.size %]
     <select class="form-control js-multiple" name="filter_category" id="filter_categories" multiple data-all="[% loc('Everything') %]">
         [% FOR cat IN filter_categories %]
-            <option value="[% cat | html %]"[% ' selected' IF filter_category.grep(cat).size %]>
+            <option value="[% cat | html %]"[% ' selected' IF filter_category.$cat %]>
                 [% cat | html %]
             </option>
         [% END %]
@@ -32,6 +41,9 @@
         <p class="report-list-filters">
             <label for="sort">[% loc('Sort by') %]</label>
             <select class="form-control" name="sort" id="sort">
+              [% IF shortlist %]
+                <option value="shortlist"[% ' selected' IF sort_key == 'shortlist' %]>[% loc('Manual order') %]</option>
+              [% END %]
                 <option value="created-desc"[% ' selected' IF sort_key == 'created-desc' %]>[% loc('Newest') %]</option>
                 <option value="created-asc"[% ' selected' IF sort_key == 'created-asc' %]>[% loc('Oldest') %]</option>
                 <option value="updated-desc"[% ' selected' IF sort_key == 'updated-desc' %]>[% loc('Recently updated') %]</option>

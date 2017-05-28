@@ -135,6 +135,7 @@ CREATE TABLE response_priorities (
     deleted boolean not null default 'f',
     name text not null,
     description text,
+    external_id text,
     unique(body_id, name)
 );
 
@@ -486,6 +487,7 @@ create table response_templates (
     text text not null,
     created timestamp not null default current_timestamp,
     auto_response boolean NOT NULL DEFAULT 'f',
+    state text,
     unique(body_id, title)
 );
 
@@ -500,3 +502,21 @@ CREATE TABLE contact_response_priorities (
     contact_id int REFERENCES contacts(id) NOT NULL,
     response_priority_id int REFERENCES response_priorities(id) NOT NULL
 );
+
+CREATE TABLE defect_types (
+    id serial not null primary key,
+    body_id int references body(id) not null,
+    name text not null,
+    description text not null,
+    extra text,
+    unique(body_id, name)
+);
+
+CREATE TABLE contact_defect_types (
+    id serial NOT NULL PRIMARY KEY,
+    contact_id int REFERENCES contacts(id) NOT NULL,
+    defect_type_id int REFERENCES defect_types(id) NOT NULL
+);
+
+ALTER TABLE problem
+    ADD COLUMN defect_type_id int REFERENCES defect_types(id);

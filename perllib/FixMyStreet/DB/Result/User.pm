@@ -248,6 +248,15 @@ sub split_name {
     return { first => $first || '', last => $last || '' };
 }
 
+has body_permissions => (
+    is => 'ro',
+    lazy => 1,
+    default => sub {
+        my $self = shift;
+        return [ $self->user_body_permissions->all ];
+    },
+);
+
 sub permissions {
     my ($self, $c, $body_id) = @_;
 
@@ -258,9 +267,7 @@ sub permissions {
 
     return unless $self->belongs_to_body($body_id);
 
-    my @permissions = $self->user_body_permissions->search({
-        body_id => $self->from_body->id,
-    })->all;
+    my @permissions = grep { $_->body_id == $self->from_body->id } @{$self->body_permissions};
     return { map { $_->permission_type => 1 } @permissions };
 }
 
@@ -269,33 +276,37 @@ sub has_permission_to {
 
     return 1 if $self->is_superuser;
     return 0 if !$body_ids || (ref $body_ids && !@$body_ids);
+    $body_ids = [ $body_ids ] unless ref $body_ids;
+    my %body_ids = map { $_ => 1 } @$body_ids;
 
-    my $permission = $self->user_body_permissions->find({
-            permission_type => $permission_type,
-            body_id => $body_ids,
-        });
-    return $permission ? 1 : 0;
+    foreach (@{$self->body_permissions}) {
+        return 1 if $_->permission_type eq $permission_type && $body_ids{$_->body_id};
+    }
+    return 0;
 }
 
 =head2 has_body_permission_to
 
-Checks if the User has a from_body set, and the specified permission on that body.
+Checks if the User has a from_body set, the specified permission on that body,
+and optionally that their from_body is one particular body.
 
 Instead of saying:
 
-    ($user->from_body && $user->has_permission_to('user_edit', $user->from_body->id))
+    ($user->from_body && $user->from_body->id == $body_id && $user->has_permission_to('user_edit', $body_id))
 
 You can just say:
 
-    $user->has_body_permission_to('user_edit')
-
-NB unlike has_permission_to, this doesn't blindly return 1 if the user is a superuser.
+    $user->has_body_permission_to('user_edit', $body_id)
 
 =cut
 
 sub has_body_permission_to {
-    my ($self, $permission_type) = @_;
+    my ($self, $permission_type, $body_id) = @_;
+
+    return 1 if $self->is_superuser;
+
     return unless $self->from_body;
+    return if $body_id && $self->from_body->id != $body_id;
 
     return $self->has_permission_to($permission_type, $self->from_body->id);
 }
@@ -371,6 +382,8 @@ around add_to_planned_reports => sub {
 around remove_from_planned_reports => sub {
     my ($orig, $self, $report) = @_;
     $self->user_planned_reports->active->for_report($report->id)->remove();
+    $report->unset_extra_metadata('order');
+    $report->update;
 };
 
 sub active_planned_reports {
