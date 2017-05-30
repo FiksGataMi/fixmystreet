@@ -105,7 +105,7 @@ sub short_name {
     my $name = $body->{name} || $body->name;
 
     if ($name =~ /^(Os|Nes|V\xe5ler|Sande|B\xf8|Her\xf8y)$/) {
-        my $area_id = $body->body_areas->first->area_id || $body->{id} || $body->id;
+        my $area_id = $body->{id} || $body->id;
         my $area    = mySociety::MaPit::call('area', $area_id);
         my $parent  = mySociety::MaPit::call('area', $area->{parent_area});
 
