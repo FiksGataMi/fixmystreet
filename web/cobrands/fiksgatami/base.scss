@@ -4,3 +4,11 @@
 
 @import "../sass/base";
 
+#front-main #postcodeForm div {
+	input#pc {
+		width: 74%;
+	}
+	input#sub {
+		width: 26%;
+	}
+}

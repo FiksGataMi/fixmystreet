@@ -1,2 +1,9 @@
 @import "_colours";
 @import "../sass/layout";
+
+#front-main #postcodeForm div {
+	width: 23.5em;
+	input#sub {
+		width: 6.5em;
+	}
+}
