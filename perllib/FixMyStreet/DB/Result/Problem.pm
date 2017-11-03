@@ -206,6 +206,7 @@ my $IM = eval {
 
 with 'FixMyStreet::Roles::Abuser',
      'FixMyStreet::Roles::Extra',
+     'FixMyStreet::Roles::Translatable',
      'FixMyStreet::Roles::PhotoSet';
 
 =head2
@@ -219,15 +220,8 @@ HASHREF.
 =cut
 
 sub open_states {
-    my $states = {
-        'confirmed'        => 1,
-        'investigating'    => 1,
-        'in progress'      => 1,
-        'planned'          => 1,
-        'action scheduled' => 1,
-    };
-
-    return wantarray ? keys %{$states} : $states;
+    my @states = map { $_->label } @{FixMyStreet::DB->resultset("State")->open};
+    return wantarray ? @states : { map { $_ => 1 } @states };
 }
 
 =head2
@@ -241,13 +235,9 @@ HASHREF.
 =cut
 
 sub fixed_states {
-    my $states = {
-        'fixed'           => 1,
-        'fixed - user'    => 1,
-        'fixed - council' => 1,
-    };
-
-    return wantarray ? keys %{ $states } : $states;
+    my @states = map { $_->label } @{FixMyStreet::DB->resultset("State")->fixed};
+    push @states, 'fixed - user', 'fixed - council' if @states;
+    return wantarray ? @states : { map { $_ => 1 } @states };
 }
 
 =head2
@@ -261,17 +251,9 @@ HASHREF.
 =cut
 
 sub closed_states {
-    my $states = {
-        'closed'                      => 1,
-        'unable to fix'               => 1,
-        'not responsible'             => 1,
-        'duplicate'                   => 1,
-        'internal referral'           => 1,
-    };
-
-    return wantarray ? keys %{$states} : $states;
+    my @states = map { $_->label } @{FixMyStreet::DB->resultset("State")->closed};
+    return wantarray ? @states : { map { $_ => 1 } @states };
 }
-
 
 =head2
 
@@ -288,21 +270,10 @@ sub all_states {
         'hidden'                      => 1,
         'partial'                     => 1,
         'unconfirmed'                 => 1,
-        'confirmed'                   => 1,
-        'investigating'               => 1,
-        'in progress'                 => 1,
-        'planned'                     => 1,
-        'action scheduled'            => 1,
-        'fixed'                       => 1,
         'fixed - council'             => 1,
         'fixed - user'                => 1,
-        'unable to fix'               => 1,
-        'not responsible'             => 1,
-        'duplicate'                   => 1,
-        'closed'                      => 1,
-        'internal referral'           => 1,
     };
-
+    map { $states->{$_->label} = 1 } @{FixMyStreet::DB->resultset("State")->states};
     return wantarray ? keys %{$states} : $states;
 }
 
@@ -322,73 +293,29 @@ my $hidden_states = {
     'unconfirmed' => 1,
 };
 
-my $visible_states = {
-    map {
-        $hidden_states->{$_} ? () : ($_ => 1)
-    } all_states()
-};
-    ## e.g.:
-    # 'confirmed'                   => 1,
-    # 'investigating'               => 1,
-    # 'in progress'                 => 1,
-    # 'planned'                     => 1,
-    # 'action scheduled'            => 1,
-    # 'fixed'                       => 1,
-    # 'fixed - council'             => 1,
-    # 'fixed - user'                => 1,
-    # 'unable to fix'               => 1,
-    # 'not responsible'             => 1,
-    # 'duplicate'                   => 1,
-    # 'closed'                      => 1,
-    # 'internal referral'           => 1,
-
 sub hidden_states {
     return wantarray ? keys %{$hidden_states} : $hidden_states;
 }
 
 sub visible_states {
-    return wantarray ? keys %{$visible_states} : $visible_states;
+    my %visible_states = map {
+        $hidden_states->{$_} ? () : ($_ => 1)
+    } all_states();
+    return wantarray ? keys %visible_states : \%visible_states;
 }
 
 sub visible_states_add {
     my ($self, @states) = @_;
     for my $state (@states) {
         delete $hidden_states->{$state};
-        $visible_states->{$state} = 1;
     }
 }
 
 sub visible_states_remove {
     my ($self, @states) = @_;
     for my $state (@states) {
-        delete $visible_states->{$state};
         $hidden_states->{$state} = 1;
     }
-}
-
-=head2
-
-    @states = FixMyStreet::DB::Problem::council_states();
-
-Get a list of states that are availble to council users. If called in
-array context then returns an array of names, otherwise returns a
-HASHREF.
-
-=cut
-sub council_states {
-    my $states = {
-        'confirmed'                   => 1,
-        'investigating'               => 1,
-        'action scheduled'            => 1,
-        'in progress'                 => 1,
-        'fixed - council'             => 1,
-        'unable to fix'               => 1,
-        'not responsible'             => 1,
-        'duplicate'                   => 1,
-        'internal referral'           => 1,
-    };
-
-    return wantarray ? keys %{$states} : $states;
 }
 
 my $stz = sub {
@@ -456,12 +383,6 @@ sub check_for_errors {
         $errors{category} = _('Please choose a category');
         $self->category(undef);
     }
-    elsif ($self->category
-        && $self->category eq _('-- Pick a property type --') )
-    {
-        $errors{category} = _('Please choose a property type');
-        $self->category(undef);
-    }
 
     return \%errors;
 }
@@ -489,6 +410,11 @@ sub confirm {
     return 1;
 }
 
+sub category_display {
+    my $self = shift;
+    $self->translate_column('category');
+}
+
 sub bodies_str_ids {
     my $self = shift;
     return [] unless $self->bodies_str;
@@ -502,12 +428,36 @@ Returns a hashref of bodies to which a report was sent.
 
 =cut
 
-sub bodies($) {
+has bodies => (
+    is => 'ro',
+    lazy => 1,
+    default => sub {
+        my $self = shift;
+        return {} unless $self->bodies_str;
+        my $cache = $self->result_source->schema->cache;
+        return $cache->{bodies}{$self->bodies_str} if $cache->{bodies}{$self->bodies_str};
+
+        my $bodies = $self->bodies_str_ids;
+        my @bodies = $self->result_source->schema->resultset('Body')->search(
+            { id => $bodies },
+            { prefetch => 'body_areas' },
+        )->all;
+        $cache->{bodies}{$self->bodies_str} = { map { $_->id => $_ } @bodies };
+        return $cache->{bodies}{$self->bodies_str};
+    },
+);
+
+sub body_names($) {
     my $self = shift;
-    return {} unless $self->bodies_str;
-    my $bodies = $self->bodies_str_ids;
-    my @bodies = $self->result_source->schema->resultset('Body')->search({ id => $bodies })->all;
-    return { map { $_->id => $_ } @bodies };
+    my $bodies = $self->bodies;
+    my @names = map { $_->name } values %$bodies;
+    return \@names;
+}
+
+sub to_body_named($$) {
+    my ($self, $re) = @_;
+    my $names = join(',,', @{$self->body_names});
+    $names =~ /$re/;
 }
 
 =head2 url
@@ -609,19 +559,6 @@ sub is_visible {
     return exists $self->visible_states->{ $self->state } ? 1 : 0;
 }
 
-=head2 state_display
-
-Returns a string suitable for display lookup in the update meta section.
-Removes the '- council/user' bit from fixed states.
-
-=cut
-
-sub state_display {
-    my $self = shift;
-    (my $state = $self->state) =~ s/ -.*$//;
-    return $state;
-}
-
 =head2 meta_line
 
 Returns a string to be used on a problem report page, describing some of the
@@ -635,7 +572,7 @@ sub meta_line {
     my $date_time = Utils::prettify_dt( $problem->confirmed );
     my $meta = '';
 
-    my $category = $problem->category;
+    my $category = $problem->category_display;
     $category = $c->cobrand->call_hook(change_category_text => $category) || $category;
 
     if ( $problem->anonymous ) {
@@ -787,7 +724,7 @@ sub defect_types {
 #     Note:   this only makes sense when called on a problem that has been sent!
 sub can_display_external_id {
     my $self = shift;
-    if ($self->external_id && $self->send_method_used && $self->bodies_str =~ /(2237|2550)/) {
+    if ($self->external_id && $self->send_method_used && $self->to_body_named('Oxfordshire|Angus')) {
         return 1;
     }
     return 0;
@@ -924,6 +861,7 @@ sub as_hashref {
         latitude  => $self->latitude,
         longitude => $self->longitude,
         postcode  => $self->postcode,
+        areas     => $self->areas,
         state     => $self->state,
         state_t   => _( $self->state ),
         used_map  => $self->used_map,
@@ -953,15 +891,21 @@ sub photos {
     my $id = $self->id;
     my @photos = map {
         my $cachebust = substr($_, 0, 8);
+        # Some Varnish configurations (e.g. on mySociety infra) strip cookies from
+        # images, which means image requests will be redirected to the login page
+        # if LOGIN_REQUIRED is set. To stop this happening, Varnish should be
+        # configured to not strip cookies if the cookie_passthrough param is
+        # present, which this line ensures will be if LOGIN_REQUIRED is set.
+        my $extra = (FixMyStreet->config('LOGIN_REQUIRED')) ? "&cookie_passthrough=1" : "";
         my ($hash, $format) = split /\./, $_;
         {
             id => $hash,
-            url_temp => "/photo/temp.$hash.$format",
-            url_temp_full => "/photo/fulltemp.$hash.$format",
-            url => "/photo/$id.$i.$format?$cachebust",
-            url_full => "/photo/$id.$i.full.$format?$cachebust",
-            url_tn => "/photo/$id.$i.tn.$format?$cachebust",
-            url_fp => "/photo/$id.$i.fp.$format?$cachebust",
+            url_temp => "/photo/temp.$hash.$format$extra",
+            url_temp_full => "/photo/fulltemp.$hash.$format$extra",
+            url => "/photo/$id.$i.$format?$cachebust$extra",
+            url_full => "/photo/$id.$i.full.$format?$cachebust$extra",
+            url_tn => "/photo/$id.$i.tn.$format?$cachebust$extra",
+            url_fp => "/photo/$id.$i.fp.$format?$cachebust$extra",
             idx => $i++,
         }
     } $photoset->all_ids;
@@ -1013,13 +957,14 @@ has get_cobrand_logged => (
 sub pin_data {
     my ($self, $c, $page, %opts) = @_;
     my $colour = $c->cobrand->pin_colour($self, $page);
-
+    my $title = $opts{private} ? $self->title : $self->title_safe;
+    $title = $c->cobrand->call_hook(pin_hover_title => $self, $title) || $title;
     {
         latitude => $self->latitude,
         longitude => $self->longitude,
         colour => $colour,
         id => $self->id,
-        title => $opts{private} ? $self->title : $self->title_safe,
+        title => $title,
         problem => $self,
         type => $opts{type},
     }
@@ -1082,6 +1027,7 @@ sub static_map {
     if ($pin) {
         my $im = Image::Magick->new;
         $im->read(FixMyStreet->path_to('web', 'i', 'pin-yellow.png'));
+        $im->Scale( geometry => '48x64' );
         $image->Composite(image => $im, gravity => 'NorthWest',
             x => $pin->{px} - 24, y => $pin->{py} - 64);
     }
@@ -1113,6 +1059,16 @@ has shortlisted_user => (
     },
 );
 
+sub set_duplicate_of {
+    my ($self, $other_id) = @_;
+    $self->set_extra_metadata( duplicate_of => $other_id );
+    my $dupe = $self->result_source->schema->resultset("Problem")->find($other_id);
+    my $dupes_duplicates = $dupe->get_extra_metadata('duplicates') || [];
+    push @$dupes_duplicates, $self->id;
+    $dupe->set_extra_metadata( duplicates => $dupes_duplicates );
+    $dupe->update;
+}
+
 has duplicate_of => (
     is => 'ro',
     lazy => 1,
@@ -1130,8 +1086,9 @@ has duplicates => (
     lazy => 1,
     default => sub {
         my $self = shift;
-        my $rabx_id = RABX::serialise( $self->id );
-        my @duplicates = $self->result_source->schema->resultset('Problem')->search({ extra => { like => "\%duplicate_of,$rabx_id%" } })->all;
+        my $duplicates = $self->get_extra_metadata("duplicates") || [];
+        return [] unless $duplicates && @$duplicates;
+        my @duplicates = $self->result_source->schema->resultset('Problem')->search({ id => $duplicates })->all;
         return \@duplicates;
     },
 );

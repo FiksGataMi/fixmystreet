@@ -128,6 +128,8 @@ function isR2L() {
   });
 })(jQuery);
 
+fixmystreet.hooks = fixmystreet.hooks || {};
+
 fixmystreet.mobile_reporting = {
   apply_ui: function() {
     // Creates the "app-like" mobile reporting UI with full screen map
@@ -249,10 +251,18 @@ $.extend(fixmystreet.set_up, {
   basics: function() {
     // Preload the new report pin
     if ( typeof fixmystreet !== 'undefined' && typeof fixmystreet.pin_prefix !== 'undefined' ) {
-        document.createElement('img').src = fixmystreet.pin_prefix + 'pin-green.png';
+        document.createElement('img').src = fixmystreet.pin_prefix + 'pin-' + fixmystreet.pin_new_report_colour + '.png';
     } else {
         document.createElement('img').src = '/i/pin-green.png';
     }
+
+    $('a[href*="around"]').each(function() {
+        this.href = this.href + (this.href.indexOf('?') > -1 ? '&js=1' : '?js=1');
+    });
+    $('input[name="js"]').val(1);
+    $('form[action*="around"]').each(function() {
+        $('<input type="hidden" name="js" value="1">').prependTo(this);
+    });
 
     // Focus on postcode box on front page
     $('#pc').focus();
@@ -377,17 +387,29 @@ $.extend(fixmystreet.set_up, {
     });
   },
 
+  autocomplete: function() {
+    $('.js-autocomplete').each(function() {
+        accessibleAutocomplete.enhanceSelectElement({
+            selectElement: this,
+            displayMenu: 'overlay',
+            required: true,
+            // showAllValues: true, // Currently undismissable on iOS
+            defaultValue: ''
+        });
+    });
+  },
+
   report_geolocation: function() {
     if (!geo_position_js.init()) {
         return;
     }
-    if ($('#postcodeForm').length) {
-        var link = '<a href="LINK" id="geolocate_link">&hellip; ' + translation_strings.geolocate + '</a>';
-        $('form[action="/alert/list"]').append(link.replace('LINK','/alert/list'));
+    if ($('.js-geolocate').length) {
+        var link = $('.js-geolocate').attr('action');
+        link = '<a href="' + link + '" id="geolocate_link">&hellip; ' + translation_strings.geolocate + '</a>';
         if ($('body.frontpage').length) {
-            $('#postcodeForm').after(link.replace('LINK','/around'));
+            $('.js-geolocate').after(link);
         } else{
-            $('#postcodeForm').append(link.replace('LINK','/around'));
+            $('.js-geolocate').append(link);
         }
         fixmystreet.geolocate.setup(function(pos) {
             var latitude = pos.coords.latitude;
@@ -425,7 +447,33 @@ $.extend(fixmystreet.set_up, {
                 $category_meta.empty();
             }
         });
+
+        if (fixmystreet.hooks.update_problem_fields) {
+            fixmystreet.hooks.update_problem_fields($(this).data('role'), $(this).data('body'), args);
+        }
     });
+  },
+
+  hide_name: function() {
+      $('body').on('click', '.js-hide-name', function(e){
+          e.preventDefault();
+
+          var $p = $(this).parents('p');
+          var $form = $p.next('.hide-name-form'); // might not exist yet
+          var url = $(this).attr('href');
+
+          if ($form.length) {
+              $form.slideUp(function(){
+                  $form.remove();
+              });
+          } else {
+              $.get(url).done(function(html){
+                  $(html).find('.hide-name-form').hide().insertAfter($p).slideDown();
+              }).fail(function(){
+                  window.location.href = url;
+              });
+          }
+      });
   },
 
   on_resize: function() {
@@ -475,6 +523,9 @@ $.extend(fixmystreet.set_up, {
         addRemoveLinks: true,
         thumbnailHeight: 150,
         thumbnailWidth: 150,
+        resizeWidth: 2048,
+        resizeHeight: 2048,
+        resizeQuality: 0.6,
         acceptedFiles: 'image/jpeg,image/pjpeg,image/gif,image/tiff,image/png',
         dictDefaultMessage: translation_strings.upload_default_message,
         dictCancelUploadConfirmation: translation_strings.upload_cancel_confirmation,
@@ -528,9 +579,13 @@ $.extend(fixmystreet.set_up, {
         if (!f) {
             return;
         }
-        var mockFile = { name: f, server_id: f };
+        var mockFile = { name: f, server_id: f, dataURL: '/photo/temp.' + f };
         photodrop.emit("addedfile", mockFile);
-        photodrop.createThumbnailFromUrl(mockFile, '/photo/temp.' + f);
+        photodrop.createThumbnailFromUrl(mockFile,
+            photodrop.options.thumbnailWidth, photodrop.options.thumbnailHeight,
+            photodrop.options.thumbnailMethod, true, function(thumbnail) {
+                photodrop.emit('thumbnail', mockFile, thumbnail);
+            });
         photodrop.emit("complete", mockFile);
         photodrop.options.maxFiles -= 1;
       });
@@ -712,7 +767,7 @@ $.extend(fixmystreet.set_up, {
     // (due to not wanting around form to submit, though good thing anyway)
     $('body').on('click', '#alert_rss_button', function(e) {
         e.preventDefault();
-        var feed = $('input[name=feed][type=radio]:checked').nextAll('a').attr('href');
+        var feed = $('input[name=feed][type=radio]:checked').parent().prevAll('a').attr('href');
         window.location.href = feed;
     });
     $('body').on('click', '#alert_email_button', function(e) {
@@ -869,6 +924,9 @@ fixmystreet.update_pin = function(lonlat, savePushState) {
             if (!data.contribute_as.another_user) {
                 $select.find('option[value=another_user]').remove();
             }
+            if (!data.contribute_as.anonymous_user) {
+                $select.find('option[value=anonymous_user]').remove();
+            }
             if (!data.contribute_as.body) {
                 $select.find('option[value=body]').remove();
             }
@@ -948,8 +1006,8 @@ fixmystreet.display = {
                 translation_strings.ok +
             '</a>' +
             '</p>')
+        .addClass('above-form') // Stop map being absolute, so reporting form doesn't get hidden
         .css({
-            position: 'relative', // Stop map being absolute, so reporting form doesn't get hidden
             width: width,
             height: height
         });
@@ -999,6 +1057,7 @@ fixmystreet.display = {
                 $('body').addClass('with-actions');
                 fixmystreet.run(fixmystreet.set_up.report_page_inspect);
                 fixmystreet.run(fixmystreet.set_up.manage_duplicates);
+                fixmystreet.run(fixmystreet.set_up.action_scheduled_raise_defect);
             } else {
                 $sideReport.appendTo('#map_sidebar');
             }
@@ -1009,7 +1068,7 @@ fixmystreet.display = {
             fixmystreet.page = 'report';
 
             fixmystreet.mobile_reporting.remove_ui();
-            if ($('html').hasClass('mobile') && fixmystreet.map.updateSize) {
+            if (fixmystreet.map.updateSize && ($twoColReport.length || $('html').hasClass('mobile'))) {
                 fixmystreet.map.updateSize();
             }
 

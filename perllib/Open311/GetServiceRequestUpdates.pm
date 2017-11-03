@@ -11,7 +11,7 @@ has start_date => ( is => 'ro', default => sub { undef } );
 has end_date => ( is => 'ro', default => sub { undef } );
 has suppress_alerts => ( is => 'rw', default => 0 );
 has verbose => ( is => 'ro', default => 0 );
-has schema => ( is =>'ro', lazy => 1, default => sub { FixMyStreet::DB->connect } );
+has schema => ( is =>'ro', lazy => 1, default => sub { FixMyStreet::DB->schema->connect } );
 
 Readonly::Scalar my $AREA_ID_BROMLEY     => 2482;
 Readonly::Scalar my $AREA_ID_OXFORDSHIRE => 2237;
@@ -142,7 +142,10 @@ sub update_comments {
 
                     # don't update state unless it's an allowed state and it's
                     # actually changing the state of the problem
-                    if ( FixMyStreet::DB::Result::Problem->council_states()->{$state} && $p->state ne $state &&
+                    if ( FixMyStreet::DB::Result::Problem->visible_states()->{$state} && $p->state ne $state &&
+                        # For Oxfordshire, don't allow changes back to Open from other open states
+                        !( $body->areas->{$AREA_ID_OXFORDSHIRE} && $state eq 'confirmed' && $p->is_open ) &&
+                        # Don't let it change between the (same in the front end) fixed states
                         !( $p->is_fixed && FixMyStreet::DB::Result::Problem->fixed_states()->{$state} ) ) {
                         if ($p->is_visible) {
                             $p->state($state);

@@ -128,7 +128,7 @@ sub process_user : Private {
         $update->user( $user );
 
         # Just in case, make sure the user will have a name
-        if ($c->stash->{contributing_as_body}) {
+        if ($c->stash->{contributing_as_body} or $c->stash->{contributing_as_anonymous_user}) {
             $user->name($user->from_body->name) unless $user->name;
         }
 
@@ -277,17 +277,19 @@ sub process_update : Private {
     $update->mark_open($params{reopen} ? 1 : 0);
 
     $c->stash->{contributing_as_body} = $c->user_exists && $c->user->contributing_as('body', $c, $update->problem->bodies_str_ids);
+    $c->stash->{contributing_as_anonymous_user} = $c->user_exists && $c->user->contributing_as('anonymous_user', $c, $update->problem->bodies_str_ids);
     if ($c->stash->{contributing_as_body}) {
         $update->name($c->user->from_body->name);
         $update->anonymous(0);
+    } elsif ($c->stash->{contributing_as_anonymous_user}) {
+        $update->name($c->user->from_body->name);
+        $update->anonymous(1);
     } else {
         $update->name($name);
         $update->anonymous($c->get_param('may_show_name') ? 0 : 1);
     }
 
     if ( $params{state} ) {
-        $params{state} = 'fixed - council'
-            if $params{state} eq 'fixed' && $c->user && $c->user->belongs_to_body( $update->problem->bodies_str );
         $update->problem_state( $params{state} );
     } else {
         # we do this so we have a record of the state of the problem at this point
@@ -309,7 +311,8 @@ sub process_update : Private {
     my @extra; # Next function fills this, but we don't need it here.
     # This is just so that the error checking for these extra fields runs.
     # TODO Use extra here as it is used on reports.
-    $c->cobrand->process_open311_extras( $c, $update->problem->bodies_str, \@extra );
+    my $body = (values %{$update->problem->bodies})[0];
+    $c->cobrand->process_open311_extras( $c, $body, \@extra );
 
     if ( $c->get_param('fms_extra_title') ) {
         my %extras = ();
@@ -344,14 +347,11 @@ sub check_for_errors : Private {
     my ( $self, $c ) = @_;
 
     # they have to be an authority user to update the state
-    if ( $c->get_param('state') ) {
+    my $state = $c->get_param('state');
+    if ( $state && $state ne $c->stash->{update}->problem->state ) {
         my $error = 0;
         $error = 1 unless $c->user && $c->user->belongs_to_body( $c->stash->{update}->problem->bodies_str );
-
-        my $state = $c->get_param('state');
-        $state = 'fixed - council' if $state eq 'fixed';
-        $error = 1 unless ( grep { $state eq $_ } ( FixMyStreet::DB::Result::Problem->council_states() ) );
-
+        $error = 1 unless grep { $state eq $_ } FixMyStreet::DB::Result::Problem->visible_states();
         if ( $error ) {
             $c->stash->{errors} ||= [];
             push @{ $c->stash->{errors} }, _('There was a problem with your update. Please try again.');
@@ -548,24 +548,17 @@ sub signup_for_alerts : Private {
     my ( $self, $c ) = @_;
 
     my $update = $c->stash->{update};
+    my $user = $update->user;
+    my $problem_id = $update->problem_id;
+
     if ( $c->stash->{add_alert} ) {
         my $options = {
-            user => $update->user,
-            alert_type => 'new_updates',
-            parameter => $update->problem_id,
+            cobrand => $update->cobrand,
+            cobrand_data => $update->cobrand_data,
+            lang => $update->lang,
         };
-        my $alert = $c->model('DB::Alert')->find($options);
-        unless ($alert) {
-            $alert = $c->model('DB::Alert')->create({
-                %$options,
-                cobrand      => $update->cobrand,
-                cobrand_data => $update->cobrand_data,
-                lang         => $update->lang,
-            });
-        }
-        $alert->confirm();
-
-    } elsif ( my $alert = $update->user->alert_for_problem($update->problem_id) ) {
+        $user->create_alert($problem_id, $options);
+    } elsif ( my $alert = $user->alert_for_problem($problem_id) ) {
         $alert->disable();
     }
 

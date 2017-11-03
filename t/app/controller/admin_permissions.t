@@ -1,7 +1,3 @@
-use strict;
-use warnings;
-use Test::More;
-
 use FixMyStreet::TestMech;
 
 my $mech = FixMyStreet::TestMech->new;
@@ -10,17 +6,10 @@ my $user = $mech->create_user_ok('test@example.com', name => 'Test User');
 my $user2 = $mech->create_user_ok('test2@example.com', name => 'Test User 2');
 my $superuser = $mech->create_user_ok('superuser@example.com', name => 'Super User', is_superuser => 1);
 
-my $oxfordshire = $mech->create_body_ok(2237, 'Oxfordshire County Council', id => 2237);
+my $oxfordshire = $mech->create_body_ok(2237, 'Oxfordshire County Council');
 my $oxfordshireuser = $mech->create_user_ok('counciluser@example.com', name => 'Council User', from_body => $oxfordshire);
 
-my $bromley = $mech->create_body_ok(2482, 'Bromley Council', id => 2482);
-
-END {
-    $mech->delete_user( $user );
-    $mech->delete_user( $user2 );
-    $mech->delete_user( $superuser );
-    $mech->delete_user( $oxfordshireuser );
-}
+my $bromley = $mech->create_body_ok(2482, 'Bromley Council');
 
 my $dt = DateTime->new(
     year   => 2011,
@@ -157,6 +146,7 @@ FixMyStreet::override_config {
             "permissions[report_inspect]" => undef,
             "permissions[report_instruct]" => undef,
             "permissions[contribute_as_another_user]" => undef,
+            "permissions[contribute_as_anonymous_user]" => undef,
             "permissions[contribute_as_body]" => undef,
             "permissions[user_edit]" => undef,
             "permissions[user_manage_permissions]" => undef,
@@ -189,6 +179,7 @@ FixMyStreet::override_config {
             "permissions[report_inspect]" => undef,
             "permissions[report_instruct]" => undef,
             "permissions[contribute_as_another_user]" => undef,
+            "permissions[contribute_as_anonymous_user]" => undef,
             "permissions[contribute_as_body]" => undef,
             "permissions[user_edit]" => undef,
             "permissions[user_manage_permissions]" => undef,

@@ -11,6 +11,7 @@ requires 'ExtUtils::MakeMaker', '6.72'; # [1]
 requires 'Guard', '1.023';
 requires 'PadWalker', '2.2';
 requires 'aliased', '0.34';
+requires 'Net::SSLeay', '1.81';
 
 # Catalyst itself, and modules/plugins used
 requires 'Catalyst', '5.80031';
@@ -42,6 +43,7 @@ requires 'DBD::Pg', '2.9.2';
 requires 'DBI';
 requires 'DBIx::Class::EncodedColumn', '0.00013';
 requires 'DBIx::Class::EncodedColumn::Crypt::Eksblowfish::Bcrypt';
+requires 'DBIx::Class::Factory';
 requires 'DBIx::Class::FilterColumn';
 requires 'DBIx::Class::InflateColumn::DateTime';
 requires 'DBIx::Class::ResultSet';
@@ -52,7 +54,7 @@ requires 'Email::MIME';
 requires 'Email::Sender';
 requires 'Email::Valid';
 requires 'Error';
-requires 'FCGI';
+requires 'FCGI'; # Required by e.g. Plack::Handler::FCGI
 requires 'File::Find';
 requires 'File::Path';
 requires 'File::Slurp';
@@ -68,6 +70,7 @@ requires 'Locale::gettext';
 requires 'LWP::Simple';
 requires 'LWP::UserAgent';
 requires 'Math::Trig';
+requires 'MIME::Parser'; # HandleMail
 requires 'Module::Pluggable';
 requires 'Moose';
 requires 'MooX::Types::MooseLike';
@@ -76,7 +79,7 @@ requires 'Net::DNS::Resolver';
 requires 'Net::Domain::TLD', '1.75';
 requires 'Net::Facebook::Oauth2', '0.10';
 requires 'Net::OAuth';
-requires 'Net::Twitter::Lite::WithAPIv1_1';
+requires 'Net::Twitter::Lite::WithAPIv1_1', '0.12008';
 requires 'Path::Class';
 requires 'POSIX';
 requires 'Readonly';
@@ -95,12 +98,12 @@ requires 'YAML';
 
 feature 'uk', 'FixMyStreet.com specific requirements' => sub {
     # East Hampshire & Angus
-    requires 'SOAP::Lite';
+    requires 'SOAP::Lite', '1.20';
 };
 
 feature 'zurich', 'Zueri wie neu specific requirements' => sub {
     # Geocoder
-    requires 'SOAP::Lite';
+    requires 'SOAP::Lite', '1.20';
 };
 
 # Moderation by from_body user
@@ -109,8 +112,16 @@ requires 'Algorithm::Diff';
 # Modules used by CSS & watcher
 requires 'CSS::Sass';
 requires 'File::ChangeNotify';
-requires 'Path::Tiny';
+requires 'Path::Tiny', '0.104';
 requires 'File::Find::Rule';
+
+# Modules used for development
+requires 'Plack::Middleware::Debug';
+requires 'Plack::Middleware::Debug::DBIC::QueryLog';
+requires 'Plack::Middleware::Debug::LWP';
+requires 'Plack::Middleware::Debug::Template';
+recommends 'Linux::Inotify2' if $^O eq 'linux';
+recommends 'Mac::FSEvents' if $^O eq 'darwin';
 
 # Modules used by the test suite
 requires 'Test::PostgreSQL';

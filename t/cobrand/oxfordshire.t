@@ -1,16 +1,19 @@
-use strict;
-use warnings;
-use Test::More;
+
+use Test::MockModule;
+use FixMyStreet::Integrations::ExorRDI;
 
 use FixMyStreet::TestMech;
 my $mech = FixMyStreet::TestMech->new;
+
+my $oxon = $mech->create_body_ok(2237, 'Oxfordshire County Council');
 
 subtest 'check /ajax defaults to open reports only' => sub {
     my $categories = [ 'Bridges', 'Fences', 'Manhole' ];
     my $params = {
         postcode  => 'OX28 4DS',
-        latitude  =>  51.7847208192,
-        longitude => -1.49445264029,
+        cobrand => 'oxfordshire',
+        latitude  =>  51.784721,
+        longitude => -1.494453,
     };
     my $bbox = ($params->{longitude} - 0.01) . ',' .  ($params->{latitude} - 0.01)
                 . ',' . ($params->{longitude} + 0.01) . ',' .  ($params->{latitude} + 0.01);
@@ -23,13 +26,12 @@ subtest 'check /ajax defaults to open reports only' => sub {
                 category => $category,
                 state => $state,
             );
-            $mech->create_problems_for_body( 1, 2237, 'Around page', \%report_params );
+            $mech->create_problems_for_body( 1, $oxon->id, 'Around page', \%report_params );
         }
     }
 
     FixMyStreet::override_config {
         ALLOWED_COBRANDS => [ { 'oxfordshire' => '.' } ],
-        MAPIT_URL => 'http://mapit.mysociety.org/',
     }, sub {
         my $json = $mech->get_ok_json( '/ajax?status=all&bbox=' . $bbox );
         my $pins = $json->{pins};
@@ -46,6 +48,10 @@ subtest 'check /ajax defaults to open reports only' => sub {
 };
 
 my $superuser = $mech->create_user_ok('superuser@example.com', name => 'Super User', is_superuser => 1);
+my $inspector = $mech->create_user_ok('inspector@example.com', name => 'Inspector');
+$inspector->user_body_permissions->create({ body => $oxon, permission_type => 'report_inspect' });
+
+my @problems = FixMyStreet::DB->resultset('Problem')->search({}, { rows => 3 })->all;
 
 subtest 'Exor RDI download appears on Oxfordshire cobrand admin' => sub {
     FixMyStreet::override_config {
@@ -57,7 +63,7 @@ subtest 'Exor RDI download appears on Oxfordshire cobrand admin' => sub {
     }
 };
 
-subtest 'Exor RDI download doesn’t appear outside of Oxfordshire cobrand admin' => sub {
+subtest "Exor RDI download doesn't appear outside of Oxfordshire cobrand admin" => sub {
     FixMyStreet::override_config {
         ALLOWED_COBRANDS => [ { 'fixmystreet' => '.' } ],
     }, sub {
@@ -67,7 +73,168 @@ subtest 'Exor RDI download doesn’t appear outside of Oxfordshire cobrand admin
     }
 };
 
-# Clean up
-$mech->delete_user( $superuser );
-$mech->delete_problems_for_body( 2237 );
-done_testing();
+subtest 'Exor file looks okay' => sub {
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => [ 'oxfordshire' ],
+        MAPIT_URL => 'http://mapit.uk/',
+    }, sub {
+        $mech->log_in_ok( $superuser->email );
+        $mech->get_ok('/admin/exordefects');
+        $mech->submit_form_ok( { with_fields => {
+            start_date => '05/05/2017',
+            end_date => '05/05/2017',
+            user_id => $inspector->id,
+        } }, 'submit download');
+        $mech->content_contains("No inspections by that inspector in the selected date range");
+
+        my $dt = FixMyStreet::DB->resultset('DefectType')->create({
+            body => $oxon,
+            name => 'Footpath',
+            description => 'Footpath stuff',
+        });
+        $dt->set_extra_metadata(activity_code => 'FC');
+        $dt->set_extra_metadata(defect_code => 'SFP1');
+        $dt->update;
+        my $dt2 = FixMyStreet::DB->resultset('DefectType')->create({
+            body => $oxon,
+            name => 'Accidental sign damage',
+            description => 'Accidental sign damage',
+        });
+        $dt2->set_extra_metadata(activity_code => 'S');
+        $dt2->set_extra_metadata(defect_code => 'ACC2');
+        $dt2->update;
+        my $i = 123;
+        foreach my $problem (@problems) {
+            $problem->update({ state => 'action scheduled', external_id => $i });
+            $problem->update({ defect_type => $dt }) if $i == 123;
+            $problem->update({ defect_type => $dt2 }) if $i == 124;
+            FixMyStreet::DB->resultset('AdminLog')->create({
+                admin_user => $inspector->name,
+                user => $inspector,
+                object_type => 'problem',
+                action => 'inspected',
+                object_id => $problem->id,
+                whenedited => DateTime->new(year => 2017, month => 5, day => 5, hour => 12),
+            });
+            $i++;
+        }
+        $mech->submit_form_ok( { with_fields => {
+            start_date => '05/05/2017',
+            end_date => '05/05/2017',
+            user_id => $inspector->id,
+        } }, 'submit download');
+        (my $rdi = $mech->content) =~ s/\r\n/\n/g;
+        $rdi =~ s/(I,[FMS]C?,,)\d+/$1XXX/g; # Remove unique ID figures, unknown order
+        is $rdi, <<EOF, "RDI file matches expected";
+"1,1.8,1.0.0.0,ENHN,"
+"G,1989169,,,XX,170505,1600,D,INS,N,,,,"
+"H,FC"
+"I,FC,,XXX,"434970E 209683N Nearest postcode: OX28 4DS.",1200,,,,,,,,"TM none","123 ""
+"J,SFP1,2,,,434970,209683,,,,,"
+"M,resolve,,,/CFC,,"
+"P,0,999999"
+"G,1989169,,,XX,170505,1600,D,INS,N,,,,"
+"H,MC"
+"I,MC,,XXX,"434970E 209683N Nearest postcode: OX28 4DS.",1200,,,,,,,,"TM none","125 ""
+"J,SFP2,2,,,434970,209683,,,,,"
+"M,resolve,,,/CMC,,"
+"P,0,999999"
+"G,1989169,,,XX,170505,1600,D,INS,N,,,,"
+"H,S"
+"I,S,,XXX,"434970E 209683N Nearest postcode: OX28 4DS.",1200,,,,,,,,"TM none","124 ""
+"J,ACC2,2,,,434970,209683,,,,,"
+"M,resolve,,,/CSI,,"
+"P,0,999999"
+"X,3,3,3,3,0,0,0,3,0,3,0,0,0"
+EOF
+        foreach my $problem (@problems) {
+            $problem->discard_changes;
+            is $problem->get_extra_metadata('rdi_processed'), undef, "Problem was not logged as sent in RDI";
+        }
+
+    }
+};
+
+subtest 'Reports are marked as inspected correctly' => sub {
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => [ 'oxfordshire' ],
+    }, sub {
+        my $date = DateTime->new(year => 2017, month => 5, day => 5, hour => 12);
+
+        my $now = DateTime->now(
+            time_zone => FixMyStreet->time_zone || FixMyStreet->local_time_zone
+        );
+        my $datetime = Test::MockModule->new('DateTime');
+        $datetime->mock('now', sub { $now });
+
+        my $params = {
+            start_date => $date,
+            end_date => $date,
+            inspection_date => $date,
+            user => $inspector,
+            mark_as_processed => 1,
+        };
+        my $rdi = FixMyStreet::Integrations::ExorRDI->new($params);
+        $rdi->construct;
+
+        foreach my $problem (@problems) {
+            $problem->discard_changes;
+            is $problem->get_extra_metadata('rdi_processed'), $now->strftime( '%Y-%m-%d %H:%M' ), "Problem was logged as sent in RDI";
+        }
+    };
+};
+
+subtest 'response times messages displayed' => sub {
+    my $oxfordshire = $mech->create_body_ok(
+        2237, 'Oxfordshire County Council'
+    );
+    my $contact = $mech->create_contact_ok(
+        body_id => $oxfordshire->id,
+        category => 'Pothole',
+        email => 'pothole@example.com',
+    );
+
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => [ 'oxfordshire' ],
+        MAPIT_URL => 'http://mapit.uk/',
+    }, sub {
+        $mech->log_out_ok;
+        $mech->clear_emails_ok;
+
+        $mech->get_ok('/around');
+        $mech->submit_form_ok( {
+                with_fields => { pc => 'OX20 1SZ' }
+            },
+            "submit_location"
+        );
+
+        $mech->follow_link_ok( { text_regex => qr/skip this step/i, },
+            "follow 'skip this step' link" );
+
+        $mech->submit_form_ok(
+            {
+                with_fields => {
+                    title         => 'Test Report',
+                    detail        => 'Test report details.',
+                    photo1        => '',
+                    email         => 'test-2@example.com',
+                    name          => 'Test User',
+                    category      => 'Pothole',
+                }
+            },
+            "submit details"
+        );
+
+        $mech->text_contains('Problems in the Pothole category are generally responded');
+        my $email = $mech->get_email;
+        ok $email, 'got and email';
+        like $mech->get_text_body_from_email, qr/Problems in the Pothole category/, 'emails contains response time message';
+        my $url = $mech->get_link_from_email($email);
+        $mech->get_ok($url);
+        $mech->text_contains('Problems in the Pothole category are generally responded')
+    };
+};
+
+END {
+    done_testing();
+}

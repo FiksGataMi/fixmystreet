@@ -1,8 +1,3 @@
-use strict;
-use utf8; # sign in error message has &ndash; in it
-use warnings;
-use Test::More;
-
 use FixMyStreet::TestMech;
 use FixMyStreet::App;
 use Web::Scraper;
@@ -41,13 +36,11 @@ for my $body (
     { area_id => 2226, name => 'Gloucestershire County Council' },
     { area_id => 2326, name => 'Cheltenham Borough Council' },
     { area_id => 2504, name => 'Westminster City Council' },
-    # The next three have fixed IDs because bits of the code rely on
-    # the body ID === MapIt area ID.
-    { area_id => 2482, name => 'Bromley Council', id => 2482 },
-    { area_id => 2227, name => 'Hampshire County Council', id => 2227 },
-    { area_id => 2333, name => 'Hart Council', id => 2333 },
+    { area_id => 2482, name => 'Bromley Council' },
+    { area_id => 2227, name => 'Hampshire County Council' },
+    { area_id => 2333, name => 'Hart Council' },
 ) {
-    my $body_obj = $mech->create_body_ok($body->{area_id}, $body->{name}, id => $body->{id});
+    my $body_obj = $mech->create_body_ok($body->{area_id}, $body->{name});
     push @bodies, $body_obj;
     $body_ids{$body->{area_id}} = $body_obj->id;
 }
@@ -897,6 +890,32 @@ foreach my $test (
 
 }
 
+subtest "Test inactive categories" => sub {
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => [ { fixmystreet => '.' } ],
+        BASE_URL => 'https://www.fixmystreet.com',
+        MAPIT_URL => 'http://mapit.uk/',
+    }, sub {
+        # Around and New report have both categories
+        $mech->get_ok('/around?pc=GL50+2PR');
+        $mech->content_contains('Potholes');
+        $mech->content_contains('Trees');
+        $mech->get_ok("/report/new?lat=$saved_lat&lon=$saved_lon");
+        $mech->content_contains('Potholes');
+        $mech->content_contains('Trees');
+        $contact2->update( { state => 'inactive' } ); # Potholes
+        # But when Potholes is inactive, it's not on New report
+        $mech->get_ok('/around?pc=GL50+2PR');
+        $mech->content_contains('Potholes');
+        $mech->content_contains('Trees');
+        $mech->get_ok("/report/new?lat=$saved_lat&lon=$saved_lon");
+        $mech->content_lacks('Potholes');
+        $mech->content_contains('Trees');
+        # Change back
+        $contact2->update( { state => 'confirmed' } );
+    };
+};
+
 subtest "test report creation for a category that is non public" => sub {
     $mech->log_out_ok;
     $mech->clear_emails_ok;
@@ -1635,8 +1654,46 @@ subtest "extra google analytics code displayed on email confirmation problem cre
     };
 };
 
-done_testing();
+subtest "inspectors get redirected directly to the report page" => sub {
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => [ { fixmystreet => '.' } ],
+        BASE_URL => 'https://www.fixmystreet.com',
+        MAPIT_URL => 'http://mapit.uk/',
+    }, sub {
+        $mech->log_out_ok;
 
-END {
-    $mech->delete_body($_) foreach @bodies;
-}
+        my $user = $mech->create_user_ok('inspector@example.org', name => 'inspector', from_body => $bodies[0]);
+        $user->user_body_permissions->find_or_create({
+            body => $bodies[0],
+            permission_type => 'planned_reports',
+        });
+
+        $mech->log_in_ok('inspector@example.org');
+        $mech->get_ok('/');
+        $mech->submit_form_ok( { with_fields => { pc => 'GL50 2PR' } },
+            "submit location" );
+        $mech->follow_link_ok(
+            { text_regex => qr/skip this step/i, },
+            "follow 'skip this step' link"
+        );
+
+        $mech->submit_form_ok(
+            {
+                with_fields => {
+                    title         => "Inspector report",
+                    detail        => 'Inspector report details.',
+                    photo1        => '',
+                    name          => 'Joe Bloggs',
+                    may_show_name => '1',
+                    phone         => '07903 123 456',
+                    category      => 'Trees',
+                }
+            },
+            "submit good details"
+        );
+
+        like $mech->uri->path, qr/\/report\/[0-9]+/, 'Redirects directly to report';
+    }
+};
+
+done_testing();

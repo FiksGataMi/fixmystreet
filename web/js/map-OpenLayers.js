@@ -2,7 +2,9 @@ var fixmystreet = fixmystreet || {};
 
 (function() {
 
-    fixmystreet.maps = {
+    fixmystreet.maps = fixmystreet.maps || {};
+
+    $.extend(fixmystreet.maps, {
       // This function might be passed either an OpenLayers.LonLat (so has
       // lon and lat), or an OpenLayers.Geometry.Point (so has x and y).
       update_pin: function(lonlat) {
@@ -50,7 +52,7 @@ var fixmystreet = fixmystreet || {};
             /* Already have a pin */
             fixmystreet.markers.features[0].move(lonlat);
         } else {
-            var markers = fixmystreet.maps.markers_list( [ [ lonlat.lat, lonlat.lon, 'green' ] ], false );
+            var markers = fixmystreet.maps.markers_list( [ [ lonlat.lat, lonlat.lon, fixmystreet.pin_new_report_colour ] ], false );
             fixmystreet.bbox_strategy.deactivate();
             fixmystreet.markers.removeAllFeatures();
             fixmystreet.markers.addFeatures( markers );
@@ -68,12 +70,8 @@ var fixmystreet = fixmystreet || {};
 
       markers_list: function(pins, transform) {
         var markers = [];
-        var size = fixmystreet.maps.marker_size_for_zoom(
-            fixmystreet.map.getZoom() + fixmystreet.zoomOffset
-        );
-        var selected_size = fixmystreet.maps.selected_marker_size_for_zoom(
-            fixmystreet.map.getZoom() + fixmystreet.zoomOffset
-        );
+        var size = fixmystreet.maps.marker_size();
+        var selected_size = fixmystreet.maps.selected_marker_size();
         for (var i=0; i<pins.length; i++) {
             var pin = pins[i];
             var loc = new OpenLayers.Geometry.Point(pin[1], pin[0]);
@@ -84,12 +82,13 @@ var fixmystreet = fixmystreet || {};
                     fixmystreet.map.getProjectionObject()
                 );
             }
-            var marker_size = (pin[3] === window.selected_problem_id) ? selected_size : size;
+            var id = +pin[3];
+            var marker_size = (id === window.selected_problem_id) ? selected_size : size;
             var marker = new OpenLayers.Feature.Vector(loc, {
                 colour: pin[2],
                 size: pin[5] || marker_size,
                 faded: 0,
-                id: pin[3],
+                id: id,
                 title: pin[4] || '',
                 draggable: pin[6] === false ? false : true
             });
@@ -99,12 +98,8 @@ var fixmystreet = fixmystreet || {};
       },
 
       markers_resize: function() {
-        var size = fixmystreet.maps.marker_size_for_zoom(
-            fixmystreet.map.getZoom() + fixmystreet.zoomOffset
-        );
-        var selected_size = fixmystreet.maps.selected_marker_size_for_zoom(
-            fixmystreet.map.getZoom() + fixmystreet.zoomOffset
-        );
+        var size = fixmystreet.maps.marker_size();
+        var selected_size = fixmystreet.maps.selected_marker_size();
         for (var i = 0; i < fixmystreet.markers.features.length; i++) {
             if (fixmystreet.markers.features[i].attributes.id == window.selected_problem_id) {
                 fixmystreet.markers.features[i].attributes.size = selected_size;
@@ -119,7 +114,8 @@ var fixmystreet = fixmystreet || {};
         return fixmystreet.markers.getFeaturesByAttribute('id', problem_id)[0];
       },
 
-      marker_size_for_zoom: function(zoom) {
+      marker_size: function() {
+        var zoom = fixmystreet.map.getZoom() + fixmystreet.zoomOffset;
         if (zoom >= 15) {
             return window.selected_problem_id ? 'small' : 'normal';
         } else if (zoom >= 13) {
@@ -129,7 +125,8 @@ var fixmystreet = fixmystreet || {};
         }
       },
 
-      selected_marker_size_for_zoom: function(zoom) {
+      selected_marker_size: function() {
+        var zoom = fixmystreet.map.getZoom() + fixmystreet.zoomOffset;
         if (zoom >= 15) {
             return 'big';
         } else if (zoom >= 13) {
@@ -198,7 +195,7 @@ var fixmystreet = fixmystreet || {};
           }
           fixmystreet.markers.redraw();
       }
-    };
+    });
 
     var drag = {
         activate: function() {
@@ -211,7 +208,9 @@ var fixmystreet = fixmystreet || {};
             this._drag.activate();
         },
         deactivate: function() {
-            this._drag && this._drag.deactivate();
+            if (this._drag) {
+              this._drag.deactivate();
+            }
         }
     };
 
@@ -310,7 +309,7 @@ var fixmystreet = fixmystreet || {};
         var filter_categories = replace_query_parameter(qs, 'filter_categories', 'filter_category');
         var filter_statuses = replace_query_parameter(qs, 'statuses', 'status');
         var sort_key = replace_query_parameter(qs, 'sort', 'sort');
-        delete qs['p'];
+        delete qs.p;
         var new_url;
         if ($.isEmptyObject(qs)) {
             new_url = location.href.replace(location.search, "");
@@ -365,6 +364,37 @@ var fixmystreet = fixmystreet || {};
             ]);
             var loaded = 0;
             var new_geometry = new OpenLayers.Geometry.Polygon(lr);
+            var style_area = function() {
+                loaded++;
+                var style = this.styleMap.styles['default'];
+                if ( fixmystreet.area_format ) {
+                    style.defaultStyle = fixmystreet.area_format;
+                } else {
+                    $.extend(style.defaultStyle, { fillColor: 'black', strokeColor: 'black' });
+                }
+                var geometry = this.features[0].geometry;
+                if (geometry.CLASS_NAME == 'OpenLayers.Geometry.Collection') {
+                    $.each(geometry.components, function(i, polygon) {
+                        new_geometry.addComponents(polygon.components);
+                        extent.extend(polygon.getBounds());
+                    });
+                } else if (geometry.CLASS_NAME == 'OpenLayers.Geometry.Polygon') {
+                    new_geometry.addComponents(geometry.components);
+                    extent.extend(this.getDataExtent());
+                }
+                if (loaded == fixmystreet.area.length) {
+                    var f = this.features[0].clone();
+                    f.geometry = new_geometry;
+                    this.removeAllFeatures();
+                    this.addFeatures([f]);
+                    var qs = parse_query_string();
+                    if (!qs.bbox) {
+                        zoomToBounds(extent);
+                    }
+                } else {
+                    fixmystreet.map.removeLayer(this);
+                }
+            };
             for (var i=0; i<fixmystreet.area.length; i++) {
                 var area = new OpenLayers.Layer.Vector("KML", {
                     renderers: ['SVGBig', 'VML', 'Canvas'],
@@ -375,37 +405,7 @@ var fixmystreet = fixmystreet || {};
                     })
                 });
                 fixmystreet.map.addLayer(area);
-                area.events.register('loadend', area, function(a,b,c) {
-                    loaded++;
-                    var style = this.styleMap.styles['default'];
-                    if ( fixmystreet.area_format ) {
-                        style.defaultStyle = fixmystreet.area_format;
-                    } else {
-                        $.extend(style.defaultStyle, { fillColor: 'black', strokeColor: 'black' });
-                    }
-                    var geometry = this.features[0].geometry;
-                    if (geometry.CLASS_NAME == 'OpenLayers.Geometry.Collection') {
-                        $.each(geometry.components, function(i, polygon) {
-                            new_geometry.addComponents(polygon.components)
-                            extent.extend(polygon.getBounds());
-                        });
-                    } else if (geometry.CLASS_NAME == 'OpenLayers.Geometry.Polygon') {
-                        new_geometry.addComponents(geometry.components);
-                        extent.extend(this.getDataExtent());
-                    }
-                    if (loaded == fixmystreet.area.length) {
-                        var f = this.features[0].clone();
-                        f.geometry = new_geometry;
-                        this.removeAllFeatures();
-                        this.addFeatures([f]);
-                        var qs = parse_query_string();
-                        if (!qs.bbox) {
-                            zoomToBounds(extent);
-                        }
-                    } else {
-                        fixmystreet.map.removeLayer(this);
-                    }
-                });
+                area.events.register('loadend', area, style_area);
             }
         }
 
@@ -541,6 +541,9 @@ var fixmystreet = fixmystreet || {};
             fixmystreet.map.addControl( fixmystreet.select_feature );
             fixmystreet.select_feature.activate();
             fixmystreet.map.events.register( 'zoomend', null, fixmystreet.maps.markers_resize );
+            fixmystreet.map.events.register( 'zoomend', null, function() {
+              fixmystreet.run(fixmystreet.maps.show_shortlist_control);
+            });
 
             // Set up the event handlers to populate the filters and react to them changing
             $("#filter_categories").on("change.filters", categories_or_status_changed);
@@ -564,22 +567,14 @@ var fixmystreet = fixmystreet || {};
 
         $('#hide_pins_link').click(function(e) {
             e.preventDefault();
-            var showhide = [
-                'Show pins', 'Hide pins',
-                'Dangos pinnau', 'Cuddio pinnau',
-                "Vis nåler", "Skjul nåler",
-                "Zeige Stecknadeln", "Stecknadeln ausblenden"
-            ];
-            for (var i=0; i<showhide.length; i+=2) {
-                if (this.innerHTML == showhide[i]) {
-                    fixmystreet.markers.setVisibility(true);
-                    fixmystreet.select_feature.activate();
-                    this.innerHTML = showhide[i+1];
-                } else if (this.innerHTML == showhide[i+1]) {
-                    fixmystreet.markers.setVisibility(false);
-                    fixmystreet.select_feature.deactivate();
-                    this.innerHTML = showhide[i];
-                }
+            if (this.innerHTML == translation_strings.show_pins) {
+                fixmystreet.markers.setVisibility(true);
+                fixmystreet.select_feature.activate();
+                this.innerHTML = translation_strings.hide_pins;
+            } else if (this.innerHTML == translation_strings.hide_pins) {
+                fixmystreet.markers.setVisibility(false);
+                fixmystreet.select_feature.deactivate();
+                this.innerHTML = translation_strings.show_pins;
             }
         });
 
@@ -680,9 +675,9 @@ var fixmystreet = fixmystreet || {};
 
         (function() {
             var timeout;
-            $('.item-list--reports').on('mouseenter', '.item-list--reports__item', function(){
+            $('#js-reports-list').on('mouseenter', '.item-list--reports__item', function(){
                 var href = $('a', this).attr('href');
-                var id = parseInt(href.replace(/^.*[/]([0-9]+)$/, '$1'));
+                var id = parseInt(href.replace(/^.*[\/]([0-9]+)$/, '$1'),10);
                 clearTimeout(timeout);
                 fixmystreet.maps.markers_highlight(id);
             }).on('mouseleave', '.item-list--reports__item', function(){
@@ -707,14 +702,6 @@ OpenLayers.Control.PanZoomFMS = OpenLayers.Class(OpenLayers.Control.PanZoom, {
         btn.action = id;
         btn.className = "olButton";
         this.div.appendChild(btn);
-        if (OpenLayers.VERSION_NUMBER.indexOf('2.11') > -1) {
-            btn.map = this.map;
-            OpenLayers.Event.observe(btn, "mousedown", OpenLayers.Function.bindAsEventListener(this.buttonDown, btn));
-            var slideFactorPixels = this.slideFactor;
-            btn.getSlideFactor = function() {
-                return slideFactorPixels;
-            };
-        }
         this.buttons.push(btn);
         return btn;
     },
@@ -752,6 +739,10 @@ OpenLayers.Control.PermalinkFMS = OpenLayers.Class(OpenLayers.Control.Permalink,
         }
         href += separator + OpenLayers.Util.getParameterString(this.createParams(center, zoom));
         // Could use mlat/mlon here as well if we are on a page with a marker
+        if (this.base == '/around') {
+            href += '&js=1';
+        }
+
         if (this.anchor && !this.element) {
             window.location.href = href;
         }
@@ -864,10 +855,6 @@ OpenLayers.Format.FixMyStreet = OpenLayers.Class(OpenLayers.Format.JSON, {
         } else {
             obj = json;
         }
-        var current;
-        if (typeof(obj.current) != 'undefined' && (current = document.getElementById('current'))) {
-            current.innerHTML = obj.current;
-        }
         var reports_list;
         if (typeof(obj.reports_list) != 'undefined' && (reports_list = document.getElementById('js-reports-list'))) {
             reports_list.innerHTML = obj.reports_list;
@@ -931,7 +918,7 @@ OpenLayers.Control.DragFeatureFMS = OpenLayers.Class(OpenLayers.Control.DragFeat
             return false;
         }
     }
-})
+});
 
 OpenLayers.Renderer.SVGBig = OpenLayers.Class(OpenLayers.Renderer.SVG, {
     MAX_PIXEL: 15E7,

@@ -101,6 +101,7 @@ use Moo;
 use namespace::clean -except => [ 'meta' ];
 
 with 'FixMyStreet::Roles::Abuser',
+     'FixMyStreet::Roles::Extra',
      'FixMyStreet::Roles::PhotoSet';
 
 my $stz = sub {
@@ -128,9 +129,10 @@ sub check_for_errors {
       unless $self->text =~ m/\S/;
 
     # Bromley Council custom character limit
-    if ( $self->text && $self->problem && $self->problem->bodies_str
-        && $self->problem->bodies_str eq '2482' && length($self->text) > 1750 ) {
-        $errors{update} = sprintf( _('Updates are limited to %s characters in length. Please shorten your update'), 1750 );
+    if ( $self->text && $self->problem && $self->problem->bodies_str) {
+        if ($self->problem->to_body_named('Bromley') && length($self->text) > 1750) {
+            $errors{update} = sprintf( _('Updates are limited to %s characters in length. Please shorten your update'), 1750 );
+        }
     }
 
     return \%errors;
@@ -147,6 +149,11 @@ sub confirm {
 
     $self->state( 'confirmed' );
     $self->confirmed( \'current_timestamp' );
+}
+
+sub url {
+    my $self = shift;
+    return "/report/" . $self->problem_id . '#update_' . $self->id;
 }
 
 sub photos {
@@ -167,22 +174,6 @@ sub photos {
         }
     } $photoset->all_ids;
     return \@photos;
-}
-
-=head2 problem_state_display
-
-Returns a string suitable for display lookup in the update meta section.
-Removes the '- council/user' bit from fixed states.
-
-=cut
-
-sub problem_state_display {
-    my $self = shift;
-
-    my $state = $self->problem_state;
-    $state =~ s/ -.*$//;
-
-    return $state;
 }
 
 =head2 latest_moderation_log_entry
@@ -236,8 +227,6 @@ sub meta_line {
 
     my $meta = '';
 
-    $c->stash->{last_state} ||= '';
-
     if ($self->anonymous or !$self->name) {
         $meta = sprintf( _( 'Posted anonymously at %s' ), Utils::prettify_dt( $self->confirmed ) )
     } elsif ($self->user->from_body) {
@@ -248,68 +237,54 @@ sub meta_line {
         } elsif ($body eq 'Royal Borough of Greenwich') {
             $body = "$body <img src='/cobrands/greenwich/favicon.png' alt=''>";
         }
-        if ($c->user_exists and $c->user->has_permission_to('view_body_contribute_details', $self->problem->bodies_str_ids)) {
-            $meta = sprintf( _( 'Posted by <strong>%s</strong> (%s) at %s' ), $body, $user_name, Utils::prettify_dt( $self->confirmed ) );
+        my $can_view_contribute = $c->user_exists && $c->user->has_permission_to('view_body_contribute_details', $self->problem->bodies_str_ids);
+        if ($self->text) {
+            if ($can_view_contribute) {
+                $meta = sprintf( _( 'Posted by <strong>%s</strong> (%s) at %s' ), $body, $user_name, Utils::prettify_dt( $self->confirmed ) );
+            } else {
+                $meta = sprintf( _( 'Posted by <strong>%s</strong> at %s' ), $body, Utils::prettify_dt( $self->confirmed ) );
+            }
         } else {
-            $meta = sprintf( _( 'Posted by <strong>%s</strong> at %s' ), $body, Utils::prettify_dt( $self->confirmed ) );
+            if ($can_view_contribute) {
+                $meta = sprintf( _( 'Updated by <strong>%s</strong> (%s) at %s' ), $body, $user_name, Utils::prettify_dt( $self->confirmed ) );
+            } else {
+                $meta = sprintf( _( 'Updated by <strong>%s</strong> at %s' ), $body, Utils::prettify_dt( $self->confirmed ) );
+            }
         }
     } else {
         $meta = sprintf( _( 'Posted by %s at %s' ), FixMyStreet::Template::html_filter($self->name), Utils::prettify_dt( $self->confirmed ) )
     }
 
-    my $update_state = '';
-
-    if ($self->mark_fixed) {
-        $update_state = _( 'marked as fixed' );
-    } elsif ($self->mark_open)  {
-        $update_state = _( 'reopened' );
-    } elsif ($self->problem_state) {
-        my $state = $self->problem_state_display;
-
-        if ($state eq 'confirmed') {
-            if ($c->stash->{last_state}) {
-                $update_state = _( 'reopened' )
-            }
-        } elsif ($state eq 'investigating') {
-            $update_state = _( 'marked as investigating' )
-        } elsif ($state eq 'planned') {
-            $update_state = _( 'marked as planned' )
-        } elsif ($state eq 'in progress') {
-            $update_state = _( 'marked as in progress' )
-        } elsif ($state eq 'action scheduled') {
-            $update_state = _( 'marked as action scheduled' )
-        } elsif ($state eq 'closed') {
-            $update_state = _( 'marked as closed' )
-        } elsif ($state eq 'fixed') {
-            $update_state = _( 'marked as fixed' )
-        } elsif ($state eq 'unable to fix') {
-            $update_state = _( 'marked as no further action' )
-        } elsif ($state eq 'not responsible') {
-            $update_state = _( "marked as not the council's responsibility" )
-        } elsif ($state eq 'duplicate') {
-            $update_state = _( 'closed as a duplicate report' )
-        } elsif ($state eq 'internal referral') {
-            $update_state = _( 'marked as an internal referral' )
-        }
-
-        if ($c->cobrand->moniker eq 'bromley' || (
-                $self->problem->bodies_str &&
-                $self->problem->bodies_str eq '2482'
-        )) {
-            if ($state eq 'not responsible') {
-                $update_state = 'marked as third party responsibility'
-            }
-        }
-
+    if ($self->get_extra_metadata('defect_raised')) {
+        $meta .= ', ' . _( 'and a defect raised' );
     }
-
-    if ($update_state ne $c->stash->{last_state} and $update_state) {
-        $meta .= ", $update_state";
-    }
-
-    $c->stash->{last_state} = $update_state;
 
     return $meta;
 };
+
+sub problem_state_display {
+    my ( $self, $c ) = @_;
+
+    my $update_state = '';
+    my $cobrand = $c->cobrand->moniker;
+
+    if ($self->mark_fixed) {
+        return FixMyStreet::DB->resultset("State")->display('fixed', 1);
+    } elsif ($self->mark_open)  {
+        return FixMyStreet::DB->resultset("State")->display('confirmed', 1);
+    } elsif ($self->problem_state) {
+        my $state = $self->problem_state;
+        if ($state eq 'not responsible') {
+            $update_state = _( "not the council's responsibility" );
+            if ($cobrand eq 'bromley' || $self->problem->to_body_named('Bromley')) {
+                $update_state = 'third party responsibility';
+            }
+        } else {
+            $update_state = FixMyStreet::DB->resultset("State")->display($state, 1);
+        }
+    }
+
+    return $update_state;
+}
 
 1;

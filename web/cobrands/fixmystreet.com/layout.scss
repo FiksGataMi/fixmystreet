@@ -67,35 +67,47 @@ h3, h4,
 @import "_colours";
 @import "../sass/layout";
 
+body {
+    @media ($high-dpi-screen) {
+        background-image: url(images/tile@2x.jpg);
+        background-size: 500px;
+    }
+}
+
 // Tiled background stripe, not plain colour
 #front-main {
     background: $primary url(images/tile-y.jpg);
+
+    @media ($high-dpi-screen) {
+        background-image: url(images/tile-y@2x.jpg);
+        background-size: 500px;
+    }
 }
 
 .nav-menu--main {
     a:hover {
         @include linear-gradient(#000, #444 10%, #444 95%, #111);
     }
+    a.report-a-problem-btn:hover {
+        background: $primary/1.1;
+    }
 }
 
-.nav-wrapper {
-    .nav-wrapper-2 {
-        border-image-source: url(images/tile-y-border.jpg);
-        border-image-slice: 4 0 0;
-        border-image-repeat: repeat;
+#site-header {
+    background: none;
+    border-image-source: url(images/tile-y.jpg);
+    border-image-slice: 4 0 0 0;
+    border-image-repeat: repeat;
+
+    @media ($high-dpi-screen) {
+        border-image-source: url(images/tile-y@2x.jpg);
+        border-image-slice: 8 0 0 0;
     }
 }
 body.mappage {
-    .nav-wrapper {
-        .nav-wrapper-2 {
-            @include linear-gradient(#000, #222 10%, #222 90%, #000);
-        }
+    #site-header {
+        @include linear-gradient(#000, #222 10%, #222 90%, #000);
     }
-}
-
-.nav-menu--mysoc {
-    background: #515151;
-    margin-top: -4px;
 }
 
 body.twothirdswidthpage,
@@ -150,61 +162,24 @@ body.fullwidthpage {
             }
         }
     }
-
-    .container {
-        .content {
-            footer {
-                .tablewrapper {
-                    background: #1a1a1a url(images/tile.jpg) 0 0 repeat;
-                }
-            }
-        }
-    }
 }
 
 body.frontpage {
-    .container {
-        background-color: transparent;
-
-        .content {
-            background-color: transparent;
-            padding: 0em 0em 1em;
-
-            > .tablewrapper {
-                margin: -4em 0em 0em;
-                padding: 1em 1em;
-                background-color: white;
-                width: auto;
-            }
-            > .form-error {
-                margin-top: -4em;
-            }
-            > .form-error + .tablewrapper {
-                margin-top: 0;
-            }
-        }
-        footer {
-            .bordered {
-                margin: 0em;
-            }
-        }
+    #site-logo {
+        margin: 2em 0;
+        width: 300px;
+        height: 60px;
+        background: url($image-sprite) -2px -108px no-repeat;
     }
-}
 
-body.twothirdswidthpage {
-    .container {
-        .content {
-            footer {
-                .tablewrapper {
-                    border: 0px;
-                }
-            }
-        }
+    .content {
+        margin-top: -3em; // overlap the bottom of #front-main
     }
 }
 
 .next-steps {
   @include clearfix;
+  @include flex-container();
   margin-bottom: 2em; // add some space between this and the footer
 }
 
@@ -285,26 +260,6 @@ body.unresponsive-council {
     }
 }
 
-// FMS.com has a slightly different version of the
-// footer-help / footer-marketing widgets that appear
-// at the bottom of pages with `pagefooter` set.
-#footer-help {
-  border: none;
-
-  ul {
-    margin: 0 auto;
-
-    li {
-      max-width: 19em;
-
-      &:last-child {
-        border: none;
-        padding-left: 3em;
-      }
-    }
-  }
-}
-
 .mysoc-footer {
   margin-top: 3em;
   // The below lines are so that on e.g. /about/posters the footer will move on
@@ -314,4 +269,46 @@ body.unresponsive-council {
 }
 body.mappage .mysoc-footer {
     display: none;
+}
+
+// FMS Pro advert
+footer {
+  background: $base_bg; // (images/tile.jpg)
+  margin: -1em;
+  padding: 1em 0;
+
+  @media ($high-dpi-screen) {
+    background-image: url(images/tile@2x.jpg);
+    background-size: 500px;
+  }
+}
+
+.fms-pro-promo {
+  margin: 1em 0 3em 0;
+  padding: 2em;
+  background: $primary url(images/tile-y.jpg) 0 0 repeat;
+
+  @media ($high-dpi-screen) {
+    background-image: url(images/tile-y@2x.jpg);
+    background-size: 500px;
+  }
+
+  p {
+    font-size: 1.2em;
+    max-width: 26em;
+  }
+
+  h2 {
+    font-family: inherit;
+    font-weight: bold;
+    font-size: 2em;
+  }
+
+  @media (min-width: 60em) {
+    padding: 3em;
+  }
+}
+
+.footer-marketing {
+  color: #ccc;
 }

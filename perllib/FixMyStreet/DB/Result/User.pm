@@ -204,6 +204,27 @@ sub alert_for_problem {
     } );
 }
 
+=head2 create_alert
+
+Sign a user up to receive alerts on a given problem
+
+=cut
+
+sub create_alert {
+    my ( $self, $id, $options ) = @_;
+    my $alert = $self->alert_for_problem($id);
+
+    unless ( $alert ) {
+      $alert = $self->alerts->create({
+          %$options,
+          alert_type   => 'new_updates',
+          parameter    => $id,
+      });
+    }
+
+    $alert->confirm();
+}
+
 sub body {
     my $self = shift;
     return '' unless $self->from_body;
@@ -273,6 +294,16 @@ sub permissions {
 
 sub has_permission_to {
     my ($self, $permission_type, $body_ids) = @_;
+
+    # Nobody, including superusers, can have a permission which isn't available
+    # in the current cobrand.
+    my $cobrand = $self->result_source->schema->cobrand;
+    my $cobrand_perms = $cobrand->available_permissions;
+    my %available = map { %$_ } values %$cobrand_perms;
+    # The 'trusted' permission is never set in the cobrand's
+    # available_permissions (see note there in Default.pm) so include it here.
+    $available{trusted} = 1;
+    return 0 unless $available{$permission_type};
 
     return 1 if $self->is_superuser;
     return 0 if !$body_ids || (ref $body_ids && !@$body_ids);
@@ -391,9 +422,19 @@ sub active_planned_reports {
     $self->planned_reports->search({ removed => undef });
 }
 
+has active_user_planned_reports => (
+    is => 'ro',
+    lazy => 1,
+    default => sub {
+        my $self = shift;
+        [ $self->user_planned_reports->search({ removed => undef })->all ];
+    },
+);
+
 sub is_planned_report {
     my ($self, $problem) = @_;
-    return $self->active_planned_reports->find({ id => $problem->id });
+    my $id = $problem->id;
+    return scalar grep { $_->report_id == $id } @{$self->active_user_planned_reports};
 }
 
 sub update_reputation {

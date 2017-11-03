@@ -1,10 +1,5 @@
-use strict;
-use warnings;
-use Test::More;
 use FixMyStreet::TestMech;
 use FixMyStreet::Script::ArchiveOldEnquiries;
-
-mySociety::Locale::gettext_domain( 'FixMyStreet' );
 
 my $mech = FixMyStreet::TestMech->new();
 
@@ -15,8 +10,10 @@ my $opts = {
 };
 
 my $user = $mech->create_user_ok('test@example.com', name => 'Test User');
-my $oxfordshire = $mech->create_body_ok(2237, 'Oxfordshire County Council', id => 2237);
-my $west_oxon = $mech->create_body_ok(2420, 'West Oxfordshire District Council', id => 2420);
+my $oxfordshire = $mech->create_body_ok(2237, 'Oxfordshire County Council');
+my $west_oxon = $mech->create_body_ok(2420, 'West Oxfordshire District Council');
+
+$opts->{body} = $oxfordshire->id;
 
 subtest 'sets reports to the correct status' => sub {
     FixMyStreet::override_config {
@@ -156,8 +153,3 @@ subtest 'user with new reports does not get email' => sub {
 };
 
 done_testing();
-
-END {
-    $mech->delete_user($user);
-    $mech->delete_body($oxfordshire);
-}

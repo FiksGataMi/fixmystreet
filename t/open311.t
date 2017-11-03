@@ -1,8 +1,6 @@
 #!/usr/bin/env perl
 
-use utf8;
-use strict;
-use warnings;
+use FixMyStreet::Test;
 use File::Temp 'tempdir';
 use Path::Tiny;
 use Test::More;
@@ -44,7 +42,7 @@ for my $sfc (0..2) {
     } );
     my $expected_error = qr{Failed to submit problem 1 over Open311}ism;
 
-    if ($sfc == 2) {
+    if ($sfc == 1) {
         warning_like {$o2->send_service_request( $p, { url => 'http://example.com/' }, 1 )} $expected_error, 'warning generated on failed call';
     } else {
         warning_like {$o2->send_service_request( $p, { url => 'http://example.com/' }, 1 )} undef, 'no warning generated on failed call';
@@ -578,8 +576,8 @@ for my $test (
     };
 }
 
-$problem->send_fail_count(2);
-$comment->send_fail_count(2);
+$problem->send_fail_count(1);
+$comment->send_fail_count(1);
 
 subtest 'No request id in reponse' => sub {
     my $results;
@@ -679,6 +677,8 @@ subtest 'check FixaMinGata' => sub {
     my $results = make_service_req( $problem, $extra, $problem->category, '<?xml version="1.0" encoding="utf-8"?><service_requests><request><service_request_id>248</service_request_id></request></service_requests>' );
     is $results->{ res }, 248, 'got request id';
     my $description = <<EOT;
+Titel: a problem
+
 Beskrivning: MØØse
 
 Länk till ärendet: http://example.com/report/1

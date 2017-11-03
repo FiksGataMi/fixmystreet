@@ -1,7 +1,3 @@
-use strict;
-use warnings;
-use Test::More;
-
 use FixMyStreet::TestMech;
 use FixMyStreet::App;
 use Web::Scraper;
@@ -176,7 +172,3 @@ foreach my $test (
 }
 
 done_testing();
-
-END {
-    $mech->delete_body($body);
-}

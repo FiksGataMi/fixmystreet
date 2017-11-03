@@ -114,12 +114,9 @@ fixmystreet.maps = {};
 
     /* Pan data handler */
     function read_pin_json(obj) {
-        var current, current_near;
-        if (typeof(obj.current) != 'undefined' && (current = document.getElementById('current'))) {
-            current.innerHTML = obj.current;
-        }
-        if (typeof(obj.current_near) != 'undefined' && (current_near = document.getElementById('current_near'))) {
-            current_near.innerHTML = obj.current_near;
+        var reports_list;
+        if (typeof(obj.reports_list) != 'undefined' && (reports_list = document.getElementById('js-reports-list'))) {
+            reports_list.innerHTML = obj.reports_list;
         }
         fixmystreet.markers = markers_list( obj.pins, false );
     }
@@ -214,24 +211,16 @@ fixmystreet.maps = {};
         $('#hide_pins_link').click(function(e) {
             var i, m;
             e.preventDefault();
-            var showhide = [
-                'Show pins', 'Hide pins',
-                'Dangos pinnau', 'Cuddio pinnau',
-                "Vis nåler", "Gjem nåler",
-                "Zeige Stecknadeln", "Stecknadeln ausblenden"
-            ];
-            for (i=0; i<showhide.length; i+=2) {
-                if (this.innerHTML == showhide[i]) {
-                    for (m=0; m<fixmystreet.markers.length; m++) {
-                        fixmystreet.markers[m].setMap(fixmystreet.map);
-                    }
-                    this.innerHTML = showhide[i+1];
-                } else if (this.innerHTML == showhide[i+1]) {
-                    for (m=0; m<fixmystreet.markers.length; m++) {
-                        fixmystreet.markers[m].setMap(null);
-                    }
-                    this.innerHTML = showhide[i];
+            if (this.innerHTML == translation_strings.show_pins) {
+                for (m=0; m<fixmystreet.markers.length; m++) {
+                    fixmystreet.markers[m].setMap(fixmystreet.map);
                 }
+                this.innerHTML = translation_strings.hide_pins;
+            } else if (this.innerHTML == translation_strings.hide_pins) {
+                for (m=0; m<fixmystreet.markers.length; m++) {
+                    fixmystreet.markers[m].setMap(null);
+                }
+                this.innerHTML = translation_strings.show_pins;
             }
         });
 

@@ -1,12 +1,13 @@
 package FixMyStreet::TestMech;
-use base qw(Test::WWW::Mechanize::Catalyst Test::Builder::Module);
+use parent qw(Test::WWW::Mechanize::Catalyst Test::Builder::Module);
 
-use strict;
-use warnings;
+use FixMyStreet::Test;
 
-BEGIN {
-    use FixMyStreet;
-    FixMyStreet->test_mode(1);
+sub import {
+    strict->import;
+    warnings->import(FATAL => 'all');
+    utf8->import;
+    Test::More->export_to_level(1);
 }
 
 use Test::WWW::Mechanize::Catalyst 'FixMyStreet::App';
@@ -484,31 +485,6 @@ sub extract_problem_list {
     return $result->{ problems } || [];
 }
 
-=head2 extract_report_stats
-
-    $stats = $mech->extract_report_stats
-
-Returns a hash ref keyed by council name of all the council stats from the all reports
-page. Each value is an array ref with the first element being the council name and the
-rest being the stats in the order the appear in each row.
-
-=cut
-
-sub extract_report_stats {
-    my $mech = shift;
-
-    my $result = scraper {
-        process 'tr[align=center]', 'councils[]' => scraper {
-            process 'td.title a', 'council', 'TEXT',
-            process 'td', 'stats[]', 'TEXT'
-        }
-    }->scrape( $mech->response );
-
-    my %councils = map { $_->{council} => $_->{stats} } @{ $result->{councils} };
-
-    return \%councils;
-}
-
 =head2 visible_form_values
 
     $hashref = $mech->visible_form_values(  );
@@ -655,8 +631,7 @@ sub delete_defect_type {
 sub create_contact_ok {
     my $self = shift;
     my %contact_params = (
-        confirmed => 1,
-        deleted => 0,
+        state => 'confirmed',
         editor => 'Test',
         whenedited => \'current_timestamp',
         note => 'Created for test',
@@ -668,16 +643,12 @@ sub create_contact_ok {
 }
 
 sub create_body_ok {
-    my $self = shift;
-    my ( $area_id, $name, %extra ) = @_;
+    my ( $self, $area_id, $name, $params ) = @_;
+
+    $params->{name} = $name;
 
     my $body = FixMyStreet::DB->resultset('Body');
-    my $params = { name => $name };
-    if ($extra{id}) {
-        $body = $body->update_or_create({ %$params, id => $extra{id} }, { key => 'primary' });
-    } else {
-        $body = $body->find_or_create($params);
-    }
+    $body = $body->find_or_create( $params );
     ok $body, "found/created body $name";
 
     $body->body_areas->delete;

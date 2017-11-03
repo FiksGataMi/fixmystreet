@@ -4,7 +4,7 @@ use parent 'FixMyStreet::Cobrand::UKCouncils';
 use strict;
 use warnings;
 
-sub council_id { return 2561; }
+sub council_area_id { return 2561; }
 sub council_area { return 'Bristol'; }
 sub council_name { return 'Bristol County Council'; }
 sub council_url { return 'bristol'; }
@@ -68,7 +68,7 @@ sub categories_restriction {
     # cobrand, not the email categories from FMS.com. We've set up the
     # Email categories with a devolved send_method, so can identify Open311
     # categories as those which have a blank send_method.
-    return $rs->search( { send_method => undef } );
+    return $rs->search( { 'me.send_method' => undef } );
 }
 
 1;

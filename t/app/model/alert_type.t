@@ -1,9 +1,4 @@
-use strict;
-use warnings;
-use Test::More;
 use FixMyStreet::TestMech;
-
-mySociety::Locale::gettext_domain( 'FixMyStreet' );
 
 my $mech = FixMyStreet::TestMech->new();
 
@@ -507,8 +502,5 @@ subtest "correct i18n-ed summary for state of closed" => sub {
 };
 
 END {
-    $mech->delete_user($user) if $user;
-    $mech->delete_user($user2) if $user2;
-    $mech->delete_user($user3) if $user3;
     done_testing();
 }

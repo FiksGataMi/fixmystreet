@@ -4,7 +4,7 @@ use base 'FixMyStreet::Cobrand::UKCouncils';
 use strict;
 use warnings;
 
-sub council_id { return 2237; }
+sub council_area_id { return 2237; }
 sub council_area { return 'Oxfordshire'; }
 sub council_name { return 'Oxfordshire County Council'; }
 sub council_url { return 'oxfordshire'; }
@@ -96,7 +96,7 @@ sub problem_response_days {
     return 10 if $p->category eq 'Utilities';
     return 10 if $p->category eq 'Vegetation';
 
-    return undef;
+    return 0;
 }
 
 sub reports_ordering {
@@ -106,10 +106,33 @@ sub reports_ordering {
 sub pin_colour {
     my ( $self, $p, $context ) = @_;
     return 'grey' unless $self->owns_problem( $p );
-    return 'grey' if $p->state eq 'not responsible';
-    return 'green' if $p->is_fixed || $p->is_closed;
-    return 'red' if $p->state eq 'confirmed';
+    return 'grey' if $p->is_closed;
+    return 'green' if $p->is_fixed;
+    return 'yellow' if $p->state eq 'confirmed';
+    return 'orange'; # all the other `open_states` like "in progress"
+}
+
+sub pin_new_report_colour {
     return 'yellow';
+}
+
+sub path_to_pin_icons {
+    return '/cobrands/oxfordshire/images/';
+}
+
+sub pin_hover_title {
+    my ($self, $problem, $title) = @_;
+    my $state = FixMyStreet::DB->resultset("State")->display($problem->state, 1);
+    return "$state: $title";
+}
+
+sub state_groups_inspect {
+    [
+        [ _('New'), [ 'confirmed', 'investigating' ] ],
+        [ _('Scheduled'), [ 'action scheduled' ] ],
+        [ _('Fixed'), [ 'fixed - council' ] ],
+        [ _('Closed'), [ 'not responsible', 'duplicate', 'unable to fix' ] ],
+    ]
 }
 
 sub open311_config {

@@ -1,7 +1,3 @@
-use strict;
-use warnings;
-use Test::More;
-
 use FixMyStreet::TestMech;
 use Web::Scraper;
 use Path::Class;
@@ -10,8 +6,6 @@ use DateTime;
 
 my $mech = FixMyStreet::TestMech->new;
 
-# create a test user and report
-$mech->delete_user('test@example.com');
 my $user = $mech->create_user_ok('test@example.com', name => 'Test User');
 
 my $user2 = $mech->create_user_ok('test2@example.com', name => 'Other User');
@@ -39,11 +33,6 @@ my $report_id = $report->id;
 subtest "check that no id redirects to homepage" => sub {
     $mech->get_ok('/report');
     is $mech->uri->path, '/', "at home page";
-};
-
-subtest "test id=NNN redirects to /NNN" => sub {
-    $mech->get_ok("/report?id=$report_id");
-    is $mech->uri->path, "/report/$report_id", "at /report/$report_id";
 };
 
 subtest "test bad council email clients web links" => sub {
@@ -324,7 +313,7 @@ for my $test (
         date => DateTime->now,
         state => 'investigating',
         banner_id => 'progress',
-        banner_text => 'progress',
+        banner_text => 'investigating',
         fixed => 0
     },
     {
@@ -332,7 +321,7 @@ for my $test (
         date => DateTime->now,
         state => 'action scheduled',
         banner_id => 'progress',
-        banner_text => 'progress',
+        banner_text => 'action scheduled',
         fixed => 0
     },
     {
@@ -340,7 +329,7 @@ for my $test (
         date => DateTime->now,
         state => 'planned',
         banner_id => 'progress',
-        banner_text => 'progress',
+        banner_text => 'planned',
         fixed => 0
     },
     {
@@ -530,7 +519,7 @@ subtest "Zurich banners are displayed correctly" => sub {
   };
 };
 
-my $oxfordshire = $mech->create_body_ok(2237, 'Oxfordshire County Council', id => 2237);
+my $oxfordshire = $mech->create_body_ok(2237, 'Oxfordshire County Council');
 my $oxfordshireuser = $mech->create_user_ok('counciluser@example.com', name => 'Council User', from_body => $oxfordshire);
 
 subtest "check user details show when a user has correct permissions" => sub {
@@ -551,14 +540,14 @@ subtest "check user details show when a user has correct permissions" => sub {
     $mech->log_in_ok( $oxfordshireuser->email );
     ok $mech->get("/report/$report_id"), "get '/report/$report_id'";
     is $mech->extract_problem_meta,
-      'Reported in the Roads category by Oxfordshire County Council (Council User) at 15:17, Tue 10 January 2012',
+      'Reported in the Roads category by Oxfordshire County Council (Council User) at 15:17, Tue 10 January 2012 (Hide your name?)',
       'correct problem meta information';
 
     ok $oxfordshireuser->user_body_permissions->delete_all, "Remove view_body_contribute_details permissions";
 
     ok $mech->get("/report/$report_id"), "get '/report/$report_id'";
     is $mech->extract_problem_meta,
-      'Reported in the Roads category by Oxfordshire County Council at 15:17, Tue 10 January 2012',
+      'Reported in the Roads category by Oxfordshire County Council at 15:17, Tue 10 January 2012 (Hide your name?)',
       'correct problem meta information for user without relevant permissions';
 
     $mech->log_out_ok;
@@ -578,12 +567,10 @@ subtest "check brackets don't appear when username and report name are the same"
     $mech->log_in_ok( $oxfordshireuser->email );
     ok $mech->get("/report/$report_id"), "get '/report/$report_id'";
     is $mech->extract_problem_meta,
-      'Reported in the Roads category by Council User at 15:17, Tue 10 January 2012',
+      'Reported in the Roads category by Council User at 15:17, Tue 10 January 2012 (Hide your name?)',
       'correct problem meta information';
 };
 
 END {
-    $mech->delete_user('test@example.com');
-    $mech->delete_body($westminster);
     done_testing();
 }

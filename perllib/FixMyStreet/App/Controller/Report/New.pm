@@ -99,12 +99,14 @@ sub report_new : Path : Args(0) {
     # create a problem from the submitted details
     $c->stash->{template} = "report/new/fill_in_details.html";
     $c->forward('setup_categories_and_bodies');
+    $c->forward('setup_report_extra_fields');
     $c->forward('generate_map');
     $c->forward('check_for_category');
 
     # deal with the user and report and check both are happy
 
     return unless $c->forward('check_form_submitted');
+
     $c->forward('/auth/check_csrf_token');
     $c->forward('process_user');
     $c->forward('process_report');
@@ -137,6 +139,7 @@ sub report_new_ajax : Path('mobile') : Args(0) {
     }
 
     $c->forward('setup_categories_and_bodies');
+    $c->forward('setup_report_extra_fields');
     $c->forward('process_user');
     $c->forward('process_report');
     $c->forward('/photo/process_photo');
@@ -184,6 +187,7 @@ sub report_form_ajax : Path('ajax') : Args(0) {
     }
 
     $c->forward('setup_categories_and_bodies');
+    $c->forward('setup_report_extra_fields');
 
     # render templates to get the html
     my $category = $c->render_fragment( 'report/new/category.html');
@@ -200,8 +204,10 @@ sub report_form_ajax : Path('ajax') : Args(0) {
     if ($c->user_exists) {
         my @bodies = keys %{$c->stash->{bodies}};
         my $ca_another_user = $c->user->has_permission_to('contribute_as_another_user', \@bodies);
-        my $ca_body = $c->user->has_permission_to('contribute_as_body', \@bodies);
+        my $ca_anonymous_user = $c->user->has_permission_to('contribute_as_anonymous_user', \@bodies);
+        my $ca_body = $c->user->from_body && $c->user->has_permission_to('contribute_as_body', \@bodies);
         $contribute_as->{another_user} = $ca_another_user if $ca_another_user;
+        $contribute_as->{anonymous_user} = $ca_anonymous_user if $ca_anonymous_user;
         $contribute_as->{body} = $ca_body if $ca_body;
     }
 
@@ -212,7 +218,6 @@ sub report_form_ajax : Path('ajax') : Args(0) {
             category        => $category,
             extra_name_info => $extra_name_info,
             titles_list     => $extra_titles_list,
-            categories      => $c->stash->{category_options},
             %$contribute_as ? (contribute_as => $contribute_as) : (),
             $top_message ? (top_message => $top_message) : (),
         }
@@ -233,6 +238,7 @@ sub category_extras_ajax : Path('category_extras') : Args(0) {
         return 1;
     }
     $c->forward('setup_categories_and_bodies');
+    $c->forward('setup_report_extra_fields');
     $c->forward('check_for_category');
 
     my $category = $c->stash->{category} || "";
@@ -250,6 +256,9 @@ sub category_extras_ajax : Path('category_extras') : Args(0) {
         $generate = 1;
     }
     if ($c->stash->{unresponsive}->{$category}) {
+        $generate = 1;
+    }
+    if ($c->stash->{report_extra_fields}) {
         $generate = 1;
     }
     if ($generate) {
@@ -493,7 +502,7 @@ Work out what the location of the report should be - either by using lat,lng or
 a tile click or what's come in from a partial. Returns false if no location
 could be found.
 
-=cut 
+=cut
 
 sub determine_location : Private {
     my ( $self, $c ) = @_;
@@ -515,7 +524,7 @@ sub determine_location : Private {
 Detect that the map tiles have been clicked on by looking for the tile
 parameters.
 
-=cut 
+=cut
 
 sub determine_location_from_tile_click : Private {
     my ( $self, $c ) = @_;
@@ -566,7 +575,7 @@ sub determine_location_from_tile_click : Private {
 Use latitude and longitude stored in the report - this is probably result of a
 partial report being loaded.
 
-=cut 
+=cut
 
 sub determine_location_from_report : Private {
     my ( $self, $c ) = @_;
@@ -604,8 +613,8 @@ sub setup_categories_and_bodies : Private {
     my $contacts                #
       = $c                      #
       ->model('DB::Contact')    #
-      ->not_deleted             #
-      ->search( { body_id => [ keys %bodies ] } );
+      ->active
+      ->search( { body_id => [ keys %bodies ] }, { prefetch => 'body' } );
     my @contacts = $c->cobrand->categories_restriction($contacts)->all;
 
     # variables to populate
@@ -632,13 +641,19 @@ sub setup_categories_and_bodies : Private {
     # keysort does not appear to obey locale so use strcoll (see i18n.t)
     @contacts = sort { strcoll( $a->category, $b->category ) } @contacts;
 
+    # Get defect types for inspectors
+    if ($c->cobrand->can('council_area_id')) {
+        my $category_defect_types = FixMyStreet::App->model('DB::DefectType')->by_categories($c->cobrand->council_area_id, @contacts);
+        $c->stash->{category_defect_types} = $category_defect_types;
+    }
+
     my %seen;
     foreach my $contact (@contacts) {
 
         $bodies_to_list{ $contact->body_id } = $contact->body;
 
         unless ( $seen{$contact->category} ) {
-            push @category_options, $contact->category;
+            push @category_options, { name => $contact->category, value => $contact->category_display };
 
             my $metas = $contact->get_metadata_for_input;
             $category_extras{$contact->category} = $metas if @$metas;
@@ -650,13 +665,15 @@ sub setup_categories_and_bodies : Private {
 
             $non_public_categories{ $contact->category } = 1 if $contact->non_public;
         }
-        $seen{$contact->category} = 1;
+        $seen{$contact->category} = $contact->category_display;
     }
 
     if (@category_options) {
         # If there's an Other category present, put it at the bottom
-        @category_options = ( _('-- Pick a category --'), grep { $_ ne _('Other') } @category_options );
-        push @category_options, _('Other') if $seen{_('Other')};
+        @category_options = (
+            { name => _('-- Pick a category --'), value => _('-- Pick a category --') },
+            grep { $_->{name} ne _('Other') } @category_options );
+        push @category_options, { name => _('Other'), value => $seen{_('Other')} } if $seen{_('Other')};
     }
 
     $c->cobrand->call_hook(munge_category_list => \@category_options, \@contacts, \%category_extras);
@@ -677,6 +694,15 @@ sub setup_categories_and_bodies : Private {
 
     $c->stash->{missing_details_bodies} = \@missing_details_bodies;
     $c->stash->{missing_details_body_names} = \@missing_details_body_names;
+}
+
+sub setup_report_extra_fields : Private {
+    my ( $self, $c ) = @_;
+
+    return unless $c->cobrand->allow_report_extra_fields;
+
+    my @extras = $c->model('DB::ReportExtraFields')->for_cobrand($c->cobrand)->for_language($c->stash->{lang_code})->all;
+    $c->stash->{report_extra_fields} = \@extras;
 }
 
 =head2 check_form_submitted
@@ -734,7 +760,8 @@ sub process_user : Private {
         $user->title( $user_title ) if $user_title;
         $report->user( $user );
 
-        if ($c->stash->{contributing_as_body} = $user->contributing_as('body', $c, $c->stash->{bodies})) {
+        if ($c->stash->{contributing_as_body} = $user->contributing_as('body', $c, $c->stash->{bodies}) or
+            $c->stash->{contributing_as_anonymous_user} = $user->contributing_as('anonymous_user', $c, $c->stash->{bodies})) {
             $report->name($user->from_body->name);
             $user->name($user->from_body->name) unless $user->name;
             $c->stash->{no_reporter_alert} = 1;
@@ -814,6 +841,8 @@ sub process_report : Private {
     # set some simple bool values (note they get inverted)
     if ($c->stash->{contributing_as_body}) {
         $report->anonymous(0);
+    } elsif ($c->stash->{contributing_as_anonymous_user}) {
+        $report->anonymous(1);
     } else {
         $report->anonymous( $params{may_show_name} ? 0 : 1 );
     }
@@ -933,7 +962,24 @@ sub set_report_extras : Private {
         }
     }
 
-    $c->cobrand->process_open311_extras( $c, @$contacts[0]->body_id, \@extra )
+    foreach my $extra_fields (@{ $c->stash->{report_extra_fields} }) {
+        my $metas = $extra_fields->get_extra_fields;
+        $param_prefix = "extra[" . $extra_fields->id . "]";
+        foreach my $field ( @$metas ) {
+            if ( lc( $field->{required} ) eq 'true' && !$c->cobrand->category_extra_hidden($field->{code})) {
+                unless ( $c->get_param($param_prefix . $field->{code}) ) {
+                    $c->stash->{field_errors}->{ $field->{code} } = _('This information is required');
+                }
+            }
+            push @extra, {
+                name => $field->{code},
+                description => $field->{description},
+                value => $c->get_param($param_prefix . $field->{code}) || '',
+            };
+        }
+    }
+
+    $c->cobrand->process_open311_extras( $c, @$contacts[0]->body, \@extra )
         if ( scalar @$contacts );
 
     if ( @extra ) {
@@ -1140,7 +1186,7 @@ sub save_user_and_report : Private {
 
 sub created_as_someone_else : Private {
     my ($self, $c, $bodies) = @_;
-    return $c->stash->{contributing_as_another_user} || $c->stash->{contributing_as_body};
+    return $c->stash->{contributing_as_another_user} || $c->stash->{contributing_as_body} || $c->stash->{contributing_as_anonymous_user};
 }
 
 =head2 generate_map
@@ -1203,9 +1249,14 @@ sub redirect_or_confirm_creation : Private {
                 to => [ [ $report->user->email, $report->name ] ],
             } );
         }
-        $c->log->info($report->user->id . ' was logged in, showing confirmation page for ' . $report->id);
-        $c->stash->{created_report} = 'loggedin';
-        $c->stash->{template} = 'tokens/confirm_problem.html';
+        if ($c->user_exists && $c->user->has_body_permission_to('planned_reports')) {
+            $c->log->info($report->user->id . ' is an inspector - redirecting straight to report page for ' . $report->id);
+            $c->res->redirect( '/report/'. $report->id );
+        } else {
+            $c->log->info($report->user->id . ' was logged in, showing confirmation page for ' . $report->id);
+            $c->stash->{created_report} = 'loggedin';
+            $c->stash->{template} = 'tokens/confirm_problem.html';
+        }
         return 1;
     }
 

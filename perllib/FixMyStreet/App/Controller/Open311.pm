@@ -160,7 +160,7 @@ sub get_services : Private {
     my $lon = $c->get_param('long') || '';
 
     # Look up categories for this council or councils
-    my $categories = $c->model('DB::Contact')->not_deleted;
+    my $categories = $c->model('DB::Contact')->active;
 
     if ($lat || $lon) {
         my $area_types = $c->cobrand->area_types;
@@ -241,7 +241,8 @@ sub output_requests : Private {
             'long' => $problem->longitude,
             'status' => $problem->state,
 #            'status_notes' => {},
-            'requested_datetime' => w3date($problem->confirmed),
+            # Zurich has visible unconfirmed reports
+            'requested_datetime' => w3date($problem->confirmed || $problem->created),
             'updated_datetime' => w3date($problem->lastupdate),
 #            'expected_datetime' => {},
 #            'address' => {},
@@ -258,8 +259,8 @@ sub output_requests : Private {
         }
         else {
             # FIXME Not according to Open311 v2
-            my @body_names = map { $_->name } values %{$problem->bodies};
-            $request->{agency_responsible} = {'recipient' => [ @body_names ] };
+            my $body_names = $problem->body_names;
+            $request->{agency_responsible} = {'recipient' => $body_names };
         }
 
         if ( !$problem->anonymous ) {

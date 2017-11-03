@@ -59,6 +59,24 @@ sub get_service_meta_info {
     return $self->_get_xml_object( $service_meta_xml );
 }
 
+sub to_bristol {
+    my $problem = shift;
+    return unless $problem->cobrand =~ /fixmystreet|bristol/;
+    my $bodies = $problem->bodies;
+    return unless %$bodies;
+    my $body = (values %$bodies)[0];
+    return unless $body->areas->{2561};
+    return 1;
+}
+
+sub warn_failure {
+    my ($obj, $problem) = @_;
+    # Special case a poorly behaving Open311 server
+    return 0 if to_bristol($problem || $obj);
+    my $threshold = 1;
+    return $obj->send_fail_count && $obj->send_fail_count == $threshold;
+}
+
 sub send_service_request {
     my $self = shift;
     my $problem = shift;
@@ -83,10 +101,10 @@ sub send_service_request {
         }
 
         warn sprintf( "Failed to submit problem %s over Open311, response\n: %s\n%s", $problem->id, $response, $self->debug_details )
-            if $problem->send_fail_count && $problem->send_fail_count == 2;
+            if warn_failure($problem);
     } else {
         warn sprintf( "Failed to submit problem %s over Open311, details:\n%s", $problem->id, $self->error)
-            if $problem->send_fail_count && $problem->send_fail_count == 2;
+            if warn_failure($problem);
     }
     return 0;
 }
@@ -175,6 +193,7 @@ sub _generate_service_request_description {
             $description = "title: " . $problem->title . "\n\n$description";
         }
     } elsif ($problem->cobrand eq 'fixamingata') {
+        $description .= "Titel: " . $problem->title . "\n\n";
         $description .= "Beskrivning: " . $problem->detail . "\n\n";
         $description .= "Länk till ärendet: " . $extra->{url} . "\n\n";
         $description .= "Skickad via FixaMinGata\n";
@@ -259,10 +278,10 @@ sub post_service_request_update {
         }
 
         warn sprintf( "Failed to submit comment %s over Open311, response - %s\n%s\n", $comment->id, $response, $self->debug_details )
-            if $comment->send_fail_count && $comment->send_fail_count == 2;
+            if warn_failure($comment, $comment->problem);
     } else {
         warn sprintf( "Failed to submit comment %s over Open311, details\n%s\n", $comment->id, $self->error)
-            if $comment->send_fail_count && $comment->send_fail_count == 2;
+            if warn_failure($comment, $comment->problem);
     }
     return 0;
 }

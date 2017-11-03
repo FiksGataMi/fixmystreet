@@ -70,7 +70,7 @@ fixmystreet.offlineBanner = (function() {
                             }
                             // In case the request failed due to out-of-date CSRF token,
                             // try once more with a new token given in the error response.
-                            var m = jqXHR.responseText.match(/name="token" value="([^"]*)"/);
+                            var m = jqXHR.responseText.match(/content="([^"]*)" name="csrf-token"/);
                             if (!m) {
                                 return nextForm();
                             }
@@ -424,6 +424,11 @@ if ($('#offline_list').length) {
         var lastupdate = $('.problem-header').data('lastupdate');
         fixmystreet.cachet.cacheReports([{ 'url': '/report/' + id, 'lastupdate': lastupdate }]);
     });
+
+    $(document).on('shortlist-all', function(e, args) {
+      fixmystreet.cachet.cacheReports(args.items);
+    });
+
     $(document).on('shortlist-remove', function(e, id) {
         fixmystreet.offline.removeReports(['/report/' + id]);
     });

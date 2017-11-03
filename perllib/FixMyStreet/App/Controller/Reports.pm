@@ -36,6 +36,12 @@ sub index : Path : Args(0) {
     if ( $c->cobrand->moniker eq 'zurich' ) {
         $c->forward( 'stash_report_filter_status' );
         $c->forward( 'load_and_group_problems' );
+        $c->stash->{body} = { id => 0 }; # So template can fetch the list
+
+        if ($c->get_param('ajax')) {
+            $c->detach('ajax', [ 'reports/_problem-list.html' ]);
+        }
+
         my $pins = $c->stash->{pins};
         $c->stash->{page} = 'reports';
         FixMyStreet::Map::display_map(
@@ -54,6 +60,15 @@ sub index : Path : Args(0) {
         $c->detach( 'redirect_body' );
     }
 
+    if (my $body = $c->get_param('body')) {
+        $body = $c->model('DB::Body')->find( { id => $body } );
+        if ($body) {
+            $body = $c->cobrand->short_name($body);
+            $c->res->redirect("/reports/$body");
+            $c->detach;
+        }
+    }
+
     # Fetch all bodies
     my @bodies = $c->model('DB::Body')->search({
         deleted => 0,
@@ -67,15 +82,21 @@ sub index : Path : Args(0) {
     $c->stash->{bodies} = \@bodies;
     $c->stash->{any_empty_bodies} = any { $_->get_column('area_count') == 0 } @bodies;
 
-    eval {
+    my $dashboard = eval {
+        my $data = File::Slurp::read_file(
+            FixMyStreet->path_to( '../data/all-reports-dashboard.json' )->stringify
+        );
+        $c->stash(decode_json($data));
+        return 1;
+    };
+    my $table = eval {
         my $data = File::Slurp::read_file(
             FixMyStreet->path_to( '../data/all-reports.json' )->stringify
         );
-        my $j = decode_json($data);
-        $c->stash->{fixed} = $j->{fixed};
-        $c->stash->{open} = $j->{open};
+        $c->stash(decode_json($data));
+        return 1;
     };
-    if ($@) {
+    if (!$dashboard && !$table) {
         my $message = _("There was a problem showing the All Reports page. Please try again later.");
         if ($c->config->{STAGING_SITE}) {
             $message .= '</p><p>Perhaps the bin/update-all-reports script needs running. Use: bin/update-all-reports</p><p>'
@@ -88,7 +109,7 @@ sub index : Path : Args(0) {
     $c->response->header('Cache-Control' => 'max-age=3600');
 }
 
-=head2 index
+=head2 body
 
 Show the summary page for a particular body.
 
@@ -99,7 +120,7 @@ sub body : Path : Args(1) {
     $c->detach( 'ward', [ $body ] );
 }
 
-=head2 index
+=head2 ward
 
 Show the summary page for a particular ward.
 
@@ -135,7 +156,7 @@ sub ward : Path : Args(2) {
         distinct => 1,
         order_by => [ 'category' ],
     } )->all;
-    @categories = map { $_->category } @categories;
+    @categories = map { { name => $_->category, value => $_->category_display } } @categories;
     $c->stash->{filter_categories} = \@categories;
     $c->stash->{filter_category} = { map { $_ => 1 } $c->get_param_list('filter_category', 1) };
 
@@ -303,6 +324,19 @@ sub body_check : Private {
         }
     }
 
+    my @translations = $c->model('DB::Translation')->search( {
+        tbl => 'body',
+        col => 'name',
+        msgstr => $q_body
+    } )->all;
+
+    if (@translations == 1) {
+        if ( my $body = $c->model('DB::Body')->find( { id => $translations[0]->object_id } ) ) {
+            $c->stash->{body} = $body;
+            return;
+        }
+    }
+
     # No result, bad body name.
     $c->detach( 'redirect_index' );
 }
@@ -369,8 +403,6 @@ sub load_and_group_problems : Private {
     $c->forward('stash_report_sort', [ $c->cobrand->reports_ordering ]);
 
     my $page = $c->get_param('p') || 1;
-    # NB: If 't' is specified, it will override 'status'.
-    my $type = $c->get_param('t') || 'all';
     my $category = [ $c->get_param_list('filter_category', 1) ];
 
     my $states = $c->stash->{filter_problem_states};
@@ -382,6 +414,18 @@ sub load_and_group_problems : Private {
         order_by => $c->stash->{sort_order},
         rows => $c->cobrand->reports_per_page,
     };
+    if ($c->user_exists && $c->stash->{body}) {
+        my $bid = $c->stash->{body}->id;
+        my $prefetch = [];
+        if ($c->user->has_permission_to('planned_reports', $bid)) {
+            push @$prefetch, 'user_planned_reports';
+        }
+        if ($c->user->has_permission_to('report_edit_priority', $bid) || $c->user->has_permission_to('report_inspect', $bid)) {
+            push @$prefetch, 'response_priority';
+        }
+        $prefetch = $prefetch->[0] if @$prefetch == 1;
+        $filter->{prefetch} = $prefetch;
+    }
 
     if (defined $c->stash->{filter_status}{shortlisted}) {
         $where->{'me.id'} = { '=', \"user_planned_reports.report_id"};
@@ -396,25 +440,6 @@ sub load_and_group_problems : Private {
            columns => ['me.id'],
         })->as_query;
         $where->{'me.id'} = { -not_in => $shortlisted_ids };
-    }
-
-    my $not_open = [ FixMyStreet::DB::Result::Problem::fixed_states(), FixMyStreet::DB::Result::Problem::closed_states() ];
-    if ( $type eq 'new' ) {
-        $where->{confirmed} = { '>', \"current_timestamp - INTERVAL '4 week'" };
-        $where->{state} = { 'IN', [ FixMyStreet::DB::Result::Problem::open_states() ] };
-    } elsif ( $type eq 'older' ) {
-        $where->{confirmed} = { '<', \"current_timestamp - INTERVAL '4 week'" };
-        $where->{lastupdate} = { '>', \"current_timestamp - INTERVAL '8 week'" };
-        $where->{state} = { 'IN', [ FixMyStreet::DB::Result::Problem::open_states() ] };
-    } elsif ( $type eq 'unknown' ) {
-        $where->{lastupdate} = { '<', \"current_timestamp - INTERVAL '8 week'" };
-        $where->{state} = { 'IN',  [ FixMyStreet::DB::Result::Problem::open_states() ] };
-    } elsif ( $type eq 'fixed' ) {
-        $where->{lastupdate} = { '>', \"current_timestamp - INTERVAL '8 week'" };
-        $where->{state} = $not_open;
-    } elsif ( $type eq 'older_fixed' ) {
-        $where->{lastupdate} = { '<', \"current_timestamp - INTERVAL '8 week'" };
-        $where->{state} = $not_open;
     }
 
     if (@$category) {
@@ -445,7 +470,6 @@ sub load_and_group_problems : Private {
 
     my ( %problems, @pins );
     while ( my $problem = $problems->next ) {
-        $c->log->debug( $problem->cobrand . ', cobrand is ' . $c->cobrand->moniker );
         if ( !$c->stash->{body} ) {
             add_row( $c, $problem, 0, \%problems, \@pins );
             next;
@@ -529,6 +553,18 @@ sub stash_report_filter_status : Private {
 
     if ($status{unshortlisted}) {
         $filter_status{unshortlisted} = 1;
+    }
+
+    if ($c->user and ($c->user->is_superuser or (
+          $c->stash->{body} and $c->user->belongs_to_body($c->stash->{body}->id)
+    ))) {
+        $c->stash->{filter_states} = $c->cobrand->state_groups_inspect;
+        foreach my $state (FixMyStreet::DB::Result::Problem->visible_states()) {
+            if ($status{$state}) {
+                $filter_problem_states{$state} = 1;
+                $filter_status{$state} = 1;
+            }
+        }
     }
 
     if (keys %filter_problem_states == 0) {

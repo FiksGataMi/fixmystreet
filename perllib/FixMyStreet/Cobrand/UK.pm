@@ -5,6 +5,7 @@ use strict;
 use JSON::MaybeXS;
 use mySociety::MaPit;
 use mySociety::VotingArea;
+use Utils;
 
 sub country             { return 'GB'; }
 sub area_types          { [ 'DIS', 'LBO', 'MTD', 'UTA', 'CTY', 'COI', 'LGD' ] }
@@ -31,12 +32,11 @@ sub disambiguate_location {
 sub process_open311_extras {
     my $self    = shift;
     my $ctx     = shift;
-    my $body_id = shift;
+    my $body = shift;
     my $extra   = shift;
     my $fields  = shift || [];
 
-    # XXX Hardcoded body ID matching mapit area ID
-    if ( $body_id eq '2482' ) {
+    if ( $body && $body->name =~ /Bromley/ ) {
         my @fields = ( 'fms_extra_title', @$fields );
         for my $field ( @fields ) {
             my $value = $ctx->get_param($field);
@@ -117,21 +117,27 @@ sub short_name {
 }
 
 sub find_closest {
-    my ( $self, $latitude, $longitude, $problem ) = @_;
+    my ( $self, $problem, $as_data ) = @_;
 
-    my $str = $self->SUPER::find_closest( $latitude, $longitude, $problem );
+    my $data = $self->SUPER::find_closest($problem, $as_data);
 
-    my $url = "http://mapit.mysociety.org/nearest/4326/$longitude,$latitude";
+    my $mapit_url = FixMyStreet->config('MAPIT_URL');
+    my ($lat, $lon) = map { Utils::truncate_coordinate($_) } $problem->latitude, $problem->longitude;
+    my $url = $mapit_url . "nearest/4326/$lon,$lat";
     my $j = LWP::Simple::get($url);
     if ($j) {
         $j = JSON->new->utf8->allow_nonref->decode($j);
         if ($j->{postcode}) {
-            $str .= sprintf(_("Nearest postcode to the pin placed on the map (automatically generated): %s (%sm away)"),
-                $j->{postcode}{postcode}, $j->{postcode}{distance}) . "\n\n";
+            if ($as_data) {
+                $data->{postcode} = $j->{postcode};
+            } else {
+                $data .= sprintf(_("Nearest postcode to the pin placed on the map (automatically generated): %s (%sm away)"),
+                    $j->{postcode}{postcode}, $j->{postcode}{distance}) . "\n\n";
+            }
         }
     }
 
-    return $str;
+    return $data;
 }
 
 sub reports_body_check {
@@ -248,25 +254,25 @@ sub council_rss_alert_options {
         push @options, {
             type  => 'area',
             id    => sprintf( 'area:%s:%s', $district->{id}, $district->{id_name} ),
-            text  => $district_name,
+            text  => sprintf( _('Problems within %s'), $district_name ),
             rss_text => sprintf( _('RSS feed for %s'), $district_name ),
             uri => $c->uri_for( '/rss/area/' . $district->{short_name}  )
         }, {
             type      => 'area',
             id        => sprintf( 'area:%s:%s:%s:%s', $district->{id}, $d_ward->{id}, $district->{id_name}, $d_ward->{id_name} ),
-            text      => sprintf( _('%s ward, %s'), $d_ward_name, $district_name ),
+            text      => sprintf( _('Problems within %s ward, %s'), $d_ward_name, $district_name ),
             rss_text  => sprintf( _('RSS feed for %s ward, %s'), $d_ward_name, $district_name ),
             uri       => $c->uri_for( '/rss/area/' . $district->{short_name} . '/' . $d_ward->{short_name} )
         }, {
             type  => 'area',
             id    => sprintf( 'area:%s:%s', $county->{id}, $county->{id_name} ),
-            text  => $county_name,
+            text  => sprintf( _('Problems within %s'), $county_name ),
             rss_text => sprintf( _('RSS feed for %s'), $county_name ),
             uri => $c->uri_for( '/rss/area/' . $county->{short_name}  )
         }, {
             type      => 'area',
             id        => sprintf( 'area:%s:%s:%s:%s', $county->{id}, $c_ward->{id}, $county->{id_name}, $c_ward->{id_name} ),
-            text      => sprintf( _('%s ward, %s'), $c_ward_name, $county_name ),
+            text      => sprintf( _('Problems within %s ward, %s'), $c_ward_name, $county_name ),
             rss_text  => sprintf( _('RSS feed for %s ward, %s'), $c_ward_name, $county_name ),
             uri       => $c->uri_for( '/rss/area/' . $county->{short_name} . '/' . $c_ward->{short_name} )
         };
@@ -274,26 +280,26 @@ sub council_rss_alert_options {
         push @reported_to_options, {
             type      => 'council',
             id        => sprintf( 'council:%s:%s', $district->{id}, $district->{id_name} ),
-            text      => $district->{name},
+            text      => sprintf( _('Reports sent to %s'), $district->{name} ),
             rss_text  => sprintf( _('RSS feed of %s'), $district->{name}),
             uri       => $c->uri_for( '/rss/reports/' . $district->{short_name} ),
         }, {
             type     => 'ward',
             id       => sprintf( 'ward:%s:%s:%s:%s', $district->{id}, $d_ward->{id}, $district->{id_name}, $d_ward->{id_name} ),
             rss_text => sprintf( _('RSS feed of %s, within %s ward'), $district->{name}, $d_ward->{name}),
-            text     => sprintf( _('%s, within %s ward'), $district->{name}, $d_ward->{name}),
+            text     => sprintf( _('Reports sent to %s, within %s ward'), $district->{name}, $d_ward->{name}),
             uri      => $c->uri_for( '/rss/reports/' . $district->{short_name} . '/' . $d_ward->{short_name} ),
         }, {
             type      => 'council',
             id        => sprintf( 'council:%s:%s', $county->{id}, $county->{id_name} ),
-            text      => $county->{name},
+            text      => sprintf( _('Reports sent to %s'), $county->{name} ),
             rss_text  => sprintf( _('RSS feed of %s'), $county->{name}),
             uri       => $c->uri_for( '/rss/reports/' . $county->{short_name} ),
         }, {
             type     => 'ward',
             id       => sprintf( 'ward:%s:%s:%s:%s', $county->{id}, $c_ward->{id}, $county->{id_name}, $c_ward->{id_name} ),
             rss_text => sprintf( _('RSS feed of %s, within %s ward'), $county->{name}, $c_ward->{name}),
-            text     => sprintf( _('%s, within %s ward'), $county->{name}, $c_ward->{name}),
+            text     => sprintf( _('Reports sent to %s, within %s ward'), $county->{name}, $c_ward->{name}),
             uri      => $c->uri_for( '/rss/reports/' . $county->{short_name} . '/' . $c_ward->{short_name} ),
         };
 
@@ -321,15 +327,11 @@ sub report_check_for_errors {
         );
     }
 
-    # XXX Hardcoded body ID matching mapit area ID
     if ( $report->bodies_str && $report->detail ) {
         # Custom character limit:
-        # Bromley Council
-        if ( $report->bodies_str eq '2482' && length($report->detail) > 1750 ) {
+        if ( $report->to_body_named('Bromley') && length($report->detail) > 1750 ) {
             $errors{detail} = sprintf( _('Reports are limited to %s characters in length. Please shorten your report'), 1750 );
-        }
-        # Oxfordshire
-        if ( $report->bodies_str eq '2237' && length($report->detail) > 1700 ) {
+        } elsif ( $report->to_body_named('Oxfordshire') && length($report->detail) > 1700 ) {
             $errors{detail} = sprintf( _('Reports are limited to %s characters in length. Please shorten your report'), 1700 );
         }
     }
@@ -377,7 +379,7 @@ sub link_to_council_cobrand {
     my $handler = $self->get_body_handler_for_problem($problem);
     $self->{c}->log->debug( sprintf "bodies: %s areas: %s self: %s handler: %s", $problem->bodies_str, $problem->areas, $self->moniker, $handler->moniker );
     my $bodies_str_ids = $problem->bodies_str_ids;
-    if ( !mySociety::Config::get('AREA_LINKS_FROM_PROBLEMS') &&
+    if ( !FixMyStreet->config('AREA_LINKS_FROM_PROBLEMS') &&
          scalar(@$bodies_str_ids) == 1 && $handler->is_council &&
          $handler->moniker ne $self->{c}->cobrand->moniker
        ) {

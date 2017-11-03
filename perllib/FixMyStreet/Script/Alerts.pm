@@ -6,7 +6,6 @@ use warnings;
 use DateTime::Format::Pg;
 use IO::String;
 
-use mySociety::DBHandle qw(dbh);
 use FixMyStreet::Gaze;
 use mySociety::Locale;
 use mySociety::MaPit;
@@ -17,8 +16,6 @@ use FixMyStreet::DB;
 use FixMyStreet::Email;
 use FixMyStreet::Map;
 use FixMyStreet::App::Model::PhotoSet;
-
-FixMyStreet->configure_mysociety_dbhandle;
 
 my $parser = DateTime::Format::Pg->new();
 
@@ -65,7 +62,7 @@ sub send() {
         $query =~ s/\?/alert.parameter/ if ($query =~ /\?/);
         $query =~ s/\?/alert.parameter2/ if ($query =~ /\?/);
 
-        $query = dbh()->prepare($query);
+        $query = FixMyStreet::DB->schema->storage->dbh->prepare($query);
         $query->execute();
         my $last_alert_id;
         my %data = ( template => $alert_type->template, data => [], schema => $schema );
@@ -105,7 +102,7 @@ sub send() {
 
             my $url = $cobrand->base_url_for_report($row);
             # this is currently only for new_updates
-            if ($row->{item_text}) {
+            if (defined($row->{item_text})) {
                 if ( $cobrand->moniker ne 'zurich' && $row->{alert_user_id} == $row->{user_id} ) {
                     # This is an alert to the same user who made the report - make this a login link
                     # Don't bother with Zurich which has no accounts
@@ -143,7 +140,7 @@ sub send() {
             # this is ward and council problems
             } else {
                 if ( exists $row->{geocode} && $row->{geocode} && $ref =~ /ward|council/ ) {
-                    my $nearest_st = _get_address_from_gecode( $row->{geocode} );
+                    my $nearest_st = _get_address_from_geocode( $row->{geocode} );
                     $row->{nearest} = $nearest_st;
                 }
 
@@ -228,7 +225,7 @@ sub send() {
             and (select whenqueued from alert_sent where alert_sent.alert_id = ? and alert_sent.parameter::integer = problem.id) is null
             and users.email <> ?
             order by confirmed desc";
-        $q = dbh()->prepare($q);
+        $q = FixMyStreet::DB->schema->storage->dbh->prepare($q);
         $q->execute($latitude, $longitude, $d, $alert->whensubscribed, $alert->id, $alert->user->email);
         while (my $row = $q->fetchrow_hashref) {
             $schema->resultset('AlertSent')->create( {
@@ -236,7 +233,7 @@ sub send() {
                 parameter => $row->{id},
             } );
             if ( exists $row->{geocode} && $row->{geocode} ) {
-                my $nearest_st = _get_address_from_gecode( $row->{geocode} );
+                my $nearest_st = _get_address_from_geocode( $row->{geocode} );
                 $row->{nearest} = $nearest_st;
             }
             my $dt = $parser->parse_timestamp( $row->{confirmed} );
@@ -304,7 +301,7 @@ sub _send_aggregated_alert_email(%) {
     }
 }
 
-sub _get_address_from_gecode {
+sub _get_address_from_geocode {
     my $geocode = shift;
 
     return '' unless defined $geocode;

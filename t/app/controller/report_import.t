@@ -1,7 +1,3 @@
-use strict;
-use warnings;
-use Test::More;
-
 use FixMyStreet::TestMech;
 use FixMyStreet::App;
 use Web::Scraper;
@@ -386,7 +382,3 @@ subtest "Submit a correct entry (with location) to cobrand" => sub {
 };
 
 done_testing();
-
-END {
-    $mech->delete_body($body);
-}

@@ -28,14 +28,11 @@ Redirect to homepage unless C<id> parameter in query, in which case redirect to
 sub index : Path('') : Args(0) {
     my ( $self, $c ) = @_;
 
-    my $id = $c->get_param('id');
-
-    my $uri =
-        $id
-      ? $c->uri_for( '/report', $id )
-      : $c->uri_for('/');
-
-    $c->res->redirect($uri);
+    if ($c->stash->{homepage_template}) {
+        $c->stash->{template} = 'index.html';
+    } else {
+        $c->res->redirect('/');
+    }
 }
 
 =head2 report_display
@@ -124,7 +121,7 @@ sub load_problem_or_display_error : Private {
         $c->detach( '/page_error_404_not_found', [ _('Unknown problem ID') ] )
             unless $c->cobrand->show_unconfirmed_reports ;
     }
-    elsif ( $problem->hidden_states->{ $problem->state } or 
+    elsif ( $problem->hidden_states->{ $problem->state } or
             (($problem->get_extra_metadata('closure_status')||'') eq 'hidden')) {
         $c->detach(
             '/page_error_410_gone',
@@ -159,7 +156,7 @@ sub load_updates : Private {
 
     my $updates = $c->model('DB::Comment')->search(
         { problem_id => $c->stash->{problem}->id, state => 'confirmed' },
-        { order_by => 'confirmed' }
+        { order_by => [ 'confirmed', 'id' ] }
     );
 
     my $questionnaires = $c->model('DB::Questionnaire')->search(
@@ -181,8 +178,10 @@ sub load_updates : Private {
     @combined = map { $_->[1] } sort { $a->[0] <=> $b->[0] } @combined;
     $c->stash->{updates} = \@combined;
 
-    if ($c->sessionid && $c->flash->{alert_to_reporter}) {
-        $c->stash->{alert_to_reporter} = 1;
+    if ($c->sessionid) {
+        foreach (qw(alert_to_reporter anonymized)) {
+            $c->stash->{$_} = $c->flash->{$_} if $c->flash->{$_};
+        }
     }
 
     return 1;
@@ -201,7 +200,8 @@ sub format_problem_for_display : Private {
         $c->stash->{add_alert} = 1;
     }
 
-    $c->stash->{extra_name_info} = $problem->bodies_str && $problem->bodies_str eq '2482' ? 1 : 0;
+    my $first_body = (values %{$problem->bodies})[0];
+    $c->stash->{extra_name_info} = $first_body && $first_body->name =~ /Bromley/ ? 1 : 0;
 
     $c->forward('generate_map_tags');
 
@@ -309,38 +309,33 @@ sub inspect : Private {
     $c->forward('/admin/categories_for_point');
     $c->stash->{report_meta} = { map { $_->{name} => $_ } @{ $c->stash->{problem}->get_extra_fields() } };
 
-    my %category_body = map { $_->category => $_->body_id } map { $_->contacts->all } values %{$problem->bodies};
-
-    my @priorities = $c->model('DB::ResponsePriority')->for_bodies($problem->bodies_str_ids)->all;
-    my $priorities_by_category = {};
-    foreach my $pri (@priorities) {
-        my $any = 0;
-        foreach ($pri->contacts->all) {
-            $any = 1;
-            push @{$priorities_by_category->{$_->category}}, $pri->id . '=' . URI::Escape::uri_escape_utf8($pri->name);
-        }
-        if (!$any) {
-            foreach (grep { $category_body{$_} == $pri->body_id } @{$c->stash->{categories}}) {
-                push @{$priorities_by_category->{$_}}, $pri->id . '=' . URI::Escape::uri_escape_utf8($pri->name);
-            }
-        }
-    }
-    foreach (keys %{$priorities_by_category}) {
-        $priorities_by_category->{$_} = join('&', @{$priorities_by_category->{$_}});
+    if ($c->cobrand->can('council_area_id')) {
+        my $priorities_by_category = FixMyStreet::App->model('DB::ResponsePriority')->by_categories($c->cobrand->council_area_id, @{$c->stash->{contacts}});
+        $c->stash->{priorities_by_category} = $priorities_by_category;
+        my $templates_by_category = FixMyStreet::App->model('DB::ResponseTemplate')->by_categories($c->cobrand->council_area_id, @{$c->stash->{contacts}});
+        $c->stash->{templates_by_category} = $templates_by_category;
     }
 
-    $c->stash->{priorities_by_category} = $priorities_by_category;
+    if ($c->user->has_body_permission_to('planned_reports')) {
+        $c->stash->{post_inspect_url} = $c->req->referer;
+    }
+
+    if ($c->user->has_body_permission_to('report_edit_priority') or
+        $c->user->has_body_permission_to('report_inspect')
+      ) {
+        $c->stash->{has_default_priority} = scalar( grep { $_->is_default } $problem->response_priorities );
+    }
 
     if ( $c->get_param('save') ) {
         $c->forward('/auth/check_csrf_token');
 
         my $valid = 1;
-        my $update_text;
+        my $update_text = '';
         my $reputation_change = 0;
         my %update_params = ();
 
         if ($permissions->{report_inspect}) {
-            foreach (qw/detailed_information traffic_information duplicate_of/) {
+            foreach (qw/detailed_information traffic_information/) {
                 $problem->set_extra_metadata( $_ => $c->get_param($_) );
             }
 
@@ -375,19 +370,35 @@ sub inspect : Private {
             }
             if ( $problem->state ne 'duplicate' ) {
                 $problem->unset_extra_metadata('duplicate_of');
+            } elsif (my $duplicate_of = $c->get_param('duplicate_of')) {
+                $problem->set_duplicate_of($duplicate_of);
             }
+
             if ( $problem->state ne $old_state ) {
                 $c->forward( '/admin/log_edit', [ $problem->id, 'problem', 'state_change' ] );
 
-                # If the state has been changed by an inspector, consider the
-                # report to be inspected.
-                unless ($problem->get_extra_metadata('inspected')) {
-                    $problem->set_extra_metadata( inspected => 1 );
-                    $c->forward( '/admin/log_edit', [ $problem->id, 'problem', 'inspected' ] );
-                    my $state = $problem->state;
-                    $reputation_change = 1 if $c->cobrand->reputation_increment_states->{$state};
-                    $reputation_change = -1 if $c->cobrand->reputation_decrement_states->{$state};
-                }
+                $update_params{problem_state} = $problem->state;
+
+                my $state = $problem->state;
+                $reputation_change = 1 if $c->cobrand->reputation_increment_states->{$state};
+                $reputation_change = -1 if $c->cobrand->reputation_decrement_states->{$state};
+
+                # If an inspector has changed the state, subscribe them to
+                # updates
+                my $options = {
+                    cobrand      => $c->cobrand->moniker,
+                    cobrand_data => $problem->cobrand_data,
+                    lang         => $problem->lang,
+                };
+                $problem->user->create_alert($problem->id, $options);
+            }
+
+            # If the state has been changed to action scheduled and they've said
+            # they want to raise a defect, consider the report to be inspected.
+            if ($problem->state eq 'action scheduled' && $c->get_param('raise_defect') && !$problem->get_extra_metadata('inspected')) {
+                $update_params{extra} = { 'defect_raised' => 1 };
+                $problem->set_extra_metadata( inspected => 1 );
+                $c->forward( '/admin/log_edit', [ $problem->id, 'problem', 'inspected' ] );
             }
         }
 
@@ -421,37 +432,50 @@ sub inspect : Private {
             }
             $problem->lastupdate( \'current_timestamp' );
             $problem->update;
-            if ( defined($update_text) ) {
-                my $timestamp = \'current_timestamp';
-                if (my $saved_at = $c->get_param('saved_at')) {
-                    $timestamp = DateTime->from_epoch( epoch => $saved_at );
-                }
-                my $name = $c->user->from_body ? $c->user->from_body->name : $c->user->name;
-                $problem->add_to_comments( {
-                    text => $update_text,
-                    created => $timestamp,
-                    confirmed => $timestamp,
-                    user_id => $c->user->id,
-                    name => $name,
-                    state => 'confirmed',
-                    mark_fixed => 0,
-                    anonymous => 0,
-                    %update_params,
-                } );
+            my $timestamp = \'current_timestamp';
+            if (my $saved_at = $c->get_param('saved_at')) {
+                $timestamp = DateTime->from_epoch( epoch => $saved_at );
             }
-            # This problem might no longer be visible on the current cobrand,
-            # if its body has changed (e.g. by virtue of the category changing)
-            # so redirect to a cobrand where it can be seen if necessary
+            my $name = $c->user->from_body ? $c->user->from_body->name : $c->user->name;
+            $problem->add_to_comments( {
+                text => $update_text,
+                created => $timestamp,
+                confirmed => $timestamp,
+                user_id => $c->user->id,
+                name => $name,
+                state => 'confirmed',
+                mark_fixed => 0,
+                anonymous => 0,
+                %update_params,
+            } );
+
             my $redirect_uri;
-            if ( $c->cobrand->is_council && !$c->cobrand->owns_problem($problem) ) {
+            $problem->discard_changes;
+
+            # If inspector, redirect back to the map view they came from
+            # with the right filters. If that wasn't set, go to /around at this
+            # report's location.
+            # We go here rather than the shortlist because it makes it much
+            # simpler to inspect many reports in the same location. The
+            # shortlist is always a single click away, being on the main nav.
+            if ($c->user->has_body_permission_to('planned_reports')) {
+                unless ($redirect_uri = $c->get_param("post_inspect_url")) {
+                    my $categories = join(',', @{ $c->user->categories });
+                    my $params = {
+                        lat => $problem->latitude,
+                        lon => $problem->longitude,
+                    };
+                    $params->{filter_category} = $categories if $categories;
+                    $params->{js} = 1 if $c->get_param('js');
+                    $redirect_uri = $c->uri_for( "/around", $params );
+                }
+            } elsif ( $c->cobrand->is_council && !$c->cobrand->owns_problem($problem) ) {
+                # This problem might no longer be visible on the current cobrand,
+                # if its body has changed (e.g. by virtue of the category changing)
+                # so redirect to a cobrand where it can be seen if necessary
                 $redirect_uri = $c->cobrand->base_url_for_report( $problem ) . $problem->url;
             } else {
                 $redirect_uri = $c->uri_for( $problem->url );
-            }
-
-            # Or if inspector, redirect back to shortlist
-            if ($c->user->has_body_permission_to('planned_reports')) {
-                $redirect_uri = $c->uri_for_action('my/planned');
             }
 
             $c->log->debug( "Redirecting to: " . $redirect_uri );
@@ -476,7 +500,7 @@ sub nearby_json : Private {
 
     $c->forward( 'load_problem_or_display_error', [ $id ] );
     my $p = $c->stash->{problem};
-    my $dist = 1000;
+    my $dist = 1;
 
     my $nearby = $c->model('DB::Nearby')->nearby(
         $c, $dist, [ $p->id ], 5, $p->latitude, $p->longitude, undef, [ $p->category ], undef
@@ -496,7 +520,7 @@ sub nearby_json : Private {
     );
 
     my $json = { pins => \@pins };
-    $json->{current} = $on_map_list_html if $on_map_list_html;
+    $json->{reports_list} = $on_map_list_html if $on_map_list_html;
     my $body = encode_json($json);
     $c->res->content_type('application/json; charset=utf-8');
     $c->res->body($body);

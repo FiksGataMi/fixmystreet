@@ -5,12 +5,6 @@ use namespace::autoclean;
 BEGIN { extends 'Catalyst::Controller'; }
 
 
-sub begin : Private {
-    my ( $self, $c ) = @_;
-
-    $c->forward('/admin/begin');
-}
-
 sub index : Path : Args(0) {
     my ( $self, $c ) = @_;
 
@@ -71,6 +65,7 @@ sub edit : Path : Args(2) {
         $priority->name( $c->get_param('name') );
         $priority->description( $c->get_param('description') );
         $priority->external_id( $c->get_param('external_id') );
+        $priority->is_default( $c->get_param('is_default') ? 1 : 0 );
         $priority->update_or_insert;
 
         my @live_contact_ids = map { $_->id } @live_contacts;

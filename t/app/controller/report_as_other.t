@@ -1,7 +1,3 @@
-use strict;
-use warnings;
-use Test::More;
-
 use FixMyStreet::TestMech;
 use FixMyStreet::App;
 
@@ -80,6 +76,20 @@ subtest "Body user, has permission to add report as another (existing) user" => 
     push @users, $report->user;
 };
 
+subtest "Body user, has permission to add report as anonymous user" => sub {
+    my $report = add_report(
+        'contribute_as_anonymous_user',
+        form_as => 'anonymous_user',
+        title => "Test Report",
+        detail => 'Test report details.',
+        category => 'Street lighting',
+    );
+    is $report->name, 'Oxfordshire County Council', 'report name is body';
+    is $report->user->name, 'Body User', 'user name unchanged';
+    is $report->user->id, $user->id, 'user matches';
+    is $report->anonymous, 1, 'report anonymous';
+};
+
 subtest "Body user, has permission to add update as council" => sub {
     my $update = add_update(
         'contribute_as_body',
@@ -123,12 +133,19 @@ subtest "Body user, has permission to add update as another (existing) user" => 
     like $mech->get_text_body_from_email, qr/Your update has been logged/;
 };
 
-done_testing();
+subtest "Body user, has permission to add update as anonymous user" => sub {
+    my $update = add_update(
+        'contribute_as_anonymous_user',
+        form_as => 'anonymous_user',
+        update => 'Test Update',
+    );
+    is $update->name, 'Oxfordshire County Council', 'update name is body';
+    is $update->user->name, 'Body User', 'user name unchanged';
+    is $update->user->id, $user->id, 'user matches';
+    is $update->anonymous, 1, 'update anonymous';
+};
 
-END {
-    $mech->delete_body($body);
-    $mech->delete_user($_) for @users;
-}
+done_testing();
 
 sub start_report {
     my $permission = shift;

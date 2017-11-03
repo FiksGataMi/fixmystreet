@@ -1,0 +1,24 @@
+@import "../sass/h5bp";
+@import "./_colours";
+@import "../sass/mixins";
+
+@import "../sass/base";
+
+#site-logo {
+    background-position: 0 0;
+    background-size: 120px 32px;
+    height: 32px;
+    width: 120px;
+    @include high-dpi-background-image('images/site-logo-mobile');
+}
+
+#site-header {
+    .container {
+        padding: 1em; // up from default `0 1em`
+    }
+}
+
+#site-subheader,
+.site-header__fake-nav {
+    display: none;
+}

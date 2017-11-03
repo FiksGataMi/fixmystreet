@@ -1,16 +1,8 @@
-use strict;
-use warnings;
-
-use Test::More;
-
 use FixMyStreet::TestMech;
 use FixMyStreet;
 use FixMyStreet::App;
 use FixMyStreet::DB;
-use mySociety::Locale;
 use Sub::Override;
-
-mySociety::Locale::gettext_domain('FixMyStreet');
 
 my $problem_rs = FixMyStreet::DB->resultset('Problem');
 
@@ -119,15 +111,6 @@ for my $test (
         },
         errors => {
             category => 'Please choose a category',
-        }
-    },
-    {
-        desc => 'bad category',
-        changed => {
-            category => '-- Pick a property type --',
-        },
-        errors => {
-            category => 'Please choose a property type',
         }
     },
     {
@@ -430,7 +413,7 @@ for my $contact ( {
     category => 'Graffiti',
     email => 'highways@example.net',
 }, {
-    confirmed => 0,
+    state => 'unconfirmed',
     body_id => $body_ids{2636}, # Isle of Wight
     category => 'potholes',
     email => '2636@example.com',
@@ -531,7 +514,6 @@ foreach my $test ( {
         my $override = {
             ALLOWED_COBRANDS => [ 'fixmystreet' ],
             BASE_URL => 'http://www.fixmystreet.com',
-            MAPIT_URL => 'http://mapit.mysociety.org/',
         };
         if ( $test->{cobrand} && $test->{cobrand} =~ /hart/ ) {
             $override->{ALLOWED_COBRANDS} = [ 'hart' ];
@@ -607,8 +589,6 @@ foreach my $test ( {
 subtest 'check can set mutiple emails as a single contact' => sub {
     my $override = {
         ALLOWED_COBRANDS => [ 'fixmystreet' ],
-        BASE_URL => 'http://www.fixmystreet.com',
-        MAPIT_URL => 'http://mapit.mysociety.org/',
     };
 
     my $contact = {
@@ -793,6 +773,8 @@ subtest 'check duplicate reports' => sub {
     $problem1->set_extra_metadata(duplicate_of => $problem2->id);
     $problem1->state('duplicate');
     $problem1->update;
+    $problem2->set_extra_metadata(duplicates => [ $problem1->id ]);
+    $problem2->update;
 
     is $problem1->duplicate_of->title, $problem2->title, 'problem1 returns correct problem from duplicate_of';
     is scalar @{ $problem2->duplicates }, 1, 'problem2 has correct number of duplicates';
@@ -883,11 +865,5 @@ subtest 'return how many days ago a problem was reported' => sub {
 };
 
 END {
-    $problem->comments->delete if $problem;
-    $problem->delete if $problem;
-    $mech->delete_user( $user ) if $user;
-
-    $mech->delete_body($_) for @bodies;
-
     done_testing();
 }

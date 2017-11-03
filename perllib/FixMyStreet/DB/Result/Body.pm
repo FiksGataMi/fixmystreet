@@ -121,16 +121,50 @@ __PACKAGE__->has_many(
 # Created by DBIx::Class::Schema::Loader v0.07035 @ 2017-02-13 15:11:11
 # DO NOT MODIFY THIS OR ANYTHING ABOVE! md5sum:BOJANVwg3kR/1VjDq0LykA
 
+use Moo;
+use namespace::clean;
+
+with 'FixMyStreet::Roles::Translatable';
+
 sub url {
     my ( $self, $c, $args ) = @_;
     # XXX $areas_info was used here for Norway parent - needs body parents, I guess
     return $c->uri_for( '/reports/' . $c->cobrand->short_name( $self ), $args || {} );
 }
 
+__PACKAGE__->might_have(
+  "translations",
+  "FixMyStreet::DB::Result::Translation",
+  sub {
+    my $args = shift;
+    return {
+        "$args->{foreign_alias}.object_id" => { -ident => "$args->{self_alias}.id" },
+        "$args->{foreign_alias}.tbl" => { '=' => \"?" },
+        "$args->{foreign_alias}.col" => { '=' => \"?" },
+        "$args->{foreign_alias}.lang" => { '=' => \"?" },
+    };
+  },
+  { cascade_copy => 0, cascade_delete => 0 },
+);
+
+around name => \&translate_around;
+
 sub areas {
     my $self = shift;
     my %ids = map { $_->area_id => 1 } $self->body_areas->all;
     return \%ids;
+}
+
+sub first_area_children {
+    my ( $self, $c ) = @_;
+
+    my $area_id = $self->body_areas->first->area_id;
+
+    my $children = mySociety::MaPit::call('area/children', $area_id,
+        type => $c->cobrand->area_types_children,
+    );
+
+    return $children;
 }
 
 =head2 get_cobrand_handler

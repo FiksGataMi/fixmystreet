@@ -1,19 +1,16 @@
-use strict;
-use warnings;
-
-use Test::More;
-
 use FixMyStreet;
 use FixMyStreet::DB;
 use FixMyStreet::TestMech;
 use FixMyStreet::SendReport::Email;
-use mySociety::Locale;
 
 ok( my $mech = FixMyStreet::TestMech->new, 'Created mech object' );
 
+use_ok 'FixMyStreet::Cobrand';
+FixMyStreet::DB->schema->cobrand(FixMyStreet::Cobrand::FixMyStreet->new());
+
 my $user = $mech->create_user_ok( 'user@example.com' );
 
-my $body = $mech->create_body_ok( 2237, 'Oxfordshire County Council', id => 2237 );
+my $body = $mech->create_body_ok( 2237, 'Oxfordshire County Council');
 # $body->update({ send_method => 'Email' });
 
 my $contact = $mech->create_contact_ok(
@@ -31,13 +28,13 @@ my @reports = $mech->create_problems_for_body( 1, $body->id, 'Test', {
 });
 my $report = $reports[0];
 
-subtest 'Report isn’t sent if uninspected' => sub {
+subtest "Report isn't sent if uninspected" => sub {
     $mech->clear_emails_ok;
 
     FixMyStreet::DB->resultset('Problem')->send_reports();
 
     $mech->email_count_is( 0 );
-    is $report->whensent, undef, 'Report hasn’t been sent';
+    is $report->whensent, undef, "Report hasn't been sent";
 };
 
 subtest 'Report is sent when inspected' => sub {
@@ -72,7 +69,7 @@ subtest 'Uninspected report is sent when made by trusted user' => sub {
     is $report->get_extra_metadata('inspected'), undef, 'Report not marked as inspected';
 };
 
-subtest 'Uninspected report isn’t sent when user rep is too low' => sub {
+subtest "Uninspected report isn't sent when user rep is too low" => sub {
     $mech->clear_emails_ok;
     $report->whensent( undef );
     $report->update;
@@ -88,7 +85,7 @@ subtest 'Uninspected report isn’t sent when user rep is too low' => sub {
 
     $report->discard_changes;
     $mech->email_count_is( 0 );
-    is $report->whensent, undef, 'Report hasn’t been sent';
+    is $report->whensent, undef, "Report hasn't been sent";
 };
 
 subtest 'Uninspected report is sent when user rep is high enough' => sub {
@@ -104,8 +101,3 @@ subtest 'Uninspected report is sent when user rep is high enough' => sub {
 };
 
 done_testing();
-
-END {
-    $mech->delete_user($user);
-    $mech->delete_body($body);
-}

@@ -1,14 +1,10 @@
-use strict;
-use warnings;
-use Test::More;
-
 use CGI::Simple;
 use FixMyStreet::TestMech;
 my $mech = FixMyStreet::TestMech->new;
 
 # Create test data
 my $user = $mech->create_user_ok( 'bromley@example.com' );
-my $body = $mech->create_body_ok( 2482, 'Bromley Council', id => 2482 );
+my $body = $mech->create_body_ok( 2482, 'Bromley Council');
 my $contact = $mech->create_contact_ok(
     body_id => $body->id,
     category => 'Other',
@@ -45,9 +41,9 @@ for my $update ('in progress', 'unable to fix') {
 # Test Bromley special casing of 'unable to fix'
 $mech->get_ok( '/report/' . $report->id );
 $mech->content_contains( 'marks it as in progress' );
-$mech->content_contains( 'marked as in progress' );
+$mech->content_contains( 'State changed to: In progress' );
 $mech->content_contains( 'marks it as unable to fix' );
-$mech->content_contains( 'marked as no further action' );
+$mech->content_contains( 'State changed to: No further action' );
 
 subtest 'testing special Open311 behaviour', sub {
     $report->set_extra_fields();
@@ -132,7 +128,4 @@ for my $test (
     };
 }
 
-# Clean up
-$mech->delete_user($user);
-$mech->delete_body($body);
 done_testing();

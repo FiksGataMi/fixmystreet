@@ -1,7 +1,3 @@
-use strict;
-use warnings;
-use Test::More;
-
 use FixMyStreet::TestMech;
 my $mech = FixMyStreet::TestMech->new;
 
@@ -75,7 +71,7 @@ ok $mech->get('/report/' . $edinburgh_problems[2]->id);
 is $mech->res->code, 403, 'page forbidden';
 is $problem_rs->count, $num+5;
 
-my $oxon = $mech->create_body_ok(2237, 'Oxfordshire County Council', id => 2237);
+my $oxon = $mech->create_body_ok(2237, 'Oxfordshire County Council');
 subtest "prefilters /around if user has categories" => sub {
     my $user = $mech->log_in_ok('test@example.com');
     my $categories = [
@@ -92,7 +88,5 @@ subtest "prefilters /around if user has categories" => sub {
 };
 
 END {
-    $mech->delete_problems_for_body( 2651 );
-    $mech->delete_body($oxon);
     done_testing();
 }

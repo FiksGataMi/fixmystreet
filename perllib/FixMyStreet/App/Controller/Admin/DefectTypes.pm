@@ -6,12 +6,6 @@ use mySociety::ArrayUtils;
 BEGIN { extends 'Catalyst::Controller'; }
 
 
-sub begin : Private {
-    my ( $self, $c ) = @_;
-
-    $c->forward('/admin/begin');
-}
-
 sub index : Path : Args(0) {
     my ( $self, $c ) = @_;
 
@@ -62,7 +56,7 @@ sub edit : Path : Args(2) {
     my %active_contacts = map { $_->id => 1 } @contacts;
     my @all_contacts = map { {
         id => $_->id,
-        category => $_->category,
+        category => $_->category_display,
         active => $active_contacts{$_->id},
     } } @live_contacts;
     $c->stash->{contacts} = \@all_contacts;

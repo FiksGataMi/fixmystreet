@@ -1,5 +1,5 @@
 <div id="update_form">
-    <h2>[% loc( 'Provide an update') %]</h2>
+    <h2 class="update-form-heading">[% loc( 'Provide an update') %]</h2>
 
     [% INCLUDE 'errors.html' %]
 
@@ -34,28 +34,25 @@
             </div>
         [% END %]
 
+            <div class="general-notes">
+                <p>Please note that new and separate occurrences of issues
+                should be logged as new reports, to avoid conflicting
+                information or updates and ensure the information is passed
+                promptly to our teams. Please log any new issue via
+                <a href="https://www.bromley.gov.uk/report">https://www.bromley.gov.uk/report</a>
+                using the map marker and description to detail where the issue
+                is located.</p>
+            </div>
+
             <label for="form_update">[% loc( 'Update' ) %]</label>
             [% IF field_errors.update %]
                 <div class='form-error'>[% field_errors.update %]</div>
             [% END %]
             <textarea class="form-control" rows="7" cols="30" name="update" id="form_update" placeholder="[% loc('Please write your update here') %]" required>[% update.text | html %]</textarea>
 
-            <div class="general-notes">
-                <p>Please note this comments box can only be used for this report.
-                <br><a href="http://www.bromley.gov.uk/report">Report a different issue</a>
-            </div>
-
             [% IF c.user && c.user.belongs_to_body( problem.bodies_str ) %]
-                <label for="form_state">[% loc( 'State' ) %]</label>
-                <select name="state" id="form_state" class="form-control">
-                    [% FOREACH state IN [ ['confirmed', loc('Open')], ['investigating',
-                    loc('Investigating')], ['action scheduled', loc('Action Scheduled')],
-                    ['in progress', loc('In Progress')], ['duplicate', loc('Duplicate')],
-                    ['unable to fix', loc('No further action')], ['not responsible', loc('Not Responsible')],
-                    ['fixed', loc('Fixed')] ] %]
-                    <option [% 'selected ' IF state.0 == problem.state_display %] value="[% state.0 %]">[% state.1 %]</option>
-                [% END %]
-                </select>
+                <label for="state">[% loc( 'State' ) %]</label>
+                [% INCLUDE 'report/inspect/state_groups_select.html' %]
             [% ELSE %]
                 [% IF problem.is_fixed AND c.user_exists AND c.user.id == problem.user_id %]
 

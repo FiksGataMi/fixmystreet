@@ -1,7 +1,3 @@
-use strict;
-use warnings;
-use Test::More;
-
 use FixMyStreet::TestMech;
 use FixMyStreet::App;
 
@@ -196,7 +192,5 @@ subtest "check RSS feeds on cobrand have correct URLs for non-cobrand reports" =
     $mech->content_contains($expected1, 'non cobrand area report point to fixmystreet.com');
     $mech->content_contains($expected2, 'cobrand area report point to cobrand url');
 };
-
-$mech->delete_user( $user1 );
 
 done_testing();

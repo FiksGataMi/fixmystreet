@@ -1,15 +1,14 @@
 # TODO
 # Overdue alerts
 
-use strict;
-use warnings;
 use DateTime;
 use Email::MIME;
 use LWP::Protocol::PSGI;
-use Test::More;
 use Test::LongString;
 use Path::Tiny;
 use t::Mock::MapItZurich;
+use FixMyStreet::TestMech;
+my $mech = FixMyStreet::TestMech->new;
 
 # Check that you have the required locale installed - the following
 # should return a line with de_CH.utf8 in. If not install that locale.
@@ -52,9 +51,6 @@ sub reset_report_state {
     $report->created($created) if $created;
     $report->update;
 }
-
-use FixMyStreet::TestMech;
-my $mech = FixMyStreet::TestMech->new;
 
 # Front page test
 ok $mech->host("zurich.example.com"), "change host to Zurich";
@@ -699,6 +695,7 @@ subtest "only superuser can edit bodies" => sub {
     $user = $mech->log_in_ok( 'dm1@example.org' );
     FixMyStreet::override_config {
         ALLOWED_COBRANDS => [ 'zurich' ],
+        MAPIT_URL => 'http://mapit.zurich/',
     }, sub {
         $mech->get( '/admin/body/' . $zurich->id );
     };
@@ -707,7 +704,6 @@ subtest "only superuser can edit bodies" => sub {
 };
 
 subtest "only superuser can see 'Add body' form" => sub {
-    LWP::Protocol::PSGI->register(t::Mock::MapItZurich->run_if_script, host => 'mapit.zurich');
     $user = $mech->log_in_ok( 'dm1@example.org' );
     FixMyStreet::override_config {
         ALLOWED_COBRANDS => [ 'zurich' ],
@@ -722,7 +718,6 @@ subtest "only superuser can see 'Add body' form" => sub {
 };
 
 subtest "phone number is mandatory" => sub {
-    LWP::Protocol::PSGI->register(t::Mock::MapItZurich->run_if_script, host => 'mapit.zurich');
     FixMyStreet::override_config {
         MAPIT_TYPES => [ 'O08' ],
         MAPIT_URL => 'http://mapit.zurich/',
@@ -739,7 +734,6 @@ subtest "phone number is mandatory" => sub {
 };
 
 subtest "phone number is not mandatory for reports from mobile apps" => sub {
-    LWP::Protocol::PSGI->register(t::Mock::MapItZurich->run_if_script, host => 'mapit.zurich');
     FixMyStreet::override_config {
         MAPIT_TYPES => [ 'O08' ],
         MAPIT_URL => 'http://mapit.zurich/',
@@ -766,7 +760,6 @@ subtest "phone number is not mandatory for reports from mobile apps" => sub {
 };
 
 subtest "problems can't be assigned to deleted bodies" => sub {
-    LWP::Protocol::PSGI->register(t::Mock::MapItZurich->run_if_script, host => 'mapit.zurich');
     $user = $mech->log_in_ok( 'dm1@example.org' );
     $user->from_body( $zurich->id );
     $user->update;
@@ -795,13 +788,11 @@ subtest "problems can't be assigned to deleted bodies" => sub {
 };
 
 subtest "photo must be supplied for categories that require it" => sub {
-    LWP::Protocol::PSGI->register(t::Mock::MapItZurich->run_if_script, host => 'mapit.zurich');
     FixMyStreet::App->model('DB::Contact')->find_or_create({
         body => $division,
         category => "Graffiti - photo required",
         email => "graffiti\@example.org",
-        confirmed => 1,
-        deleted => 0,
+        state => 'confirmed',
         editor => "editor",
         whenedited => DateTime->now(),
         note => "note for graffiti",
@@ -974,20 +965,21 @@ FixMyStreet::override_config {
     MAPIT_URL => 'http://mapit.zurich/',
     MAPIT_TYPES  => [ 'ZZZ' ],
 }, sub {
-    LWP::Protocol::PSGI->register(t::Mock::MapItZurich->run_if_script, host => 'mapit.zurich');
     subtest 'users at the top level can be edited' => sub {
         $mech->log_in_ok( $superuser->email );
         $mech->get_ok('/admin/user_edit/' . $superuser->id );
     };
 };
 
+FixMyStreet::override_config {
+    ALLOWED_COBRANDS => [ 'zurich' ],
+}, sub {
+    subtest 'A visit to /reports is okay' => sub {
+        $mech->get_ok('/reports');
+    };
+};
+
 END {
-    $mech->delete_body($subdivision);
-    $mech->delete_body($division);
-    $mech->delete_body($zurich);
-    $mech->delete_body($external_body);
-    $mech->delete_user( 'dm1@example.org' );
-    $mech->delete_user( 'sdm1@example.org' );
     ok $mech->host("www.fixmystreet.com"), "change host back";
     done_testing();
 }

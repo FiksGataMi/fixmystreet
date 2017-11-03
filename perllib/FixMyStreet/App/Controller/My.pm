@@ -19,9 +19,10 @@ Catalyst Controller.
 
 =cut
 
-sub begin : Private {
+sub auto : Private {
     my ($self, $c) = @_;
     $c->detach( '/auth/redirect' ) unless $c->user;
+    return 1;
 }
 
 =head2 index
@@ -162,7 +163,7 @@ sub setup_page_data : Private {
         distinct => 1,
         order_by => [ 'category' ],
     } )->all;
-    @categories = map { $_->category } @categories;
+    @categories = map { { name => $_->category, value => $_->category_display } } @categories;
     $c->stash->{filter_categories} = \@categories;
 
     $c->stash->{page} = 'my';
@@ -205,6 +206,20 @@ sub planned_change : Path('planned/change') {
     }
 }
 
+sub shortlist_multiple : Path('planned/change_multiple') {
+    my ($self, $c) = @_;
+    $c->forward('/auth/check_csrf_token');
+
+    my @ids = $c->get_param_list('ids[]');
+
+    foreach my $id (@ids) {
+      $c->forward( '/report/load_problem_or_display_error', [ $id ] );
+      $c->user->add_to_planned_reports($c->stash->{problem});
+    }
+
+    $c->res->body(encode_json({ outcome => 'add' }));
+}
+
 sub by_shortlisted {
     my $a_order = $a->get_extra_metadata('order') || 0;
     my $b_order = $b->get_extra_metadata('order') || 0;
@@ -217,6 +232,38 @@ sub by_shortlisted {
     } else {
         # Default to order added to planned reports
         $a->user_planned_reports->first->id <=> $b->user_planned_reports->first->id;
+    }
+}
+
+sub anonymize : Path('anonymize') {
+    my ($self, $c) = @_;
+    $c->forward('/auth/get_csrf_token');
+
+    my $object;
+    if (my $id = $c->get_param('problem')) {
+        $c->forward( '/report/load_problem_or_display_error', [ $id ] );
+        $object = $c->stash->{problem};
+    } elsif ($id = $c->get_param('update')) {
+        $c->stash->{update} = $object = $c->model('DB::Comment')->find({ id => $id });
+        $c->detach('/page_error_400_bad_request') unless $object;
+    } else {
+        $c->detach('/page_error_404_not_found');
+    }
+    $c->detach('/page_error_400_bad_request') unless $c->user->id == $object->user_id;
+    $c->detach('/page_error_400_bad_request') if $object->anonymous;
+
+    if ($c->get_param('hide') || $c->get_param('hide_everywhere')) {
+        $c->detach('/page_error_400_bad_request') unless $c->req->method eq 'POST';
+        $c->forward('/auth/check_csrf_token');
+        if ($c->get_param('hide')) {
+            $object->update({ anonymous => 1 });
+            $c->flash->{anonymized} = _('Your name has been hidden.');
+        } elsif ($c->get_param('hide_everywhere')) {
+            $c->user->problems->update({anonymous => 1});
+            $c->user->comments->update({anonymous => 1});
+            $c->flash->{anonymized} = _('Your name has been hidden from all your reports and updates.');
+        }
+        $c->res->redirect($object->url);
     }
 }
 

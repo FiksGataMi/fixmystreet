@@ -1,8 +1,3 @@
-use strict;
-use warnings;
-use Test::More;
-use utf8;
-
 use FixMyStreet::TestMech;
 use FixMyStreet::App;
 use Data::Dumper;
@@ -16,9 +11,6 @@ my $body = $mech->create_body_ok( $BROMLEY_ID, 'Bromley Council' );
 my $dt = DateTime->now;
 
 my $user = $mech->create_user_ok('test-moderation@example.com', name => 'Test User');
-$user->user_body_permissions->delete_all;
-$user->discard_changes;
-
 my $user2 = $mech->create_user_ok('test-moderation2@example.com', name => 'Test User 2');
 
 sub create_report {
@@ -104,8 +96,8 @@ subtest 'Problem moderation' => sub {
         $mech->content_like(qr/Moderated by Bromley Council/);
 
         $report->discard_changes;
-        is $report->title, 'Good [...] good';
-        is $report->detail, 'Good [...] good [...]improved';
+        is $report->title, 'Good good';
+        is $report->detail, 'Good good improved';
     };
 
     subtest 'Revert title and text' => sub {
@@ -199,8 +191,8 @@ subtest 'Problem 2' => sub {
     $mech->base_like( qr{\Q$REPORT2_URL\E} );
 
     $report2->discard_changes;
-    is $report2->title, 'Good [...] good';
-    is $report2->detail, 'Good [...] good [...]improved';
+    is $report2->title, 'Good good';
+    is $report2->detail, 'Good good improved';
 
     $mech->submit_form_ok({ with_fields => {
         %problem_prepopulated,
@@ -244,7 +236,7 @@ subtest 'updates' => sub {
         $mech->base_like( qr{\Q$REPORT_URL\E} );
 
         $update->discard_changes;
-        is $update->text, 'update good good [...] good',
+        is $update->text, 'update good good good',
     };
 
     subtest 'Revert text' => sub {
@@ -328,7 +320,7 @@ subtest 'Update 2' => sub {
     }}) or die $mech->content;
 
     $update2->discard_changes;
-    is $update2->text, 'update good good [...] good',
+    is $update2->text, 'update good good good',
 };
 
 subtest 'Now stop being a staff user' => sub {
@@ -347,12 +339,5 @@ subtest 'And do it as a superuser' => sub {
     }});
     $mech->content_contains('Moderated by a FixMyStreet administrator');
 };
-
-$update->delete;
-$update2->delete;
-$report->moderation_original_data->delete;
-$report->delete;
-$report2->delete;
-$mech->delete_user($user);
 
 done_testing();

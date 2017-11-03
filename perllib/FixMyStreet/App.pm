@@ -25,7 +25,6 @@ use Catalyst (
     'Session::State::Cookie',    # FIXME - we're using our own override atm
     'Authentication',
     'SmartURI',
-    'Compress::Gzip',
 );
 
 extends 'Catalyst';
@@ -168,9 +167,13 @@ template paths, maps, languages etc, etc.
 sub setup_request {
     my $c = shift;
 
+    # Set the Catalyst model schema to the same as the DB schema
+    $c->model("DB")->schema( FixMyStreet::DB->schema );
+
     $c->setup_dev_overrides();
 
     my $cobrand = $c->cobrand;
+    FixMyStreet::DB->schema->cobrand($cobrand);
 
     $cobrand->call_hook('add_response_headers');
 
@@ -200,6 +203,10 @@ sub setup_request {
 
     $c->stash->{site_name} = Utils::trim_text($c->render_fragment('site-name.html'));
 
+    if (my $template = $c->forward('/about/find_template', [ 'homepage' ])) {
+        $c->stash->{homepage_template} = $template;
+    }
+
     $c->model('DB::Problem')->set_restriction( $cobrand->site_key() );
 
     Memcached::set_namespace( FixMyStreet->config('FMS_DB_NAME') . ":" );
@@ -212,11 +219,8 @@ sub setup_request {
         mySociety::MaPit::configure( "http://$host/fakemapit/" );
     }
 
-    # XXX Put in cobrand / do properly
-    if ($c->cobrand->moniker eq 'zurich') {
-        FixMyStreet::DB::Result::Problem->visible_states_add('unconfirmed');
-        FixMyStreet::DB::Result::Problem->visible_states_remove('investigating');
-    }
+    $c->stash->{has_fixed_state} = FixMyStreet::DB::Result::Problem::fixed_states->{fixed};
+    $c->cobrand->call_hook('setup_states');
 
     if (FixMyStreet->test_mode) {
         # Is there a better way of altering $c->config that may have
@@ -293,7 +297,7 @@ sub get_override {
 
 =head2 send_email
 
-    $email_sent = $c->send_email( 'email_template.txt', $extra_stash_values );
+    $success = $c->send_email( 'email_template.txt', $extra_stash_values );
 
 Send an email by filling in the given template with values in the stash.
 
@@ -304,6 +308,8 @@ The stash (or extra_stash_values) keys 'to', 'from' and 'subject' are used to
 set those fields in the email if they are present.
 
 If a 'from' is not specified then the default from the config is used.
+
+Returns the email on success, false on failure.
 
 =cut
 
@@ -349,14 +355,15 @@ sub send_email {
 
     my $email = mySociety::Locale::in_gb_locale { FixMyStreet::Email::construct_email($data) };
 
+    my $result = 0;
     try {
         FixMyStreet::Email::Sender->send($email, { from => $sender });
+        $result = $email;
     } catch {
         my $error = $_ || 'unknown error';
         $c->log->error("$error");
     };
-
-    return $email;
+    return $result;
 }
 
 =head2 uri_with

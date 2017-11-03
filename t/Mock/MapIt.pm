@@ -24,13 +24,17 @@ sub output {
 
 my @PLACES = (
     [ 'EH1 1BB', 55.952055, -3.189579, 2651, 'Edinburgh City Council', 'UTA', 20728, 'City Centre', 'UTE' ],
+    [ 'BS10 5EE', 51.494885, -2.602237, 2561, 'Bristol City Council', 'UTA', 148646, 'Bedminster', 'UTW' ],
     [ 'SW1A 1AA', 51.501009, -0.141588, 2504, 'Westminster City Council', 'LBO' ],
     [ 'GL50 2PR', 51.896268, -2.093063, 2226, 'Gloucestershire County Council', 'CTY', 2326, 'Cheltenham Borough Council', 'DIS', 4544, 'Lansdown', 'DIW', 143641, 'Lansdown and Park', 'CED' ],
     [ '?', 51.754926, -1.256179, 2237, 'Oxfordshire County Council', 'CTY', 2421, 'Oxford City Council', 'DIS' ],
+    [ 'OX20 1SZ', 51.754926, -1.256179, 2237, 'Oxfordshire County Council', 'CTY', 2421, 'Oxford City Council', 'DIS' ],
     [ 'BR1 3UH', 51.4021, 0.01578, 2482, 'Bromley Council', 'LBO' ],
     [ '?', 50.78301, -0.646929 ],
     [ 'GU51 4AE', 51.279456, -0.846216, 2333, 'Hart District Council', 'DIS', 2227, 'Hampshire County Council', 'CTY' ],
     [ 'WS1 4NH', 52.563074, -1.991032, 2535, 'Sandwell Borough Council', 'MTD' ],
+    [ 'OX28 4DS', 51.784721, -1.494453 ],
+    [ 'E14 2DN', 51.508536, '0.000001' ],
 );
 
 sub dispatch_request {
@@ -105,6 +109,19 @@ sub dispatch_request {
         my ($self, $area) = @_;
         return [ 200, [ 'Content-Type' => 'application/json' ], [ '"AB12 1AA"' ] ];
     },
+
+    sub (GET + /nearest/**.*) {
+        my ($self, $point) = @_;
+        foreach (@PLACES) {
+            if ($point eq "4326/$_->[2],$_->[1]") {
+                return $self->output({
+                    postcode => { wgs84_lat => $_->[1], wgs84_lon => $_->[2], postcode => $_->[0], distance => 93 },
+                });
+            }
+        }
+        return $self->output({});
+    },
+
 }
 
 LWP::Protocol::PSGI->register(t::Mock::MapIt->to_psgi_app, host => 'mapit.uk');

@@ -9,11 +9,11 @@ $.extend(fixmystreet.set_up, {
               latitude: $('input[name="latitude"]').val(),
               longitude: $('input[name="longitude"]').val()
           };
-          $("#js-duplicate-reports ul").html("<li>Loading...</li>");
+          $("#js-duplicate-reports ul").html('<li class="item-list__item">Loading...</li>');
           var nearby_url = '/report/'+report_id+'/nearby.json';
           $.getJSON(nearby_url, args, function(data) {
               var duplicate_of = $("#report_inspect_form [name=duplicate_of]").val();
-              var $reports = $(data.current)
+              var $reports = $(data.reports_list)
                               .filter("li")
                               .not("[data-report-id="+report_id+"]")
                               .slice(0, 5);
@@ -80,17 +80,20 @@ $.extend(fixmystreet.set_up, {
       $("#js-change-duplicate-report").click(refresh_duplicate_list);
   },
 
-  list_item_actions: function() {
-    function toggle_shortlist(btn, sw, id) {
-        btn.attr('class', 'item-list__item__shortlist-' + sw);
-        btn.attr('title', btn.data('label-' + sw));
-        if (id) {
-            sw += '-' + id;
+  action_scheduled_raise_defect: function() {
+    $("#report_inspect_form").find('[name=state]').on('change', function() {
+        if ($(this).val() !== "action scheduled") {
+            $("#js-inspect-action-scheduled").addClass("hidden");
+            $('#raise_defect_yes').prop('required', false);
+        } else {
+            $("#js-inspect-action-scheduled").removeClass("hidden");
+            $('#raise_defect_yes').prop('required', true);
         }
-        btn.attr('name', 'shortlist-' + sw);
-    }
+    });
+  },
 
-    $('.item-list--reports').on('click', ':submit', function(e) {
+  list_item_actions: function() {
+    $('#js-reports-list').on('click', ':submit', function(e) {
       e.preventDefault();
 
       var $submitButton = $(this);
@@ -105,7 +108,7 @@ $.extend(fixmystreet.set_up, {
           var parts = whatUserWants.split('-');
           whatUserWants = parts[0] + '-' + parts[1];
           report_id = parts[2];
-          var token = $('[name=token]').val();
+          var token = $('meta[name="csrf-token"]').attr('content');
           data = whatUserWants + '=1&token=' + token + '&id=' + report_id;
       } else {
           var $form = $(this).parents('form');
@@ -130,9 +133,9 @@ $.extend(fixmystreet.set_up, {
       } else if ('shortlist-up' === whatUserWants) {
         $item.insertBefore( $item.prev() );
       } else if ('shortlist-remove' === whatUserWants) {
-          toggle_shortlist($submitButton, 'add', report_id);
+          fixmystreet.utils.toggle_shortlist($submitButton, 'add', report_id);
       } else if ('shortlist-add' === whatUserWants) {
-          toggle_shortlist($submitButton, 'remove', report_id);
+          fixmystreet.utils.toggle_shortlist($submitButton, 'remove', report_id);
       }
 
       // Items have moved around. We need to make sure the "up" button on the
@@ -150,9 +153,9 @@ $.extend(fixmystreet.set_up, {
         } else if ('shortlist-up' === whatUserWants) {
           $item.insertAfter( $item.next() );
         } else if ('shortlist-remove' === whatUserWants) {
-          toggle_shortlist($submitButton, 'remove', report_id);
+          fixmystreet.utils.toggle_shortlist($submitButton, 'remove', report_id);
         } else if ('shortlist-add' === whatUserWants) {
-          toggle_shortlist($submitButton, 'add', report_id);
+          fixmystreet.utils.toggle_shortlist($submitButton, 'add', report_id);
         }
         fixmystreet.update_list_item_buttons($list);
       }).complete(function() {
@@ -170,21 +173,31 @@ $.extend(fixmystreet.set_up, {
             txt = opt.text;
         var $emailInput = $('input[name=email]').add('input[name=rznvy]');
         var $nameInput = $('input[name=name]');
+        var $phoneInput = $('input[name=phone]');
         var $showNameCheckbox = $('input[name=may_show_name]');
         var $addAlertCheckbox = $('#form_add_alert');
         if (val === 'myself') {
             $emailInput.val($emailInput.prop('defaultValue')).prop('disabled', true);
             $nameInput.val($nameInput.prop('defaultValue')).prop('disabled', false);
+            $phoneInput.val($phoneInput.prop('defaultValue')).prop('disabled', false);
             $showNameCheckbox.prop('checked', false).prop('disabled', false);
             $addAlertCheckbox.prop('checked', true).prop('disabled', false);
         } else if (val === 'another_user') {
             $emailInput.val('').prop('disabled', false);
             $nameInput.val('').prop('disabled', false);
+            $phoneInput.val('').prop('disabled', false);
             $showNameCheckbox.prop('checked', false).prop('disabled', true);
             $addAlertCheckbox.prop('checked', true).prop('disabled', false);
+        } else if (val === 'anonymous_user') {
+            $emailInput.val('-').prop('disabled', true);
+            $nameInput.val('-').prop('disabled', true);
+            $phoneInput.val('-').prop('disabled', true);
+            $showNameCheckbox.prop('checked', false).prop('disabled', true);
+            $addAlertCheckbox.prop('checked', false).prop('disabled', true);
         } else if (val === 'body') {
             $emailInput.val('-').prop('disabled', true);
             $nameInput.val(txt).prop('disabled', true);
+            $phoneInput.val('-').prop('disabled', true);
             $showNameCheckbox.prop('checked', true).prop('disabled', true);
             $addAlertCheckbox.prop('checked', false).prop('disabled', true);
         }
@@ -193,54 +206,83 @@ $.extend(fixmystreet.set_up, {
   },
 
   report_page_inspect: function() {
-    if (!$('form#report_inspect_form').length) {
+    var $inspect_form = $('form#report_inspect_form'),
+        $templates = $('#templates_for_public_update');
+
+    if (!$inspect_form.length) {
         return;
     }
 
     // Focus on form
-    $('html,body').scrollTop($('#report_inspect_form').offset().top);
+    $('html,body').scrollTop($inspect_form.offset().top);
+
+    function updateTemplates(opts) {
+        opts.category = opts.category || $inspect_form.find('[name=category]').val();
+        opts.state = opts.state || $inspect_form.find('[name=state]').val();
+        var selector = "[data-category='" + opts.category + "']";
+        var data = $inspect_form.find(selector).data('templates') || [];
+        data = $.grep(data, function(d, i) {
+            if (!d.state || d.state == opts.state) {
+                return true;
+            }
+            return false;
+        });
+        populateSelect($templates, data, 'templates_format');
+    }
+
+    function populateSelect($select, data, label_formatter) {
+      $select.find('option:gt(0)').remove();
+      $.each(data, function(k,v) {
+        label = window.fixmystreet.utils[label_formatter](v);
+        $opt = $('<option></option>').attr('value', v.id).text(label);
+        if (v.state) {
+            $opt.attr('data-problem-state', v.state);
+        }
+        $select.append($opt);
+      });
+    }
 
     // On the manage/inspect report form, we already have all the extra inputs
     // in the DOM, we just need to hide/show them as appropriate.
-    $('form#report_inspect_form [name=category]').change(function() {
+    $inspect_form.find('[name=category]').change(function() {
         var category = $(this).val(),
-            selector = "[data-category='" + category + "']";
-        $("form#report_inspect_form [data-category]:not(" + selector + ")").addClass("hidden");
-        $("form#report_inspect_form " + selector).removeClass("hidden");
-        // And update the associated priority list
-        var priorities = $("form#report_inspect_form " + selector).data('priorities');
-        var $select = $('#problem_priority'),
-            curr_pri = $select.val();
-        $select.find('option:gt(0)').remove();
-        $.each(priorities.split('&'), function(i, kv) {
-            if (!kv) {
-                return;
-            }
-            kv = kv.split('=', 2);
-            $select.append($('<option>', { value: kv[0], text: decodeURIComponent(kv[1]) }));
-        });
-        $select.val(curr_pri);
+            selector = "[data-category='" + category + "']",
+            entry = $inspect_form.find(selector),
+            $priorities = $('#problem_priority'),
+            $defect_types = $('#defect_type'),
+            defect_types_data = entry.data('defect-types') || [],
+            priorities_data = entry.data('priorities') || [],
+            curr_pri = $priorities.val();
+
+        $inspect_form.find("[data-category]:not(" + selector + ")").addClass("hidden");
+        entry.removeClass("hidden");
+
+        populateSelect($priorities, priorities_data, 'priorities_type_format');
+        populateSelect($defect_types, defect_types_data, 'defect_type_format');
+        updateTemplates({'category': category});
+        $priorities.val(curr_pri);
     });
 
-    // The inspect form submit button can change depending on the selected state
-    $("#report_inspect_form [name=state]").change(function(){
-        var state = $(this).val();
-        var $inspect_form = $("#report_inspect_form");
-        var $submit = $inspect_form.find("input[type=submit]");
-        var value = $submit.attr('data-value-'+state);
-        if (value !== undefined) {
-            $submit.val(value);
-        } else {
-            $submit.val($submit.data('valueOriginal'));
-        }
+    function state_change(state) {
+        // The inspect form submit button can change depending on the selected state
+        var $submit = $inspect_form.find("input[type=submit][name=save]");
+        var value = $submit.attr('data-value-' + state);
+        $submit.val(value || $submit.data('valueOriginal'));
 
+        updateTemplates({'state': state});
+    }
+    var $state_dropdown = $inspect_form.find("[name=state]");
+    state_change($state_dropdown.val());
+    $state_dropdown.change(function(){
+        var state = $(this).val();
+        state_change(state);
         // We might also have a response template to preselect for the new state
         var $select = $inspect_form.find("select.js-template-name");
         var $option = $select.find("option[data-problem-state='"+state+"']").first();
         if ($option.length) {
             $select.val($option.val()).change();
         }
-    }).change();
+    });
 
     $('.js-toggle-public-update').each(function() {
         var $checkbox = $(this);
@@ -268,10 +310,22 @@ $.extend(fixmystreet.set_up, {
             $("#problem_easting").text(bng.lon.toFixed(1));
             $("#problem_latitude").text(latlon.lat.toFixed(6));
             $("#problem_longitude").text(latlon.lon.toFixed(6));
-            $("form#report_inspect_form input[name=latitude]").val(latlon.lat);
-            $("form#report_inspect_form input[name=longitude]").val(latlon.lon);
+            $inspect_form.find("input[name=latitude]").val(latlon.lat);
+            $inspect_form.find("input[name=longitude]").val(latlon.lon);
         });
     }
+
+    // Make the "Provide an update" form toggleable, and hide it by default.
+    // (Inspectors will normally just use the #public_update box instead).
+    var $updateFormH2 = $('.update-form-heading');
+    var $updateFormBtn = $('<button>').insertBefore( $updateFormH2 );
+    $updateFormH2.hide().nextAll().hide();
+    $updateFormBtn.addClass('btn btn--provide-update');
+    $updateFormBtn.text( $updateFormH2.text() );
+    $updateFormBtn.on('click', function(e) {
+        e.preventDefault();
+        $updateFormH2.nextAll().toggle();
+    });
   },
 
   moderation: function() {
@@ -340,5 +394,121 @@ $.extend(fixmystreet.set_up, {
             $input.val($this.val());
         }
     });
+  },
+
+  shortlist_listener: function() {
+    $('#fms_shortlist_all').on('click', function() {
+      var features = [];
+      var csrf = $('meta[name="csrf-token"]').attr('content');
+
+      for (var i = 0; i < fixmystreet.markers.features.length; i++) {
+        var feature = fixmystreet.markers.features[i];
+        if (feature.onScreen()) {
+          features.push(feature.data.id);
+        }
+      }
+
+      fixmystreet.maps.shortlist_multiple(features, csrf);
+    });
   }
+
+});
+
+$.extend(fixmystreet.hooks, {
+    update_problem_fields: function(role, body, args) {
+        if (role == 'inspector') {
+            var title = args.category + ' problem has been scheduled for fixing';
+            var description = args.category + ' problem found - scheduled for fixing by ' + body;
+
+            var $title_field = $('#form_title');
+            var $description_field = $('#form_detail');
+
+            if ($title_field.val().length === 0 || $title_field.data('autopopulated') === true) {
+                $title_field.val(title);
+                $title_field.data('autopopulated', true);
+            }
+
+            if ($description_field.val().length === 0 || $description_field.data('autopopulated') === true) {
+                $description_field.val(description);
+                $description_field.data('autopopulated', true);
+            }
+
+            $('#form_title, #form_detail').on('keyup', function() {
+              $(this).data('autopopulated', false);
+            });
+        }
+    }
+
+});
+
+fixmystreet.maps = fixmystreet.maps || {};
+
+$.extend(fixmystreet.maps, {
+  shortlist_multiple: function(ids, token, count) {
+    var retryCount = (typeof count !== 'undefined') ?  count : 0;
+    $.post("/my/planned/change_multiple", { ids: ids, token: token })
+    .done(function() {
+      var $itemList = $('.item-list'),
+          items = [];
+
+      for (var i = 0; i < ids.length; i++) {
+        var problemId = ids[i],
+            $item = $itemList.find('#report-'+ problemId),
+            $form = $item.find('form'),
+            $submit = $form.find("input[type='submit']" );
+
+        fixmystreet.utils.toggle_shortlist($submit, 'remove', problemId);
+
+        items.push({
+          'url': '/report/' + $item.data('report-id'),
+          'lastupdate': $item.data('lastupdate')
+        });
+      }
+      $(document).trigger('shortlist-all', { items: items});
+    })
+    .fail(function(response) {
+      if (response.status == 400 && retryCount < 4) {
+        // If the response is 400, then get a new CSRF token and retry
+        var csrf = response.responseText.match(/content="([^"]*)" name="csrf-token"/)[1];
+        fixmystreet.maps.shortlist_multiple(ids, csrf, retryCount + 1);
+      } else {
+        alert("We appear to be having problems. Please try again later.");
+      }
+    });
+  },
+
+  show_shortlist_control: function() {
+    var $shortlistButton = $('#fms_shortlist_all');
+    if ($shortlistButton === undefined || fixmystreet.page != "reports" ) {
+      return;
+    }
+
+    if (fixmystreet.map.getZoom() >= 14) {
+      $shortlistButton.removeClass('hidden');
+    } else {
+      $shortlistButton.addClass('hidden');
+    }
+  }
+});
+
+fixmystreet.utils = fixmystreet.utils || {};
+
+$.extend(fixmystreet.utils, {
+    defect_type_format: function(data) {
+        return data.name;
+    },
+    priorities_type_format: function(data) {
+        return data.name;
+    },
+    templates_format: function(data) {
+        return data.name;
+    },
+    toggle_shortlist: function(btn, sw, id) {
+        btn.attr('class', 'item-list__item__shortlist-' + sw);
+        btn.attr('title', btn.data('label-' + sw));
+        if (id) {
+            sw += '-' + id;
+        }
+        btn.attr('name', 'shortlist-' + sw);
+    }
 });

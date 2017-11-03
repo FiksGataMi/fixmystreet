@@ -69,8 +69,12 @@ create table contacts (
     body_id integer not null references body(id),
     category text not null default 'Other',
     email text not null,
-    confirmed boolean not null,
-    deleted boolean not null,
+    state text not null check (
+        state = 'unconfirmed'
+        or state = 'confirmed'
+        or state = 'inactive'
+        or state = 'deleted'
+    ),
 
     -- last editor
     editor text not null,
@@ -102,8 +106,12 @@ create table contacts_history (
     body_id integer not null,
     category text not null default 'Other',
     email text not null,
-    confirmed boolean not null,
-    deleted boolean not null,
+    state text not null check (
+        state = 'unconfirmed'
+        or state = 'confirmed'
+        or state = 'inactive'
+        or state = 'deleted'
+    ),
 
     -- editor
     editor text not null,
@@ -118,7 +126,7 @@ create table contacts_history (
 create function contacts_updated()
     returns trigger as '
     begin
-        insert into contacts_history (contact_id, body_id, category, email, editor, whenedited, note, confirmed, deleted) values (new.id, new.body_id, new.category, new.email, new.editor, new.whenedited, new.note, new.confirmed, new.deleted);
+        insert into contacts_history (contact_id, body_id, category, email, editor, whenedited, note, state) values (new.id, new.body_id, new.category, new.email, new.editor, new.whenedited, new.note, new.state);
         return new;
     end;
 ' language 'plpgsql';
@@ -136,6 +144,7 @@ CREATE TABLE response_priorities (
     name text not null,
     description text,
     external_id text,
+    is_default boolean not null default 'f',
     unique(body_id, name)
 );
 
@@ -169,24 +178,7 @@ create table problem (
     -- Metadata
     created timestamp not null default current_timestamp,
     confirmed timestamp,
-    state text not null check (
-        state = 'unconfirmed'
-        or state = 'confirmed'
-        or state = 'investigating'
-        or state = 'planned'
-        or state = 'in progress'
-        or state = 'action scheduled'
-        or state = 'closed'
-        or state = 'fixed'
-        or state = 'fixed - council'
-        or state = 'fixed - user'
-        or state = 'hidden'
-        or state = 'partial'
-        or state = 'unable to fix'
-        or state = 'not responsible'
-        or state = 'duplicate'
-        or state = 'internal referral'
-    ),
+    state text not null,
     lang text not null default 'en-gb',
     service text not null default '',
     cobrand text not null default '' check (cobrand ~* '^[a-z0-9_]*$'),
@@ -319,21 +311,7 @@ create table comment (
     cobrand_data text not null default '' check (cobrand_data ~* '^[a-z0-9_]*$'), -- Extra data used in cobranded versions of the site
     mark_fixed boolean not null,
     mark_open boolean not null default 'f',
-    problem_state text check (
-        problem_state = 'confirmed'
-        or problem_state = 'investigating'
-        or problem_state = 'planned'
-        or problem_state = 'in progress'
-        or problem_state = 'action scheduled'
-        or problem_state = 'closed'
-        or problem_state = 'fixed'
-        or problem_state = 'fixed - council'
-        or problem_state = 'fixed - user'
-        or problem_state = 'unable to fix'
-        or problem_state = 'not responsible'
-        or problem_state = 'duplicate'
-        or problem_state = 'internal referral'
-    ),
+    problem_state text,
     -- other fields? one to indicate whether this was written by the council
     -- and should be highlighted in the display?
     external_id text,
@@ -520,3 +498,28 @@ CREATE TABLE contact_defect_types (
 
 ALTER TABLE problem
     ADD COLUMN defect_type_id int REFERENCES defect_types(id);
+
+CREATE TABLE translation (
+    id serial not null primary key,
+    tbl text not null,
+    object_id integer not null,
+    col text not null,
+    lang text not null,
+    msgstr text not null,
+    unique(tbl, object_id, col, lang)
+);
+
+CREATE TABLE report_extra_fields (
+    id serial not null primary key,
+    name text not null,
+    cobrand text,
+    language text,
+    extra text
+);
+
+CREATE TABLE state (
+    id serial not null primary key,
+    label text not null unique,
+    type text not null check (type = 'open' OR type = 'closed' OR type = 'fixed'),
+    name text not null unique
+);

@@ -1,12 +1,4 @@
-use strict;
-use warnings;
-use Test::More;
 use Test::MockModule;
-
-BEGIN {
-    use FixMyStreet;
-    FixMyStreet->test_mode(1);
-}
 
 use mySociety::Locale;
 
@@ -115,7 +107,6 @@ subtest "Test ajax decimal points" => sub {
 };
 
 END {
-    $mech->delete_body($body);
     ok $mech->host("www.fixmystreet.com"), "change host back";
     done_testing();
 }

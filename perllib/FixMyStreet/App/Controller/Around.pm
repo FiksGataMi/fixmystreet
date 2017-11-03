@@ -163,52 +163,20 @@ sub display_location : Private {
 
     $c->forward('/auth/get_csrf_token');
 
-    # get the lat,lng
+    # Check the category to filter by, if any, is valid
+    $c->forward('check_and_stash_category');
+
     my $latitude  = $c->stash->{latitude};
     my $longitude = $c->stash->{longitude};
 
-    # Deal with pin hiding/age
-    my $all_pins = $c->get_param('all_pins') ? 1 : undef;
-    $c->stash->{all_pins} = $all_pins;
-    my $interval = $all_pins ? undef : $c->cobrand->on_map_default_max_pin_age;
+    $c->forward('map_features', [ { latitude => $latitude, longitude => $longitude } ] );
 
-    $c->forward( '/reports/stash_report_filter_status' );
-
-    # Check the category to filter by, if any, is valid
-    $c->forward('check_and_stash_category');
-    $c->forward( '/reports/stash_report_sort', [ 'created-desc' ]);
-
-    # get the map features
-    my ( $on_map_all, $on_map, $nearby, $distance ) =
-      FixMyStreet::Map::map_features( $c,
-        latitude => $latitude, longitude => $longitude,
-        interval => $interval, categories => [ keys %{$c->stash->{filter_category}} ],
-        states => $c->stash->{filter_problem_states},
-        order => $c->stash->{sort_order},
-      );
-
-    # copy the found reports to the stash
-    $c->stash->{on_map}     = $on_map;
-    $c->stash->{around_map} = $nearby;
-    $c->stash->{distance}   = $distance;
-
-    # create a list of all the pins
-    my @pins;
-    unless ($c->get_param('no_pins')) {
-        @pins = map {
-            # Here we might have a DB::Problem or a DB::Nearby, we always want the problem.
-            my $p = (ref $_ eq 'FixMyStreet::App::Model::DB::Nearby') ? $_->problem : $_;
-            $p->pin_data($c, 'around');
-        } @$on_map_all, @$nearby;
-    }
-
-    $c->stash->{page} = 'around'; # So the map knows to make clickable pins, update on pan
     FixMyStreet::Map::display_map(
         $c,
         latitude  => $latitude,
         longitude => $longitude,
         clickable => 1,
-        pins      => \@pins,
+        pins      => $c->stash->{pins},
         area      => $c->cobrand->areas_on_around,
     );
 
@@ -259,13 +227,51 @@ sub check_and_stash_category : Private {
             distinct => 1
         }
     )->all;
-    my @categories = map { $_->category } @contacts;
+    my @categories = map { { name => $_->category, value => $_->category_display } } @contacts;
     $c->stash->{filter_categories} = \@categories;
     my %categories_mapped = map { $_ => 1 } @categories;
 
     my $categories = [ $c->get_param_list('filter_category', 1) ];
     my %valid_categories = map { $_ => 1 } grep { $_ && $categories_mapped{$_} } @$categories;
     $c->stash->{filter_category} = \%valid_categories;
+}
+
+sub map_features : Private {
+    my ($self, $c, $extra) = @_;
+
+    $c->stash->{page} = 'around'; # Needed by _item.html / so the map knows to make clickable pins, update on pan
+
+    $c->forward( '/reports/stash_report_filter_status' );
+    $c->forward( '/reports/stash_report_sort', [ 'created-desc' ]);
+
+    # Deal with pin hiding/age
+    my $all_pins = $c->get_param('all_pins') ? 1 : undef;
+    $c->stash->{all_pins} = $all_pins;
+    my $interval = $all_pins ? undef : $c->cobrand->on_map_default_max_pin_age;
+
+    return if $c->get_param('js'); # JS will request the same (or more) data client side
+
+    my ( $on_map_all, $on_map_list, $nearby, $distance ) =
+      FixMyStreet::Map::map_features(
+        $c, interval => $interval, %$extra,
+        categories => [ keys %{$c->stash->{filter_category}} ],
+        states => $c->stash->{filter_problem_states},
+        order => $c->stash->{sort_order},
+      );
+
+    my @pins;
+    unless ($c->get_param('no_pins')) {
+        @pins = map {
+            # Here we might have a DB::Problem or a DB::Result::Nearby, we always want the problem.
+            my $p = (ref $_ eq 'FixMyStreet::DB::Result::Nearby') ? $_->problem : $_;
+            $p->pin_data($c, 'around');
+        } @$on_map_all, @$nearby;
+    }
+
+    $c->stash->{pins} = \@pins;
+    $c->stash->{on_map} = $on_map_list;
+    $c->stash->{around_map} = $nearby;
+    $c->stash->{distance} = $distance;
 }
 
 =head2 /ajax
@@ -279,8 +285,6 @@ the map.
 sub ajax : Path('/ajax') {
     my ( $self, $c ) = @_;
 
-    $c->res->content_type('application/json; charset=utf-8');
-
     my $bbox = $c->get_param('bbox');
     unless ($bbox) {
         $c->res->status(404);
@@ -288,51 +292,12 @@ sub ajax : Path('/ajax') {
         return;
     }
 
-    # assume this is not cacheable - may need to be more fine-grained later
-    $c->res->header( 'Cache_Control' => 'max-age=0' );
+    my %valid_categories = map { $_ => 1 } $c->get_param_list('filter_category', 1);
+    $c->stash->{filter_category} = \%valid_categories;
 
-    $c->stash->{page} = 'around'; # Needed by _item.html
-
-    # how far back should we go?
-    my $all_pins = $c->get_param('all_pins') ? 1 : undef;
-    my $interval = $all_pins ? undef : $c->cobrand->on_map_default_max_pin_age;
-
-    $c->forward( '/reports/stash_report_filter_status' );
-    $c->forward( '/reports/stash_report_sort', [ 'created-desc' ]);
-
-    # extract the data from the map
-    my ( $on_map_all, $on_map_list, $nearby, $dist ) =
-      FixMyStreet::Map::map_features($c,
-          bbox => $bbox, interval => $interval,
-          categories => [ $c->get_param_list('filter_category', 1) ],
-          states => $c->stash->{filter_problem_states},
-          order => $c->stash->{sort_order},
-      );
-
-    # create a list of all the pins
-    my @pins = map {
-        # Here we might have a DB::Problem or a DB::Nearby, we always want the problem.
-        my $p = (ref $_ eq 'FixMyStreet::App::Model::DB::Nearby') ? $_->problem : $_;
-        my $colour = $c->cobrand->pin_colour( $p, 'around' );
-        [ $p->latitude, $p->longitude,
-          $colour,
-          $p->id, $p->title_safe
-        ]
-    } @$on_map_all, @$nearby;
-
-    # render templates to get the html
-    my $on_map_list_html = $c->render_fragment(
-        'around/on_map_list_items.html',
-        { on_map => $on_map_list, around_map => $nearby }
-    );
-
-    # JSON encode the response
-    my $json = { pins => \@pins };
-    $json->{current} = $on_map_list_html if $on_map_list_html;
-    my $body = encode_json($json);
-    $c->res->body($body);
+    $c->forward('map_features', [ { bbox => $bbox } ]);
+    $c->forward('/reports/ajax', [ 'around/on_map_list_items.html' ]);
 }
-
 
 sub location_autocomplete : Path('/ajax/geocode') {
     my ( $self, $c ) = @_;

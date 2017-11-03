@@ -30,16 +30,14 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     # To prevent "dpkg-preconfigure: unable to re-open stdin: No such file or directory" warnings
     export DEBIAN_FRONTEND=noninteractive
     # Make sure git submodules are checked out!
-    if [ ! -e fixmystreet/commonlib/.git ]; then
-      echo "Checking out submodules"
-      apt-get -qq install -y git >/dev/null
-      cd fixmystreet
-      git submodule --quiet update --init --recursive
-      cd commonlib
-      git config core.worktree "../../../commonlib"
-      echo "gitdir: ../.git/modules/commonlib" > .git
-      cd ../..
-    fi
+    echo "Checking submodules exist/up to date"
+    apt-get -qq install -y git >/dev/null
+    cd fixmystreet
+    git submodule --quiet update --init --recursive --rebase
+    cd commonlib
+    git config core.worktree "../../../commonlib"
+    echo "gitdir: ../.git/modules/commonlib" > .git
+    cd ../..
     # Fetch and run install script
     wget -O install-site.sh --no-verbose https://github.com/mysociety/commonlib/raw/master/bin/install-site.sh
     sh install-site.sh --dev fixmystreet vagrant 127.0.0.1.xip.io
@@ -56,7 +54,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
         echo "****************"
         echo "You can now ssh into your vagrant box: vagrant ssh"
         echo "The website code is found in: ~/fixmystreet"
-        echo "You can run the dev server with: script/fixmystreet_app_server.pl [-d] [-r] [--fork]"
+        echo "You can run the dev server with: script/server"
         echo "Access the admin with username: superuser@example.org and password: password"
     else
         echo "Unfortunately, something appears to have gone wrong with the installation."

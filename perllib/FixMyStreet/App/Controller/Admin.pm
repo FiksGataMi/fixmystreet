@@ -8,9 +8,10 @@ use Path::Class;
 use POSIX qw(strftime strcoll);
 use Digest::SHA qw(sha1_hex);
 use mySociety::EmailUtil qw(is_valid_email is_valid_email_list);
-use mySociety::ArrayUtils;
 use DateTime::Format::Strptime;
 use List::Util 'first';
+use List::MoreUtils 'uniq';
+use mySociety::ArrayUtils;
 
 use FixMyStreet::SendReport;
 
@@ -26,7 +27,7 @@ Admin pages
 
 =cut
 
-sub begin : Private {
+sub auto : Private {
     my ( $self, $c ) = @_;
 
     $c->uri_disposition('relative');
@@ -43,10 +44,6 @@ sub begin : Private {
     if ( $c->cobrand->moniker eq 'zurich' ) {
         $c->cobrand->admin_type();
     }
-}
-
-sub auto : Private {
-    my ( $self, $c ) = @_;
 
     $c->forward('check_page_allowed');
 }
@@ -97,11 +94,11 @@ sub index : Path : Args(0) {
     my $contacts = $c->model('DB::Contact')->summary_count();
 
     my %contact_counts =
-      map { $_->confirmed => $_->get_column('confirmed_count') } $contacts->all;
+      map { $_->state => $_->get_column('state_count') } $contacts->all;
 
-    $contact_counts{0} ||= 0;
-    $contact_counts{1} ||= 0;
-    $contact_counts{total} = $contact_counts{0} + $contact_counts{1};
+    $contact_counts{confirmed} ||= 0;
+    $contact_counts{unconfirmed} ||= 0;
+    $contact_counts{total} = $contact_counts{confirmed} + $contact_counts{unconfirmed};
 
     $c->stash->{contacts} = \%contact_counts;
 
@@ -243,6 +240,9 @@ sub bodies : Path('bodies') : Args(0) {
 
     $c->stash->{edit_activity} = $edit_activity;
 
+    $c->forward( 'fetch_languages' );
+    $c->forward( 'fetch_translations' );
+
     my $posted = $c->get_param('posted') || '';
     if ( $posted eq 'body' ) {
         $c->forward('check_for_super_user');
@@ -256,6 +256,9 @@ sub bodies : Path('bodies') : Args(0) {
                 $c->model('DB::BodyArea')->create( { body => $body, area_id => $_ } );
             }
 
+            $c->stash->{object} = $body;
+            $c->stash->{translation_col} = 'name';
+            $c->forward('update_translations');
             $c->stash->{updated} = _('New body added');
         }
     }
@@ -265,8 +268,8 @@ sub bodies : Path('bodies') : Args(0) {
     my $contacts = $c->model('DB::Contact')->search(
         undef,
         {
-            select => [ 'body_id', { count => 'id' }, { count => \'case when deleted then 1 else null end' },
-            { count => \'case when confirmed then 1 else null end' } ],
+            select => [ 'body_id', { count => 'id' }, { count => \'case when state = \'deleted\' then 1 else null end' },
+            { count => \'case when state = \'confirmed\' then 1 else null end' } ],
             as => [qw/body_id c deleted confirmed/],
             group_by => [ 'body_id' ],
             result_class => 'DBIx::Class::ResultClass::HashRefInflator'
@@ -297,30 +300,6 @@ sub body_form_dropdowns : Private {
 
     my @methods = map { $_ =~ s/FixMyStreet::SendReport:://; $_ } keys %{ FixMyStreet::SendReport->get_senders };
     $c->stash->{send_methods} = \@methods;
-}
-
-sub body : Path('body') : Args(1) {
-    my ( $self, $c, $body_id ) = @_;
-
-    $c->stash->{body_id} = $body_id;
-
-    unless ($c->user->has_permission_to('category_edit', $body_id)) {
-        $c->forward('check_for_super_user');
-    }
-
-    $c->forward( '/auth/get_csrf_token' );
-    $c->forward( 'lookup_body' );
-    $c->forward( 'fetch_all_bodies' );
-    $c->forward( 'body_form_dropdowns' );
-
-    if ( $c->get_param('posted') ) {
-        $c->log->debug( 'posted' );
-        $c->forward('update_contacts');
-    }
-
-    $c->forward('fetch_contacts');
-
-    return 1;
 }
 
 sub check_for_super_user : Private {
@@ -365,8 +344,7 @@ sub update_contacts : Private {
         }
 
         $contact->email( $email );
-        $contact->confirmed( $c->get_param('confirmed') ? 1 : 0 );
-        $contact->deleted( $c->get_param('deleted') ? 1 : 0 );
+        $contact->state( $c->get_param('state') );
         $contact->non_public( $c->get_param('non_public') ? 1 : 0 );
         $contact->note( $c->get_param('note') );
         $contact->whenedited( \'current_timestamp' );
@@ -393,6 +371,8 @@ sub update_contacts : Private {
             $contact->set_extra_metadata( reputation_threshold => int($c->get_param('reputation_threshold')) );
         }
 
+        $c->forward('update_extra_fields', [ $contact ]);
+
         if ( %errors ) {
             $c->stash->{updated} = _('Please correct the errors below');
             $c->stash->{contact} = $contact;
@@ -405,6 +385,12 @@ sub update_contacts : Private {
         } else {
             $c->stash->{updated} = _('New category contact added');
             $contact->insert;
+        }
+
+        unless ( %errors ) {
+            $c->stash->{translation_col} = 'category';
+            $c->stash->{object} = $contact;
+            $c->forward('update_translations');
         }
 
     } elsif ( $posted eq 'update' ) {
@@ -421,7 +407,7 @@ sub update_contacts : Private {
 
         $contacts->update(
             {
-                confirmed => 1,
+                state => 'confirmed',
                 whenedited => \'current_timestamp',
                 note => 'Confirmed',
                 editor => $editor,
@@ -446,7 +432,39 @@ sub update_contacts : Private {
             # Remove any others
             $c->stash->{body}->body_areas->search( { area_id => [ keys %current ] } )->delete;
 
+            $c->stash->{translation_col} = 'name';
+            $c->stash->{object} = $c->stash->{body};
+            $c->forward('update_translations');
+
             $c->stash->{updated} = _('Values updated');
+        }
+    }
+}
+
+sub update_translations : Private {
+    my ( $self, $c ) = @_;
+
+    foreach my $lang (keys(%{$c->stash->{languages}})) {
+        my $id = $c->get_param('translation_id_' . $lang);
+        my $text = $c->get_param('translation_' . $lang);
+        if ($id) {
+            my $translation = $c->model('DB::Translation')->find(
+                {
+                    id => $id,
+                }
+            );
+
+            if ($text) {
+                $translation->msgstr($text);
+                $translation->update;
+            } else {
+                $translation->delete;
+            }
+        } elsif ($text) {
+            my $col = $c->stash->{translation_col};
+            $c->stash->{object}->add_translation_for(
+                $col, $lang, $text
+            );
         }
     }
 }
@@ -485,8 +503,8 @@ sub fetch_contacts : Private {
 
     my $contacts = $c->stash->{body}->contacts->search(undef, { order_by => [ 'category' ] } );
     $c->stash->{contacts} = $contacts;
-    $c->stash->{live_contacts} = $contacts->search({ deleted => 0 });
-    $c->stash->{any_not_confirmed} = $contacts->search({ confirmed => 0 })->count;
+    $c->stash->{live_contacts} = $contacts->search({ state => { '!=' => 'deleted' } });
+    $c->stash->{any_not_confirmed} = $contacts->search({ state => 'unconfirmed' })->count;
 
     if ( $c->get_param('text') && $c->get_param('text') eq '1' ) {
         $c->stash->{template} = 'admin/council_contacts.txt';
@@ -497,10 +515,48 @@ sub fetch_contacts : Private {
     return 1;
 }
 
-sub lookup_body : Private {
+sub fetch_languages : Private {
     my ( $self, $c ) = @_;
 
-    my $body_id = $c->stash->{body_id};
+    my $lang_map = {};
+    foreach my $lang (@{$c->cobrand->languages}) {
+        my ($id, $name, $code) = split(',', $lang);
+        $lang_map->{$id} = { name => $name, code => $code };
+    }
+
+    $c->stash->{languages} = $lang_map;
+
+    return 1;
+}
+
+sub fetch_translations : Private {
+    my ( $self, $c ) = @_;
+
+    my $translations = {};
+    if ($c->get_param('posted')) {
+        foreach my $lang (keys %{$c->stash->{languages}}) {
+            if (my $msgstr = $c->get_param('translation_' . $lang)) {
+                $translations->{$lang} = { msgstr => $msgstr };
+            }
+            if (my $id = $c->get_param('translation_id_' . $lang)) {
+                $translations->{$lang}->{id} = $id;
+            }
+        }
+    } elsif ($c->stash->{object}) {
+        my @translations = $c->stash->{object}->translation_for($c->stash->{translation_col})->all;
+
+        foreach my $tx (@translations) {
+            $translations->{$tx->lang} = { id => $tx->id, msgstr => $tx->msgstr };
+        }
+    }
+
+    $c->stash->{translations} = $translations;
+}
+
+sub body : Chained('/') : PathPart('admin/body') : CaptureArgs(1) {
+    my ( $self, $c, $body_id ) = @_;
+
+    $c->stash->{body_id} = $body_id;
     my $body = $c->model('DB::Body')->find($body_id);
     $c->detach( '/page_error_404_not_found', [] )
       unless $body;
@@ -512,39 +568,70 @@ sub lookup_body : Private {
             $c->stash->{example_pc} = $example_postcode;
         }
     }
+}
 
+sub edit_body : Chained('body') : PathPart('') : Args(0) {
+    my ( $self, $c ) = @_;
+
+    unless ($c->user->has_permission_to('category_edit', $c->stash->{body_id})) {
+        $c->forward('check_for_super_user');
+    }
+
+    $c->forward( '/auth/get_csrf_token' );
+    $c->forward( 'fetch_all_bodies' );
+    $c->forward( 'body_form_dropdowns' );
+    $c->forward('fetch_languages');
+
+    if ( $c->get_param('posted') ) {
+        $c->forward('update_contacts');
+    }
+
+    $c->stash->{object} = $c->stash->{body};
+    $c->stash->{translation_col} = 'name';
+
+    # if there's a contact then it's because we're displaying error
+    # messages about adding a contact so grabbing translations will
+    # fetch the contact submitted translations. So grab them, stash
+    # them and then clear posted so we can fetch the body translations
+    if ($c->stash->{contact}) {
+        $c->forward('fetch_translations');
+        $c->stash->{contact_translations} = $c->stash->{translations};
+    }
+    $c->set_param('posted', '');
+
+    $c->forward('fetch_translations');
+    $c->forward('fetch_contacts');
+
+    $c->stash->{template} = 'admin/body.html';
     return 1;
 }
 
-# This is for if the category name contains a '/'
-sub category_edit_all : Path('body') {
-    my ( $self, $c, $body_id, @category ) = @_;
+sub category : Chained('body') : PathPart('') {
+    my ( $self, $c, @category ) = @_;
     my $category = join( '/', @category );
-    $c->go( 'category_edit', [ $body_id, $category ] );
-}
-
-sub category_edit : Path('body') : Args(2) {
-    my ( $self, $c, $body_id, $category ) = @_;
-
-    $c->stash->{body_id} = $body_id;
 
     $c->forward( '/auth/get_csrf_token' );
-    $c->forward( 'lookup_body' );
+    $c->stash->{template} = 'admin/category_edit.html';
 
     my $contact = $c->stash->{body}->contacts->search( { category => $category } )->first;
     $c->stash->{contact} = $contact;
 
+    $c->stash->{translation_col} = 'category';
+    $c->stash->{object} = $c->stash->{contact};
+
+    $c->forward('fetch_languages');
+    $c->forward('fetch_translations');
+
     my $history = $c->model('DB::ContactsHistory')->search(
         {
-            body_id => $body_id,
-            category => $category
+            body_id => $c->stash->{body_id},
+            category => $c->stash->{contact}->category
         },
         {
             order_by => ['contacts_history_id']
         },
     );
     $c->stash->{history} = $history;
-
     my @methods = map { $_ =~ s/FixMyStreet::SendReport:://; $_ } keys %{ FixMyStreet::SendReport->get_senders };
     $c->stash->{send_methods} = \@methods;
 
@@ -844,10 +931,26 @@ sub report_edit_category : Private {
         $problem->category($category);
         my @contacts = grep { $_->category eq $problem->category } @{$c->stash->{contacts}};
         my @new_body_ids = map { $_->body_id } @contacts;
-        # If the report has changed bodies we need to resend it
-        if (scalar @{mySociety::ArrayUtils::symmetric_diff($problem->bodies_str_ids, \@new_body_ids)}) {
+        # If the report has changed bodies (and not to a subset!) we need to resend it
+        my %old_map = map { $_ => 1 } @{$problem->bodies_str_ids};
+        if (grep !$old_map{$_}, @new_body_ids) {
             $problem->whensent(undef);
         }
+        # If the send methods of the old/new contacts differ we need to resend the report
+        my @old_contacts = grep { $_->category eq $category_old } @{$c->stash->{contacts}};
+        my @new_send_methods = uniq map {
+            ( $_->body->can_be_devolved && $_->send_method ) ?
+            $_->send_method : $_->body->send_method;
+        } @contacts;
+        my @old_send_methods = map {
+            ( $_->body->can_be_devolved && $_->send_method ) ?
+            $_->send_method : $_->body->send_method;
+        } @old_contacts;
+        if ( scalar @{ mySociety::ArrayUtils::symmetric_diff(\@old_send_methods, \@new_send_methods) } ) {
+            $c->log->debug("Report changed, resending");
+            $problem->whensent(undef);
+        }
+
         $problem->bodies_str(join( ',', @new_body_ids ));
         $problem->add_to_comments({
             text => '*' . sprintf(_('Category changed from ‘%s’ to ‘%s’'), $category_old, $category) . '*',
@@ -909,8 +1012,8 @@ sub categories_for_point : Private {
     # Remove the "Pick a category" option
     shift @{$c->stash->{category_options}} if @{$c->stash->{category_options}};
 
-    $c->stash->{categories} = $c->stash->{category_options};
-    $c->stash->{categories_hash} = { map { $_ => 1 } @{$c->stash->{category_options}} };
+    $c->stash->{category_options_copy} = $c->stash->{category_options};
+    $c->stash->{categories_hash} = { map { $_->{name} => 1 } @{$c->stash->{category_options}} };
 }
 
 sub templates : Path('templates') : Args(0) {
@@ -966,7 +1069,7 @@ sub template_edit : Path('templates') : Args(2) {
     my %active_contacts = map { $_->id => 1 } @contacts;
     my @all_contacts = map { {
         id => $_->id,
-        category => $_->category,
+        category => $_->category_display,
         active => $active_contacts{$_->id},
     } } @live_contacts;
     $c->stash->{contacts} = \@all_contacts;
@@ -1808,7 +1911,7 @@ sub check_page_allowed : Private {
 sub fetch_all_bodies : Private {
     my ($self, $c ) = @_;
 
-    my @bodies = $c->model('DB::Body')->all;
+    my @bodies = $c->model('DB::Body')->all_translated;
     if ( $c->cobrand->moniker eq 'zurich' ) {
         @bodies = $c->cobrand->admin_fetch_all_bodies( @bodies );
     } else {
@@ -1838,6 +1941,46 @@ sub fetch_body_areas : Private {
     $c->stash->{areas} = [ sort { strcoll($a->{name}, $b->{name}) } values %$areas ];
     # Keep track of the areas we've fetched to prevent a duplicate fetch later on
     $c->stash->{fetched_areas_body_id} = $body->id;
+}
+
+sub update_extra_fields : Private {
+    my ($self, $c, $object) = @_;
+
+    my @indices = grep { /^metadata\[\d+\]\.code/ } keys %{ $c->req->params };
+    @indices = sort map { /(\d+)/ } @indices;
+
+    my @extra_fields;
+    foreach my $i (@indices) {
+        my $meta = {};
+        $meta->{code} = $c->get_param("metadata[$i].code");
+        next unless $meta->{code};
+        $meta->{order} = int $c->get_param("metadata[$i].order");
+        $meta->{datatype} = $c->get_param("metadata[$i].datatype");
+        my $required = $c->get_param("metadata[$i].required") && $c->get_param("metadata[$i].required") eq 'on';
+        $meta->{required} = $required ? 'true' : 'false';
+        my $notice = $c->get_param("metadata[$i].notice") && $c->get_param("metadata[$i].notice") eq 'on';
+        $meta->{variable} = $notice ? 'false' : 'true';
+        $meta->{description} = $c->get_param("metadata[$i].description");
+        $meta->{datatype_description} = $c->get_param("metadata[$i].datatype_description");
+
+        if ( $meta->{datatype} eq "singlevaluelist" ) {
+            $meta->{values} = [];
+            my $re = qr{^metadata\[$i\]\.values\[\d+\]\.key};
+            my @vindices = grep { /$re/ } keys %{ $c->req->params };
+            @vindices = sort map { /values\[(\d+)\]/ } @vindices;
+            foreach my $j (@vindices) {
+                my $name = $c->get_param("metadata[$i].values[$j].name");
+                my $key = $c->get_param("metadata[$i].values[$j].key");
+                push(@{$meta->{values}}, {
+                    name => $name,
+                    key => $key,
+                }) if $name;
+            }
+        }
+        push @extra_fields, $meta;
+    }
+    @extra_fields = sort { $a->{order} <=> $b->{order} } @extra_fields;
+    $object->set_extra_fields(@extra_fields);
 }
 
 sub trim {

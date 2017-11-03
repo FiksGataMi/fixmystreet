@@ -1,6 +1,3 @@
-use strict;
-use warnings;
-use Test::More;
 use Test::MockTime ':all';
 
 use FixMyStreet::TestMech;
@@ -62,9 +59,8 @@ FixMyStreet::override_config {
                 body_id    => $body->id,
                 category   => $contact,
                 email      => "$contact\@example.org",
-                confirmed  => 1,
+                state => 'confirmed',
                 whenedited => DateTime->now,
-                deleted    => 0,
                 editor     => 'test',
                 note       => 'test',
             }
@@ -132,7 +128,7 @@ FixMyStreet::override_config {
         },
         {
             desc => 'confirmed last 2 weeks with no state',
-            dt   => $now->clone->subtract( weeks => 2 ),
+            dt   => $now->clone->subtract( weeks => 2, hours => 1 ),
             counts => [1,2,4,4],
             report_counts => [2, 1, 1],
         },
@@ -535,12 +531,12 @@ FixMyStreet::override_config {
             desc => 'Selecting no state does nothing',
             p1 => {
                     state   => 'fixed - user',
-                    conf_dt => DateTime->now(),
+                    conf_dt => DateTime->now()->subtract( minutes => 1 ),
                     category => 'Potholes',
             },
             p2 => {
                     state   => 'confirmed',
-                    conf_dt => DateTime->now(),
+                    conf_dt => DateTime->now()->subtract( minutes => 1 ),
                     category => 'Litter',
             },
             state => '',
@@ -549,35 +545,24 @@ FixMyStreet::override_config {
         },
         {
             desc => 'limit by state works',
-            state => 'fixed',
+            state => 'fixed - council',
             report_counts => [2,0,0],
-            report_counts_after => [1,0,0],
-        },
-        {
-            desc => 'planned counted as action scheduled',
-            p1 => {
-                    state   => 'planned',
-                    conf_dt => DateTime->now(),
-                    category => 'Potholes',
-            },
-            state => 'action scheduled',
-            report_counts => [3,0,0],
             report_counts_after => [1,0,0],
         },
         {
             desc => 'All fixed states count as fixed',
             p1 => {
                     state   => 'fixed - council',
-                    conf_dt => DateTime->now(),
+                    conf_dt => DateTime->now()->subtract( minutes => 1 ),
                     category => 'Potholes',
             },
             p2 => {
                     state   => 'fixed',
-                    conf_dt => DateTime->now(),
+                    conf_dt => DateTime->now()->subtract( minutes => 1 ),
                     category => 'Potholes',
             },
             state => 'fixed',
-            report_counts => [5,0,0],
+            report_counts => [4,0,0],
             report_counts_after => [3,0,0],
         },
     ) {
@@ -608,6 +593,7 @@ FixMyStreet::override_config {
             detail => "this report\nis split across\nseveral lines",
             state => "confirmed",
             conf_dt => DateTime->now(),
+            areas => 62883,
         } );
         $mech->get_ok('/dashboard?export=1');
         open my $data_handle, '<', \$mech->content;
@@ -616,7 +602,37 @@ FixMyStreet::override_config {
         while ( my $row = $csv->getline( $data_handle ) ) {
             push @rows, $row;
         }
-        is scalar @rows, 7, '1 (header) + 6 (reports) = 7 lines';
+        is scalar @rows, 6, '1 (header) + 5 (reports) = 6 lines';
+
+        is scalar @{$rows[0]}, 18, '18 columns present';
+
+        is_deeply $rows[0],
+            [
+                'Report ID',
+                'Title',
+                'Detail',
+                'User Name',
+                'Category',
+                'Created',
+                'Confirmed',
+                'Acknowledged',
+                'Fixed',
+                'Closed',
+                'Status',
+                'Latitude',
+                'Longitude',
+                'Nearest Postcode',
+                'Ward',
+                'Easting',
+                'Northing',
+                'Report URL',
+            ],
+            'Column headers look correct';
+
+        is $rows[5]->[14], 'Bradford-on-Avon', 'Ward column is name not ID';
+
+        is $rows[5]->[15], '610591', 'Correct Easting conversion';
+        is $rows[5]->[16], '126573', 'Correct Northing conversion';
     };
 };
 restore_time;

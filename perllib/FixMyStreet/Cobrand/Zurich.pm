@@ -54,6 +54,11 @@ you already have, and the countres set so that they shouldn't in future.
 
 =cut
 
+sub setup_states {
+    FixMyStreet::DB::Result::Problem->visible_states_add('unconfirmed');
+    FixMyStreet::DB::Result::Problem->visible_states_remove('investigating');
+}
+
 sub shorten_recency_if_new_greater_than_fixed {
     return 0;
 }
@@ -67,7 +72,7 @@ sub pin_colour {
 
 # This isn't used
 sub find_closest {
-    my ( $self, $latitude, $longitude, $problem ) = @_;
+    my ( $self, $problem ) = @_;
     return '';
 }
 
@@ -519,7 +524,7 @@ sub admin_report_edit {
 
         # Can change category to any other
         my @categories = $c->model('DB::Contact')->not_deleted->all;
-        $c->stash->{categories} = [ map { $_->category } @categories ];
+        $c->stash->{category_options} = [ map { { name => $_->category, value => $_->category } } @categories ];
 
     } elsif ($type eq 'dm') {
 
@@ -534,7 +539,7 @@ sub admin_report_edit {
 
         # Can change category to any other
         my @categories = $c->model('DB::Contact')->not_deleted->all;
-        $c->stash->{categories} = [ map { $_->category } @categories ];
+        $c->stash->{category_options} = [ map { { name => $_->category, value => $_->category } } @categories ];
 
     }
 

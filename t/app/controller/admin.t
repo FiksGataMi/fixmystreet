@@ -1,7 +1,3 @@
-use strict;
-use warnings;
-use Test::More;
-
 use FixMyStreet::TestMech;
 
 my $mech = FixMyStreet::TestMech->new;
@@ -12,7 +8,7 @@ my $user2 = $mech->create_user_ok('test2@example.com', name => 'Test User 2');
 
 my $superuser = $mech->create_user_ok('superuser@example.com', name => 'Super User', is_superuser => 1);
 
-my $oxfordshire = $mech->create_body_ok(2237, 'Oxfordshire County Council', id => 2237);
+my $oxfordshire = $mech->create_body_ok(2237, 'Oxfordshire County Council');
 my $oxfordshirecontact = $mech->create_contact_ok( body_id => $oxfordshire->id, category => 'Potholes', email => 'potholes@example.com' );
 $mech->create_contact_ok( body_id => $oxfordshire->id, category => 'Traffic lights', email => 'lights@example.com' );
 my $oxfordshireuser = $mech->create_user_ok('counciluser@example.com', name => 'Council User', from_body => $oxfordshire);
@@ -20,13 +16,9 @@ my $oxfordshireuser = $mech->create_user_ok('counciluser@example.com', name => '
 my $oxford = $mech->create_body_ok(2421, 'Oxford City Council');
 $mech->create_contact_ok( body_id => $oxford->id, category => 'Graffiti', email => 'graffiti@example.net' );
 
-my $bromley = $mech->create_body_ok(2482, 'Bromley Council', id => 2482);
+my $bromley = $mech->create_body_ok(2482, 'Bromley Council');
 
-my $user3 = $mech->create_user_ok('test3@example.com', name => 'Test User 2');
-
-if ( $user3 ) {
-  $mech->delete_user( $user3 );
-}
+my $user3;
 
 my $dt = DateTime->new(
     year   => 2011,
@@ -119,7 +111,7 @@ subtest 'check summary counts' => sub {
         my ($num_alerts) = $mech->content =~ /(\d+) confirmed alerts/;
         my ($num_qs) = $mech->content =~ /(\d+) questionnaires sent/;
 
-        $report->bodies_str(2237);
+        $report->bodies_str($oxfordshire->id);
         $report->cobrand('oxfordshire');
         $report->update;
 
@@ -158,16 +150,6 @@ $mech->content_like(qr{AB\d\d});
 $mech->content_contains("http://www.example.org/around");
 
 subtest 'check contact creation' => sub {
-    my $contact = FixMyStreet::App->model('DB::Contact')->search(
-        { body_id => $body->id, category => [ 'test category', 'test/category' ] }
-    );
-    $contact->delete_all;
-
-    my $history = FixMyStreet::App->model('DB::ContactsHistory')->search(
-        { body_id => $body->id, category => [ 'test category', 'test/category' ] }
-    );
-    $history->delete_all;
-
     $mech->get_ok('/admin/body/' . $body->id);
 
     $mech->submit_form_ok( { with_fields => { 
@@ -175,13 +157,13 @@ subtest 'check contact creation' => sub {
         email      => 'test@example.com',
         note       => 'test note',
         non_public => undef,
-        confirmed  => 0,
+        state => 'unconfirmed',
     } } );
 
     $mech->content_contains( 'test category' );
     $mech->content_contains( 'test@example.com' );
     $mech->content_contains( '<td>test note' );
-    $mech->content_contains( 'Private:&nbsp;No' );
+    $mech->content_like( qr/<td>\s*unconfirmed\s*<\/td>/ ); # No private
 
     $mech->submit_form_ok( { with_fields => { 
         category   => 'private category',
@@ -191,7 +173,7 @@ subtest 'check contact creation' => sub {
     } } );
 
     $mech->content_contains( 'private category' );
-    $mech->content_contains( 'Private:&nbsp;Yes' );
+    $mech->content_like( qr{test\@example.com\s*</td>\s*<td>\s*confirmed\s*<br>\s*<small>\s*Private\s*</small>\s*</td>} );
 
     $mech->submit_form_ok( { with_fields => {
         category => 'test/category',
@@ -200,7 +182,7 @@ subtest 'check contact creation' => sub {
         non_public => 'on',
     } } );
     $mech->get_ok('/admin/body/' . $body->id . '/test/category');
-
+    $mech->content_contains('<h1>test/category</h1>');
 };
 
 subtest 'check contact editing' => sub {
@@ -213,9 +195,8 @@ subtest 'check contact editing' => sub {
     } } );
 
     $mech->content_contains( 'test category' );
-    $mech->content_contains( 'test2@example.com' );
+    $mech->content_like( qr{test2\@example.com\s*</td>\s*<td>\s*unconfirmed\s*</td>} );
     $mech->content_contains( '<td>test2 note' );
-    $mech->content_contains( 'Private:&nbsp;No' );
 
     $mech->get_ok('/admin/body/' . $body->id . '/test%20category');
     $mech->submit_form_ok( { with_fields => {
@@ -228,14 +209,13 @@ subtest 'check contact editing' => sub {
     $mech->get_ok('/admin/body/' . $body->id . '/test%20category');
     $mech->content_contains( '<td><strong>test2@example.com,test3@example.com' );
 
-    $mech->get_ok('/admin/body/' . $body->id . '/test%20category');
     $mech->submit_form_ok( { with_fields => {
         email    => 'test2@example.com',
         note     => 'test2 note',
         non_public => 'on',
     } } );
 
-    $mech->content_contains( 'Private:&nbsp;Yes' );
+    $mech->content_like( qr{test2\@example.com\s*</td>\s*<td>\s*unconfirmed\s*<br>\s*<small>\s*Private\s*</small>\s*</td>} );
 
     $mech->get_ok('/admin/body/' . $body->id . '/test%20category');
     $mech->content_contains( '<td><strong>test2@example.com' );
@@ -243,7 +223,7 @@ subtest 'check contact editing' => sub {
 
 subtest 'check contact updating' => sub {
     $mech->get_ok('/admin/body/' . $body->id . '/test%20category');
-    $mech->content_like(qr{test2\@example.com</strong>[^<]*</td>[^<]*<td>No}s);
+    $mech->content_like(qr{test2\@example.com</strong>[^<]*</td>[^<]*<td>unconfirmed}s);
 
     $mech->get_ok('/admin/body/' . $body->id);
 
@@ -251,9 +231,9 @@ subtest 'check contact updating' => sub {
     $mech->tick( 'confirmed', 'test category' );
     $mech->submit_form_ok({form_number => 1});
 
-    $mech->content_like(qr'test2@example.com</td>[^<]*<td>\s*Confirmed:&nbsp;Yes's);
+    $mech->content_like(qr'test2@example.com</td>[^<]*<td>\s*confirmed's);
     $mech->get_ok('/admin/body/' . $body->id . '/test%20category');
-    $mech->content_like(qr{test2\@example.com[^<]*</td>[^<]*<td><strong>Yes}s);
+    $mech->content_like(qr{test2\@example.com[^<]*</td>[^<]*<td><strong>confirmed}s);
 };
 
 $body->update({ send_method => undef }); 
@@ -1197,6 +1177,7 @@ my %default_perms = (
     "permissions[report_inspect]" => undef,
     "permissions[report_instruct]" => undef,
     "permissions[contribute_as_another_user]" => undef,
+    "permissions[contribute_as_anonymous_user]" => undef,
     "permissions[contribute_as_body]" => undef,
     "permissions[view_body_contribute_details]" => undef,
     "permissions[user_edit]" => undef,
@@ -1489,12 +1470,32 @@ subtest "response priorities can be added" => sub {
         name => "Cat 1A",
         description => "Fixed within 24 hours",
         deleted => undef,
+        is_default => undef,
         "contacts[".$oxfordshirecontact->id."]" => 1,
     };
     $mech->submit_form_ok( { with_fields => $fields } );
 
      is $oxfordshire->response_priorities->count, 1, "Response template was added to body";
      is $oxfordshirecontact->response_priorities->count, 1, "Response template was added to contact";
+};
+
+subtest "response priorities can set to default" => sub {
+    my $priority_id = $oxfordshire->response_priorities->first->id;
+    is $oxfordshire->response_priorities->count, 1, "Response priority exists";
+    $mech->get_ok( "/admin/responsepriorities/" . $oxfordshire->id . "/$priority_id" );
+
+    my $fields = {
+        name => "Cat 1A",
+        description => "Fixed within 24 hours",
+        deleted => undef,
+        is_default => 1,
+        "contacts[".$oxfordshirecontact->id."]" => 1,
+    };
+    $mech->submit_form_ok( { with_fields => $fields } );
+
+     is $oxfordshire->response_priorities->count, 1, "Still one response priority";
+     is $oxfordshirecontact->response_priorities->count, 1, "Still one response template";
+     ok $oxfordshire->response_priorities->first->is_default, "Response priority set to default";
 };
 
 subtest "response priorities can be listed" => sub {
@@ -1546,15 +1547,4 @@ subtest "response priorities can't be viewed across councils" => sub {
     };
 };
 
-END {
-    $mech->delete_user( $user );
-    $mech->delete_user( $user2 );
-    $mech->delete_user( $user3 );
-    $mech->delete_user( $superuser );
-    $mech->delete_user( 'test4@example.com' );
-    $mech->delete_body( $oxfordshire );
-    $mech->delete_body( $oxford );
-    $mech->delete_body( $bromley );
-    $mech->delete_body( $westminster );
-    done_testing();
-}
+done_testing();

@@ -3,8 +3,6 @@ package t::Mock::MapItZurich;
 use JSON::MaybeXS;
 use Web::Simple;
 
-use mySociety::Locale;
-
 has json => (
     is => 'lazy',
     default => sub {
@@ -45,5 +43,7 @@ sub dispatch_request {
         return [ 200, [ 'Content-Type' => 'application/json' ], [ $json ] ];
     },
 }
+
+LWP::Protocol::PSGI->register(t::Mock::MapItZurich->to_psgi_app, host => 'mapit.zurich');
 
 __PACKAGE__->run_if_script;

@@ -18,6 +18,7 @@ __PACKAGE__->config(
     expose_methods => [
         'tprintf', 'prettify_dt',
         'version', 'decode',
+        'prettify_state',
     ],
     FILTERS => {
         add_links => \&add_links,
@@ -165,6 +166,12 @@ sub decode {
     my ( $self, $c, $text ) = @_;
     utf8::decode($text) unless utf8::is_utf8($text);
     return $text;
+}
+
+sub prettify_state {
+    my ($self, $c, $text, $single_fixed) = @_;
+
+    return FixMyStreet::DB->resultset("State")->display($text, $single_fixed);
 }
 
 1;
