@@ -2,9 +2,9 @@ package FixMyStreet::App::Controller::Reports;
 use Moose;
 use namespace::autoclean;
 
-use File::Slurp;
 use JSON::MaybeXS;
 use List::MoreUtils qw(any);
+use Path::Tiny;
 use POSIX qw(strcoll);
 use RABX;
 use mySociety::MaPit;
@@ -69,40 +69,42 @@ sub index : Path : Args(0) {
         }
     }
 
-    # Fetch all bodies
-    my @bodies = $c->model('DB::Body')->search({
-        deleted => 0,
-    }, {
-        '+select' => [ { count => 'area_id' } ],
-        '+as' => [ 'area_count' ],
-        join => 'body_areas',
-        distinct => 1,
-    })->all;
-    @bodies = sort { strcoll($a->name, $b->name) } @bodies;
-    $c->stash->{bodies} = \@bodies;
-    $c->stash->{any_empty_bodies} = any { $_->get_column('area_count') == 0 } @bodies;
+    my $dashboard = $c->forward('load_dashboard_data');
 
-    my $dashboard = eval {
-        my $data = File::Slurp::read_file(
-            FixMyStreet->path_to( '../data/all-reports-dashboard.json' )->stringify
-        );
-        $c->stash(decode_json($data));
-        return 1;
-    };
-    my $table = eval {
-        my $data = File::Slurp::read_file(
-            FixMyStreet->path_to( '../data/all-reports.json' )->stringify
-        );
+    my $table = !$c->stash->{body} && eval {
+        my $data = path(FixMyStreet->path_to('../data/all-reports.json'))->slurp_utf8;
         $c->stash(decode_json($data));
         return 1;
     };
     if (!$dashboard && !$table) {
+        $c->detach('/page_error_404_not_found') if $c->stash->{body};
+
         my $message = _("There was a problem showing the All Reports page. Please try again later.");
         if ($c->config->{STAGING_SITE}) {
             $message .= '</p><p>Perhaps the bin/update-all-reports script needs running. Use: bin/update-all-reports</p><p>'
                 . sprintf(_('The error was: %s'), $@);
         }
         $c->detach('/page_error_500_internal_error', [ $message ]);
+    }
+
+    if ($c->stash->{body}) {
+        my $children = $c->stash->{body}->first_area_children;
+        unless ($children->{error}) {
+            $c->stash->{children} = $children;
+        }
+    } else {
+        # Fetch all bodies
+        my @bodies = $c->model('DB::Body')->search({
+            deleted => 0,
+        }, {
+            '+select' => [ { count => 'area_id' } ],
+            '+as' => [ 'area_count' ],
+            join => 'body_areas',
+            distinct => 1,
+        })->all;
+        @bodies = sort { strcoll($a->name, $b->name) } @bodies;
+        $c->stash->{bodies} = \@bodies;
+        $c->stash->{any_empty_bodies} = any { $_->get_column('area_count') == 0 } @bodies;
     }
 
     # Down here so that error pages aren't cached.
@@ -131,9 +133,24 @@ sub ward : Path : Args(2) {
 
     $c->forward('/auth/get_csrf_token');
 
+    my @wards = split /\|/, $ward || "";
     $c->forward( 'body_check', [ $body ] );
-    $c->forward( 'ward_check', [ $ward ] )
-        if $ward;
+
+    my $body_short = $c->cobrand->short_name( $c->stash->{body} );
+    $c->stash->{body_url} = '/reports/' . $body_short;
+
+    if ($ward && $ward eq 'summary') {
+        if (my $actual_ward = $c->get_param('ward')) {
+            $ward = $c->cobrand->short_name({ name => $actual_ward });
+            $c->res->redirect($ward);
+            $c->detach;
+        }
+        $c->cobrand->call_hook('council_dashboard_hook');
+        $c->go('index');
+    }
+
+    $c->forward( 'ward_check', [ @wards ] )
+        if @wards;
     $c->forward( 'check_canonical_url', [ $body ] );
     $c->forward( 'stash_report_filter_status' );
     $c->forward( 'load_and_group_problems' );
@@ -142,12 +159,9 @@ sub ward : Path : Args(2) {
         $c->detach('ajax', [ 'reports/_problem-list.html' ]);
     }
 
-    my $body_short = $c->cobrand->short_name( $c->stash->{body} );
     $c->stash->{rss_url} = '/rss/reports/' . $body_short;
     $c->stash->{rss_url} .= '/' . $c->cobrand->short_name( $c->stash->{ward} )
         if $c->stash->{ward};
-
-    $c->stash->{body_url} = '/reports/' . $body_short;
 
     $c->stash->{stats} = $c->cobrand->get_report_stats();
 
@@ -166,7 +180,7 @@ sub ward : Path : Args(2) {
     my %map_params = (
         latitude  => @$pins ? $pins->[0]{latitude} : 0,
         longitude => @$pins ? $pins->[0]{longitude} : 0,
-        area      => $c->stash->{ward} ? $c->stash->{ward}->{id} : [ keys %{$c->stash->{body}->areas} ],
+        area      => [ $c->stash->{wards} ? map { $_->{id} } @{$c->stash->{wards}} : keys %{$c->stash->{body}->areas} ],
         any_zoom  => 1,
     );
     FixMyStreet::Map::display_map(
@@ -176,10 +190,8 @@ sub ward : Path : Args(2) {
     $c->cobrand->tweak_all_reports_map( $c );
 
     # List of wards
-    if ( !$c->stash->{ward} && $c->stash->{body}->id && $c->stash->{body}->body_areas->first ) {
-        my $children = mySociety::MaPit::call('area/children', [ $c->stash->{body}->body_areas->first->area_id ],
-            type => $c->cobrand->area_types_children,
-        );
+    if ( !$c->stash->{wards} && $c->stash->{body}->id && $c->stash->{body}->body_areas->first ) {
+        my $children = $c->stash->{body}->first_area_children;
         unless ($children->{error}) {
             foreach (values %$children) {
                 $_->{url} = $c->uri_for( $c->stash->{body_url}
@@ -309,17 +321,35 @@ sub body_check : Private {
     # Oslo/ kommunes sharing a name in Norway
     return if $c->cobrand->reports_body_check( $c, $q_body );
 
+    my $body = $c->forward('body_find', [ $q_body ]);
+    if ($body) {
+        $c->stash->{body} = $body;
+        return;
+    }
+
+    # No result, bad body name.
+    $c->detach( 'redirect_index' );
+}
+
+=head2
+
+Given a string, try and find a body starting with/matching that string.
+Returns the matching body object if found.
+
+=cut
+
+sub body_find : Private {
+    my ($self, $c, $q_body) = @_;
+
     # We must now have a string to check
     my @bodies = $c->model('DB::Body')->search( { name => { -like => "$q_body%" } } )->all;
 
     if (@bodies == 1) {
-        $c->stash->{body} = $bodies[0];
-        return;
+        return $bodies[0];
     } else {
         foreach (@bodies) {
             if (lc($_->name) eq lc($q_body) || $_->name =~ /^\Q$q_body\E (Borough|City|District|County) Council$/i) {
-                $c->stash->{body} = $_;
-                return;
+                return $_;
             }
         }
     }
@@ -332,29 +362,27 @@ sub body_check : Private {
 
     if (@translations == 1) {
         if ( my $body = $c->model('DB::Body')->find( { id => $translations[0]->object_id } ) ) {
-            $c->stash->{body} = $body;
-            return;
+            return $body;
         }
     }
-
-    # No result, bad body name.
-    $c->detach( 'redirect_index' );
 }
 
 =head2 ward_check
 
-This action checks the ward name from a URI exists and is part of the right
+This action checks the ward names from a URI exists and are part of the right
 parent, already found with body_check. It either stores the ward Area if
 okay, or redirects to the body page if bad.
 
 =cut
 
 sub ward_check : Private {
-    my ( $self, $c, $ward ) = @_;
+    my ( $self, $c, @wards ) = @_;
 
-    $ward =~ s/\+/ /g;
-    $ward =~ s/\.html//;
-    $ward =~ s{_}{/}g;
+    foreach (@wards) {
+        s/\+/ /g;
+        s/\.html//;
+        s{_}{/}g;
+    }
 
     # Could be from RSS area, or body...
     my $parent_id;
@@ -366,19 +394,123 @@ sub ward_check : Private {
         $parent_id = $c->stash->{area}->{id};
     }
 
-    my $qw = mySociety::MaPit::call('areas', $ward,
+    my $qw = mySociety::MaPit::call('area/children', [ $parent_id ],
         type => $c->cobrand->area_types_children,
     );
+    my %names = map { $_ => 1 } @wards;
+    my @areas;
     foreach my $area (sort { $a->{name} cmp $b->{name} } values %$qw) {
-        if ($area->{parent_area} == $parent_id) {
-            $c->stash->{ward} = $area;
-            return;
-        }
+        push @areas, $area if $names{$area->{name}};
     }
+    if (@areas) {
+        $c->stash->{ward} = $areas[0] if @areas == 1;
+        $c->stash->{wards} = \@areas;
+        return;
+    }
+
     # Given a false ward name
     $c->stash->{body} = $c->stash->{area}
         unless $c->stash->{body};
     $c->detach( 'redirect_body' );
+}
+
+=head2 summary
+
+This is the summary page used on fixmystreet.com
+
+=cut
+
+sub summary : Private {
+    my ($self, $c) = @_;
+    my $dashboard = $c->forward('load_dashboard_data');
+
+    eval {
+        my $data = path(FixMyStreet->path_to('../data/all-reports-dashboard.json'))->slurp_utf8;
+        $data = decode_json($data);
+        $c->stash(
+            top_five_bodies => $data->{top_five_bodies},
+            average => $data->{average},
+        );
+    };
+
+    my $dtf = $c->model('DB')->storage->datetime_parser;
+    my $period = $c->stash->{period} = $c->get_param('period') || '';
+    my $start_date;
+    if ($period eq 'ever') {
+        $start_date = DateTime->new(year => 2007);
+    } elsif ($period eq 'year') {
+        $start_date = DateTime->now->subtract(years => 1);
+    } elsif ($period eq '3months') {
+        $start_date = DateTime->now->subtract(months => 3);
+    } elsif ($period eq 'week') {
+        $start_date = DateTime->now->subtract(weeks => 1);
+    } else {
+        $c->stash->{period} = 'month';
+        $start_date = DateTime->now->subtract(months => 1);
+    }
+
+    # required to stop errors in generate_grouped_data
+    $c->stash->{q_state} = '';
+    $c->stash->{ward} = $c->get_param('ward');
+    $c->stash->{start_date} = $dtf->format_date($start_date);
+    $c->stash->{end_date} = $c->get_param('end_date');
+
+    $c->stash->{group_by_default} = 'category';
+
+    my $area_id = $c->stash->{body}->body_areas->first->area_id;
+    my $children = mySociety::MaPit::call('area/children', $area_id,
+        type => $c->cobrand->area_types_children,
+    );
+    $c->stash->{children} = $children;
+
+    $c->forward('/admin/fetch_contacts');
+    $c->stash->{contacts} = [ $c->stash->{contacts}->all ];
+
+    $c->forward('/dashboard/construct_rs_filter');
+
+    if ( $c->get_param('csv') ) {
+        $c->detach('export_summary_csv');
+    }
+
+    $c->forward('/dashboard/generate_grouped_data');
+    $c->forward('/dashboard/generate_body_response_time');
+
+    $c->stash->{template} = 'reports/summary.html';
+}
+
+sub export_summary_csv : Private {
+    my ( $self, $c ) = @_;
+
+    $c->stash->{csv} = {
+        problems => $c->stash->{problems_rs}->search_rs({}, {
+            rows => 100,
+            order_by => { '-desc' => 'me.confirmed' },
+        }),
+        headers => [
+            'Report ID',
+            'Title',
+            'Category',
+            'Created',
+            'Confirmed',
+            'Status',
+            'Latitude', 'Longitude',
+            'Query',
+            'Report URL',
+        ],
+        columns => [
+            'id',
+            'title',
+            'category',
+            'created_pp',
+            'confirmed_pp',
+            'state',
+            'latitude', 'longitude',
+            'postcode',
+            'url',
+        ],
+        filename => 'fixmystreet-data.csv',
+    };
+    $c->forward('/dashboard/generate_csv');
 }
 
 =head2 check_canonical_url
@@ -395,6 +527,25 @@ sub check_canonical_url : Private {
     my $url_short = URI::Escape::uri_escape_utf8($q_body);
     $url_short =~ s/%2B/+/g;
     $c->detach( 'redirect_body' ) unless $body_short eq $url_short;
+}
+
+sub load_dashboard_data : Private {
+    my ($self, $c) = @_;
+    my $dashboard = eval {
+        my $data = FixMyStreet->config('TEST_DASHBOARD_DATA');
+        # uncoverable branch true
+        unless ($data) {
+            my $fn = '../data/all-reports-dashboard';
+            if ($c->stash->{body}) {
+                $fn .= '-' . $c->stash->{body}->id;
+            }
+            $data = decode_json(path(FixMyStreet->path_to($fn . '.json'))->slurp_utf8);
+        }
+        $c->stash($data);
+        return 1;
+    };
+
+    return $dashboard;
 }
 
 sub load_and_group_problems : Private {
@@ -448,8 +599,10 @@ sub load_and_group_problems : Private {
 
     my $problems = $c->cobrand->problems;
 
-    if ($c->stash->{ward}) {
-        $where->{areas} = { 'like', '%,' . $c->stash->{ward}->{id} . ',%' };
+    if ($c->stash->{wards}) {
+        $where->{areas} = [
+            map { { 'like', '%,' . $_->{id} . ',%' } } @{$c->stash->{wards}}
+        ];
         $problems = $problems->to_body($c->stash->{body});
     } elsif ($c->stash->{body}) {
         $problems = $problems->to_body($c->stash->{body});
@@ -510,8 +663,8 @@ sub redirect_body : Private {
     $url   .= "/rss" if $c->stash->{rss};
     $url   .= '/reports';
     $url   .= '/' . $c->cobrand->short_name( $c->stash->{body} );
-    $url   .= '/' . $c->cobrand->short_name( $c->stash->{ward} )
-        if $c->stash->{ward};
+    $url   .= '/' . join('|', map { $c->cobrand->short_name($_) } @{$c->stash->{wards}})
+        if $c->stash->{wards};
     $c->res->redirect( $c->uri_for($url, $c->req->params ) );
 }
 
@@ -529,16 +682,19 @@ sub stash_report_filter_status : Private {
         my $s = FixMyStreet::DB::Result::Problem->open_states();
         %filter_problem_states = (%filter_problem_states, %$s);
         $filter_status{open} = 1;
+        $filter_status{$_} = 1 for keys %$s;
     }
     if ($status{closed}) {
         my $s = FixMyStreet::DB::Result::Problem->closed_states();
         %filter_problem_states = (%filter_problem_states, %$s);
         $filter_status{closed} = 1;
+        $filter_status{$_} = 1 for keys %$s;
     }
     if ($status{fixed}) {
         my $s = FixMyStreet::DB::Result::Problem->fixed_states();
         %filter_problem_states = (%filter_problem_states, %$s);
         $filter_status{fixed} = 1;
+        $filter_status{$_} = 1 for keys %$s;
     }
 
     if ($status{all}) {

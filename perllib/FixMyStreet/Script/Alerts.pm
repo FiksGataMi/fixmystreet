@@ -39,6 +39,7 @@ sub send() {
                    $item_table.name as item_name, $item_table.anonymous as item_anonymous,
                    $item_table.confirmed as item_confirmed,
                    $item_table.photo as item_photo,
+                   $item_table.problem_state as item_problem_state,
                    $head_table.*
             from alert, $item_table, $head_table
                 where alert.parameter::integer = $head_table.id
@@ -65,6 +66,7 @@ sub send() {
         $query = FixMyStreet::DB->schema->storage->dbh->prepare($query);
         $query->execute();
         my $last_alert_id;
+        my $last_problem_state = '';
         my %data = ( template => $alert_type->template, data => [], schema => $schema );
         while (my $row = $query->fetchrow_hashref) {
 
@@ -86,7 +88,26 @@ sub send() {
                 alert_id  => $row->{alert_id},
                 parameter => $row->{item_id},
             } );
+
+            # this is currently only for new_updates
+            if (defined($row->{item_text})) {
+                # this might throw up the odd false positive but only in cases where the
+                # state has changed and there was already update text
+                if ($row->{item_problem_state} &&
+                    !( $last_problem_state eq '' && $row->{item_problem_state} eq 'confirmed' ) &&
+                    $last_problem_state ne $row->{item_problem_state}
+                ) {
+                    my $state = FixMyStreet::DB->resultset("State")->display($row->{item_problem_state}, 1, $cobrand);
+
+                    my $update = _('State changed to:') . ' ' . $state;
+                    $row->{item_text} = $row->{item_text} ? $row->{item_text} . "\n\n" . $update :
+                                                            $update;
+                }
+                next unless $row->{item_text};
+            }
+
             if ($last_alert_id && $last_alert_id != $row->{alert_id}) {
+                $last_problem_state = '';
                 _send_aggregated_alert_email(%data);
                 %data = ( template => $alert_type->template, data => [], schema => $schema );
             }
@@ -109,7 +130,7 @@ sub send() {
                     my $user = $schema->resultset('User')->find( {
                         id => $row->{alert_user_id}
                     } );
-                    $data{alert_email} = $user->email;
+                    $data{alert_user} = $user;
                     my $token_obj = $schema->resultset('Token')->create( {
                         scope => 'alert_to_reporter',
                         data  => {
@@ -209,7 +230,7 @@ sub send() {
             template => $template,
             data => [],
             alert_id => $alert->id,
-            alert_email => $alert->user->email,
+            alert_user => $alert->user,
             lang => $alert->lang,
             cobrand => $cobrand,
             cobrand_data => $alert->cobrand_data,
@@ -258,16 +279,20 @@ sub _send_aggregated_alert_email(%) {
     $cobrand->set_lang_and_domain( $data{lang}, 1, FixMyStreet->path_to('locale')->stringify );
     FixMyStreet::Map::set_map_class($cobrand->map_type);
 
-    if (!$data{alert_email}) {
+    if (!$data{alert_user}) {
         my $user = $data{schema}->resultset('User')->find( {
             id => $data{alert_user_id}
         } );
-        $data{alert_email} = $user->email;
+        $data{alert_user} = $user;
     }
 
-    my ($domain) = $data{alert_email} =~ m{ @ (.*) \z }x;
+    # Ignore phone-only users
+    return unless $data{alert_user}->email_verified;
+
+    my $email = $data{alert_user}->email;
+    my ($domain) = $email =~ m{ @ (.*) \z }x;
     return if $data{schema}->resultset('Abuse')->search( {
-        email => [ $data{alert_email}, $domain ]
+        email => [ $email, $domain ]
     } )->first;
 
     my $token = $data{schema}->resultset("Token")->new_result( {
@@ -275,7 +300,7 @@ sub _send_aggregated_alert_email(%) {
         data  => {
             id => $data{alert_id},
             type => 'unsubscribe',
-            email => $data{alert_email},
+            email => $email,
         }
     } );
     $data{unsubscribe_url} = $cobrand->base_url( $data{cobrand_data} ) . '/A/' . $token->token;
@@ -286,7 +311,7 @@ sub _send_aggregated_alert_email(%) {
         "$data{template}.txt",
         \%data,
         {
-            To => $data{alert_email},
+            To => $email,
         },
         $sender,
         0,

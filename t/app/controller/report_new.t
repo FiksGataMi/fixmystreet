@@ -101,6 +101,7 @@ foreach my $test (
             photo3        => '',
             name          => '',
             may_show_name => '1',
+            username      => '',
             email         => '',
             phone         => '',
             password_sign_in => '',
@@ -127,6 +128,7 @@ foreach my $test (
             photo3        => '',
             name          => '',
             may_show_name => '1',
+            username      => '',
             email         => '',
             phone         => '',
             category      => 'Something bad',
@@ -156,6 +158,7 @@ foreach my $test (
             photo3        => '',
             name          => '',
             may_show_name => '1',
+            username      => '',
             email         => '',
             phone         => '',
             category      => 'Street lighting',
@@ -182,6 +185,7 @@ foreach my $test (
             photo3        => '',
             name          => '',
             may_show_name => undef,
+            username      => '',
             email         => '',
             phone         => '',
             category      => 'Street lighting',
@@ -208,6 +212,7 @@ foreach my $test (
             photo3        => '',
             name          => 'Bob Jones',
             may_show_name => undef,
+            username      => '',
             email         => '',
             phone         => '',
             category      => 'Street lighting',
@@ -233,6 +238,7 @@ foreach my $test (
             photo3        => '',
             name          => 'Bob Jones',
             may_show_name => '1',
+            username      => '',
             email         => '',
             phone         => '',
             category      => 'Street lighting',
@@ -258,6 +264,7 @@ foreach my $test (
             photo3        => '',
             name          => 'Bob Jones',
             may_show_name => '1',
+            username      => '',
             email         => '',
             phone         => '',
             category      => 'Street lighting',
@@ -283,6 +290,7 @@ foreach my $test (
             photo3        => '',
             name          => 'DUDE',
             may_show_name => '1',
+            username      => '',
             email         => '',
             phone         => '',
             category      => 'Street lighting',
@@ -307,6 +315,7 @@ foreach my $test (
             photo3        => '',
             name          => 'anonymous',
             may_show_name => '1',
+            username      => '',
             email         => '',
             phone         => '',
             category      => 'Street lighting',
@@ -331,14 +340,15 @@ foreach my $test (
             photo3        => '',
             name          => 'Joe Smith',
             may_show_name => '1',
-            email         => 'not an email',
+            username      => 'not an email',
+            email         => '',
             phone         => '',
             category      => 'Street lighting',
             password_sign_in => '',
             password_register => '',
             remember_me => undef,
         },
-        changes => { email => 'notanemail', },
+        changes => { username => 'notanemail', email => 'notanemail' },
         errors  => [ 'Please enter a valid email', ],
     },
     {
@@ -352,6 +362,7 @@ foreach my $test (
             photo3        => '',
             name          => '',
             may_show_name => '1',
+            username      => '',
             email         => '',
             phone         => '',
             category      => 'Street lighting',
@@ -379,7 +390,8 @@ foreach my $test (
             photo3        => '',
             name          => '  Bob    Jones   ',
             may_show_name => '1',
-            email         => '   BOB @ExAmplE.COM   ',
+            username      => '   BOB @ExAmplE.COM   ',
+            email         => '',
             phone         => '',
             category      => 'Street lighting',
             password_sign_in => '',
@@ -388,6 +400,7 @@ foreach my $test (
         },
         changes => {
             name  => 'Bob Jones',
+            username => 'bob@example.com',
             email => 'bob@example.com',
         },
         errors => [ 'Please enter a subject', 'Please enter some details', ],
@@ -403,6 +416,7 @@ foreach my $test (
             photo3        => '',
             name          => 'Bob Jones',
             may_show_name => '1',
+            username      => 'bob@example.com',
             email         => 'bob@example.com',
             phone         => '',
             category      => 'Street lighting',
@@ -426,6 +440,7 @@ foreach my $test (
             photo3        => '',
             name          => 'Bob Jones',
             may_show_name => '1',
+            username      => 'bob@example.com',
             email         => 'bob@example.com',
             phone         => '',
             category      => 'Street lighting',
@@ -449,6 +464,7 @@ foreach my $test (
             photo3        => '',
             name          => 'Bob Jones',
             may_show_name => '1',
+            username      => 'bob@example.com',
             email         => 'bob@example.com',
             phone         => '',
             category      => 'Street lighting',
@@ -560,7 +576,7 @@ foreach my $test (
                     photo1        => '',
                     name          => 'Joe Bloggs',
                     may_show_name => '1',
-                    email         => 'test-1@example.com',
+                    username      => 'test-1@example.com',
                     phone         => '07903 123 456',
                     category      => 'Street lighting',
                     password_register => $test->{password} ? 'secret' : '',
@@ -674,7 +690,7 @@ subtest "test password errors for a user who is signing in as they report" => su
                     title         => 'Test Report',
                     detail        => 'Test report details.',
                     photo1        => '',
-                    email         => 'test-2@example.com',
+                    username      => 'test-2@example.com',
                     password_sign_in => 'secret1',
                     category      => 'Street lighting',
                 }
@@ -685,7 +701,7 @@ subtest "test password errors for a user who is signing in as they report" => su
 
     # check that we got the errors expected
     is_deeply $mech->page_errors, [
-        "There was a problem with your email/password combination. If you cannot remember your password, or do not have one, please fill in the \x{2018}sign in by email\x{2019} section of the form.",
+        "There was a problem with your login information. If you cannot remember your password, or do not have one, please fill in the \x{2018}No\x{2019} section of the form.",
     ], "check there were errors";
 };
 
@@ -726,7 +742,7 @@ subtest "test report creation for a user who is signing in as they report" => su
                     title         => 'Test Report',
                     detail        => 'Test report details.',
                     photo1        => '',
-                    email         => 'test-2@example.com',
+                    username      => 'test-2@example.com',
                     password_sign_in => 'secret2',
                     category      => 'Street lighting',
                 }
@@ -877,7 +893,7 @@ foreach my $test (
 
         # Test that AJAX pages return the right data
         $mech->get_ok(
-            '/ajax?bbox=' . ($report->longitude - 0.01) . ',' .  ($report->latitude - 0.01)
+            '/around?ajax=1&bbox=' . ($report->longitude - 0.01) . ',' .  ($report->latitude - 0.01)
             . ',' . ($report->longitude + 0.01) . ',' .  ($report->latitude + 0.01)
         );
         $mech->content_contains( "Test Report at caf\xc3\xa9" );
@@ -947,7 +963,7 @@ subtest "test report creation for a category that is non public" => sub {
                     title         => 'Test Report',
                     detail        => 'Test report details.',
                     photo1        => '',
-                    email         => 'test-2@example.com',
+                    username      => 'test-2@example.com',
                     name          => 'Joe Bloggs',
                     category      => 'Street lighting',
                 }
@@ -1038,6 +1054,51 @@ subtest "check that a lat/lon off coast leads to /around" => sub {
       [ 'That location does not appear to be covered by a council; perhaps it is offshore or outside the country. Please try again.' ],
       "Found location error";
 
+};
+
+subtest "check we load a partial report correctly" => sub {
+    my $user = FixMyStreet::App->model('DB::User')->find_or_create(
+        {
+            email => 'test-partial@example.com'
+        }
+    );
+
+    my $report = FixMyStreet::App->model('DB::Problem')->create( {
+        name               => '',
+        postcode           => '',
+        category           => 'Street lighting',
+        title              => 'Testing',
+        detail             => "Testing Detail",
+        anonymous          => 0,
+        state              => 'partial',
+        lang               => 'en-gb',
+        service            => '',
+        areas              => '',
+        used_map           => 1,
+        latitude           => '51.754926',
+        longitude          => '-1.256179',
+        user_id            => $user->id,
+    } );
+
+    my $report_id = $report->id;
+
+    my $token = FixMyStreet::App->model("DB::Token")
+        ->create( { scope => 'partial', data => $report->id } );
+
+    my $token_code = $token->token;
+
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => [ { fixmystreet => '.' } ],
+        MAPIT_URL => 'http://mapit.uk/',
+    },
+    sub {
+        $mech->get("/L/$token_code");
+        is $mech->res->previous->code, 302, 'partial token page redirects';
+        is $mech->uri->path, "/report/new", "partial redirects to report page";
+        $mech->content_contains('Testing Detail');
+    };
+
+    $mech->delete_user($user);
 };
 
 for my $test (
@@ -1135,7 +1196,7 @@ for my $test (
             title             => "Test Report",
             detail            => 'Test report details.',
             photo1            => '',
-            email             => 'firstlast@example.com',
+            username          => 'firstlast@example.com',
             may_show_name     => '1',
             phone             => '07903 123 456',
             category          => 'Trees',
@@ -1167,9 +1228,7 @@ for my $test (
         # confirm token in order to update the user details
         $mech->get_ok($url);
 
-        my $user =
-          FixMyStreet::App->model('DB::User')
-          ->find( { email => 'firstlast@example.com' } );
+        my $user = FixMyStreet::App->model('DB::User')->find( { email => 'firstlast@example.com' } );
 
         my $report = $user->problems->first;
         ok $report, "Found the report";
@@ -1284,7 +1343,7 @@ subtest "test Hart" => sub {
                 $mech->submit_form_ok( { with_fields => { pc => 'GU51 4AE' } }, "submit location" );
                 $mech->follow_link_ok( { text_regex => qr/skip this step/i, }, "follow 'skip this step' link" );
                 my %optional_fields = $test->{confirm} ?  () :
-                    ( email => $test_email, phone => '07903 123 456' );
+                    ( username => $test_email, phone => '07903 123 456' );
 
                 # we do this as otherwise test::www::mechanize::catalyst
                 # goes to the value set in ->host above irregardless and
@@ -1424,7 +1483,7 @@ subtest "unresponsive body handling works" => sub {
                     detail        => 'Test report details.',
                     photo1        => '',
                     name          => 'Joe Bloggs',
-                    email         => $test_email,
+                    username      => $test_email,
                     may_show_name => '1',
                     phone         => '07903 123 456',
                     category      => 'Trees',
@@ -1497,7 +1556,7 @@ subtest "unresponsive body handling works" => sub {
                     detail        => 'Test report details.',
                     photo1        => '',
                     name          => 'Joe Bloggs',
-                    email         => $test_email,
+                    username      => $test_email,
                     may_show_name => '1',
                     phone         => '07903 123 456',
                     category      => 'Trees',
@@ -1618,7 +1677,7 @@ subtest "extra google analytics code displayed on email confirmation problem cre
             title             => "Test Report",
             detail            => 'Test report details.',
             photo1            => '',
-            email             => 'firstlast@example.com',
+            username          => 'firstlast@example.com',
             name              => 'Test User',
             may_show_name     => '1',
             phone             => '07903 123 456',
@@ -1639,9 +1698,7 @@ subtest "extra google analytics code displayed on email confirmation problem cre
         $mech->get_ok($url);
 
         # find the report
-        my $user =
-          FixMyStreet::App->model('DB::User')
-          ->find( { email => 'firstlast@example.com' } );
+        my $user = FixMyStreet::App->model('DB::User')->find( { email => 'firstlast@example.com' } );
 
         my $report = $user->problems->first;
         ok $report, "Found the report";

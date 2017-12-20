@@ -1,9 +1,9 @@
 [%
     PROCESS "report/photo-js.html";
     PROCESS "maps/zurich.html";
+    SET bodyclass = 'mappage';
     PROCESS 'admin/header.html'
-        title = tprintf(loc('Editing problem %d'), problem.id ),
-        bodyclass = 'mappage';
+        title = tprintf(loc('Editing problem %d'), problem.id );
     PROCESS 'admin/report_blocks.html'
 -%]
 
@@ -64,7 +64,7 @@
         <br>
         [% problem.user.email | html %]
         [% IF NOT problem.extra.email_confirmed %]<span class="error">[% loc('Unconfirmed') %]</span>[% END %]
-        <input type='hidden' id='email' name='email' value='[% problem.user.email | html %]'>
+        <input type='hidden' id='username' name='username' value='[% problem.user.username | html %]'>
         <br>
         [% IF problem.user.phone %][% problem.user.phone | html %][% ELSE %]<em>[% loc('(No phone number)') %]</em>[% END %]
     </dd>

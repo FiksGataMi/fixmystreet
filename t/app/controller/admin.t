@@ -1,4 +1,6 @@
 use FixMyStreet::TestMech;
+# avoid wide character warnings from the category change message
+use open ':std', ':encoding(UTF-8)';
 
 my $mech = FixMyStreet::TestMech->new;
 
@@ -287,6 +289,7 @@ subtest 'check text output' => sub {
     $mech->get_ok('/admin/body/' . $body->id . '?text=1');
     is $mech->content_type, 'text/plain';
     $mech->content_contains('test category');
+    $mech->content_lacks('<body');
 };
 
 
@@ -316,7 +319,7 @@ foreach my $test (
             detail     => 'Detail for Report to Edit',
             state      => 'confirmed',
             name       => 'Test User',
-            email      => $user->email,
+            username => $user->email,
             anonymous  => 0,
             flagged    => undef,
             non_public => undef,
@@ -332,7 +335,7 @@ foreach my $test (
             detail     => 'Detail for Report to Edit',
             state      => 'confirmed',
             name       => 'Test User',
-            email      => $user->email,
+            username => $user->email,
             anonymous  => 0,
             flagged    => undef,
             non_public => undef,
@@ -348,7 +351,7 @@ foreach my $test (
             detail     => 'Edited Detail',
             state      => 'confirmed',
             name       => 'Test User',
-            email      => $user->email,
+            username => $user->email,
             anonymous  => 0,
             flagged    => undef,
             non_public => undef,
@@ -365,7 +368,7 @@ foreach my $test (
             detail     => 'Edited Detail',
             state      => 'confirmed',
             name       => 'Edited User',
-            email      => $user->email,
+            username => $user->email,
             anonymous  => 0,
             flagged    => undef,
             non_public => undef,
@@ -384,12 +387,12 @@ foreach my $test (
             detail     => 'Edited Detail',
             state      => 'confirmed',
             name       => 'Edited User',
-            email      => $user->email,
+            username => $user->email,
             anonymous  => 0,
             flagged    => 'on',
             non_public => undef,
         },
-        changes     => { email => $user2->email, },
+        changes     => { username => $user2->email, },
         log_entries => [qw/edit edit edit edit edit/],
         resend      => 0,
         user        => $user2,
@@ -401,11 +404,12 @@ foreach my $test (
             detail     => 'Edited Detail',
             state      => 'confirmed',
             name       => 'Edited User',
-            email      => $user2->email,
+            username => $user2->email,
             anonymous  => 0,
             flagged    => 'on',
             non_public => undef,
         },
+        expect_comment => 1,
         changes   => { state => 'unconfirmed' },
         log_entries => [qw/edit state_change edit edit edit edit edit/],
         resend      => 0,
@@ -417,11 +421,12 @@ foreach my $test (
             detail     => 'Edited Detail',
             state      => 'unconfirmed',
             name       => 'Edited User',
-            email      => $user2->email,
+            username => $user2->email,
             anonymous  => 0,
             flagged    => 'on',
             non_public => undef,
         },
+        expect_comment => 1,
         changes   => { state => 'confirmed' },
         log_entries => [qw/edit state_change edit state_change edit edit edit edit edit/],
         resend      => 0,
@@ -433,11 +438,12 @@ foreach my $test (
             detail     => 'Edited Detail',
             state      => 'confirmed',
             name       => 'Edited User',
-            email      => $user2->email,
+            username => $user2->email,
             anonymous  => 0,
             flagged    => 'on',
             non_public => undef,
         },
+        expect_comment => 1,
         changes   => { state => 'fixed' },
         log_entries =>
           [qw/edit state_change edit state_change edit state_change edit edit edit edit edit/],
@@ -450,11 +456,12 @@ foreach my $test (
             detail     => 'Edited Detail',
             state      => 'fixed',
             name       => 'Edited User',
-            email      => $user2->email,
+            username => $user2->email,
             anonymous  => 0,
             flagged    => 'on',
             non_public => undef,
         },
+        expect_comment => 1,
         changes     => { state => 'hidden' },
         log_entries => [
             qw/edit state_change edit state_change edit state_change edit state_change edit edit edit edit edit/
@@ -468,11 +475,12 @@ foreach my $test (
             detail     => 'Edited Detail',
             state      => 'hidden',
             name       => 'Edited User',
-            email      => $user2->email,
+            username => $user2->email,
             anonymous  => 0,
             flagged    => 'on',
             non_public => undef,
         },
+        expect_comment => 1,
         changes => {
             state     => 'confirmed',
             anonymous => 1,
@@ -489,7 +497,7 @@ foreach my $test (
             detail     => 'Edited Detail',
             state      => 'confirmed',
             name       => 'Edited User',
-            email      => $user2->email,
+            username => $user2->email,
             anonymous  => 1,
             flagged    => 'on',
             non_public => undef,
@@ -507,7 +515,7 @@ foreach my $test (
             detail     => 'Edited Detail',
             state      => 'confirmed',
             name       => 'Edited User',
-            email      => $user2->email,
+            username => $user2->email,
             anonymous  => 1,
             flagged    => 'on',
             non_public => undef,
@@ -520,10 +528,58 @@ foreach my $test (
         ],
         resend => 0,
     },
+    {
+        description => 'change state to investigating as body superuser',
+        fields      => {
+            title      => 'Edited Report',
+            detail     => 'Edited Detail',
+            state      => 'confirmed',
+            name       => 'Edited User',
+            username   => $user2->email,
+            anonymous  => 1,
+            flagged    => 'on',
+            non_public => 'on',
+        },
+        expect_comment => 1,
+        user_body => $oxfordshire,
+        changes   => { state => 'investigating' },
+        log_entries => [
+            qw/edit state_change edit resend edit state_change edit state_change edit state_change edit state_change edit state_change edit edit edit edit edit/
+        ],
+        resend => 0,
+    },
+    {
+        description => 'change state to in progess and change category as body superuser',
+        fields      => {
+            title      => 'Edited Report',
+            detail     => 'Edited Detail',
+            state      => 'investigating',
+            name       => 'Edited User',
+            username   => $user2->email,
+            anonymous  => 1,
+            flagged    => 'on',
+            non_public => 'on',
+        },
+        expect_comment => 1,
+        expected_text => '*Category changed from ‘Other’ to ‘Potholes’*',
+        user_body => $oxfordshire,
+        changes   => { state => 'in progress', category => 'Potholes' },
+        log_entries => [
+            qw/edit state_change edit state_change edit resend edit state_change edit state_change edit state_change edit state_change edit state_change edit edit edit edit edit/
+        ],
+        resend => 0,
+    },
   )
 {
     subtest $test->{description} => sub {
+        $report->comments->delete;
         $log_entries->reset;
+
+        if ( $test->{user_body} ) {
+            $superuser->from_body( $test->{user_body}->id );
+            $superuser->update;
+        }
+
         $mech->get_ok("/admin/report_edit/$report_id");
 
         @{$test->{fields}}{'external_id', 'external_body', 'external_team', 'category'} = (13, "", "", "Other");
@@ -555,7 +611,7 @@ foreach my $test (
         $test->{changes}->{flagged} = 1 if $test->{changes}->{flagged};
         $test->{changes}->{non_public} = 1 if $test->{changes}->{non_public};
 
-        is $report->$_, $test->{changes}->{$_}, "$_ updated" for grep { $_ ne 'email' } keys %{ $test->{changes} };
+        is $report->$_, $test->{changes}->{$_}, "$_ updated" for grep { $_ ne 'username' } keys %{ $test->{changes} };
 
         if ( $test->{user} ) {
             is $report->user->id, $test->{user}->id, 'user changed';
@@ -565,6 +621,31 @@ foreach my $test (
             $mech->content_contains( 'That problem will now be resent' );
             is $report->whensent, undef, 'mark report to resend';
         }
+
+        if ( $test->{expect_comment} ) {
+            my $comment = $report->comments->first;
+            ok $comment, 'report status change creates comment';
+            is $report->comments->count, 1, 'report only has one comment';
+            if ($test->{expected_text}) {
+                is $comment->text, $test->{expected_text}, 'comment has expected text';
+            } else {
+                is $comment->text, '', 'comment has no text';
+            }
+            if ( $test->{user_body} ) {
+                ok $comment->get_extra_metadata('is_body_user'), 'body user metadata set';
+                ok !$comment->get_extra_metadata('is_superuser'), 'superuser metadata not set';
+                is $comment->name, $test->{user_body}->name, 'comment name is body name';
+            } else {
+                ok !$comment->get_extra_metadata('is_body_user'), 'body user metadata not set';
+                ok $comment->get_extra_metadata('is_superuser'), 'superuser metadata set';
+                is $comment->name, _('an administrator'), 'comment name is admin';
+            }
+        } else {
+            is $report->comments->count, 0, 'report has no comments';
+        }
+
+        $superuser->from_body(undef);
+        $superuser->update;
     };
 }
 
@@ -586,6 +667,8 @@ subtest 'change report category' => sub {
     $ox_report->discard_changes;
     is $ox_report->category, 'Traffic lights';
     isnt $ox_report->whensent, undef;
+    is $ox_report->comments->count, 1, "Comment created for update";
+    is $ox_report->comments->first->text, '*Category changed from ‘Potholes’ to ‘Traffic lights’*', 'Comment text correct';
 
     $mech->submit_form_ok( { with_fields => { category => 'Graffiti' } }, 'form_submitted' );
     $ox_report->discard_changes;
@@ -603,8 +686,8 @@ subtest 'change email to new user' => sub {
         detail => $report->detail,
         state  => $report->state,
         name   => $report->name,
-        email  => $report->user->email,
-        category => 'Other',
+        username => $report->user->email,
+        category => 'Potholes',
         anonymous => 1,
         flagged => 'on',
         non_public => 'on',
@@ -616,12 +699,10 @@ subtest 'change email to new user' => sub {
     is_deeply( $mech->visible_form_values(), $fields, 'initial form values' );
 
     my $changes = {
-        email => 'test3@example.com'
+        username => 'test3@example.com'
     };
 
-    $user3 =
-      FixMyStreet::App->model('DB::User')
-      ->find( { email => 'test3@example.com', name => 'Test User 2' } );
+    $user3 = FixMyStreet::App->model('DB::User')->find( { email => 'test3@example.com' } );
 
     ok !$user3, 'user not in database';
 
@@ -640,9 +721,7 @@ subtest 'change email to new user' => sub {
     is $log_entries->first->action, 'edit', 'log action';
     is_deeply( $mech->visible_form_values(), $new_fields, 'changed form values' );
 
-    $user3 =
-      FixMyStreet::App->model('DB::User')
-      ->find( { email => 'test3@example.com', name => 'Test User 2' } );
+    $user3 = FixMyStreet::App->model('DB::User')->find( { email => 'test3@example.com' } );
 
     $report->discard_changes;
 
@@ -657,18 +736,50 @@ subtest 'adding email to abuse list from report page' => sub {
     $abuse->delete if $abuse;
 
     $mech->get_ok( '/admin/report_edit/' . $report->id );
-    $mech->content_contains('Ban email address');
+    $mech->content_contains('Ban user');
 
     $mech->click_ok('banuser');
 
-    $mech->content_contains('Email added to abuse list');
-    $mech->content_contains('<small>(Email in abuse table)</small>');
+    $mech->content_contains('User added to abuse list');
+    $mech->content_contains('<small>User in abuse table</small>');
 
     $abuse = FixMyStreet::App->model('DB::Abuse')->find( { email => $email } );
     ok $abuse, 'entry created in abuse table';
 
     $mech->get_ok( '/admin/report_edit/' . $report->id );
-    $mech->content_contains('<small>(Email in abuse table)</small>');
+    $mech->content_contains('<small>User in abuse table</small>');
+};
+
+subtest 'remove user from abuse list from edit user page' => sub {
+    my $abuse = FixMyStreet::App->model('DB::Abuse')->find_or_create( { email => $user->email } );
+    $mech->get_ok( '/admin/user_edit/' . $user->id );
+    $mech->content_contains('User in abuse table');
+
+    $mech->click_ok('unban');
+
+    $abuse = FixMyStreet::App->model('DB::Abuse')->find( { email => $user->email } );
+    ok !$abuse, 'record removed from abuse table';
+};
+
+subtest 'remove user with phone account from abuse list from edit user page' => sub {
+    my $abuse_user = $mech->create_user_ok('01234 456789');
+    my $abuse = FixMyStreet::App->model('DB::Abuse')->find_or_create( { email => $abuse_user->phone } );
+    $mech->get_ok( '/admin/user_edit/' . $abuse_user->id );
+    $mech->content_contains('User in abuse table');
+    my $abuse_found = FixMyStreet::App->model('DB::Abuse')->find( { email => $abuse_user->phone } );
+    ok $abuse_found, 'user in abuse table';
+
+    $mech->click_ok('unban');
+
+    $abuse = FixMyStreet::App->model('DB::Abuse')->find( { email => $user->phone } );
+    ok !$abuse, 'record removed from abuse table';
+};
+
+subtest 'no option to remove user already in abuse list' => sub {
+    my $abuse = FixMyStreet::App->model('DB::Abuse')->find( { email => $user->email } );
+    $abuse->delete if $abuse;
+    $mech->get_ok( '/admin/user_edit/' . $user->id );
+    $mech->content_lacks('User in abuse table');
 };
 
 subtest 'flagging user from report page' => sub {
@@ -742,7 +853,7 @@ for my $test (
             state => 'confirmed',
             name => '',
             anonymous => 1,
-            email => 'test@example.com',
+            username => 'test@example.com',
         },
         changes => {
             text => 'this is a changed update',
@@ -757,7 +868,7 @@ for my $test (
             state => 'confirmed',
             name => '',
             anonymous => 1,
-            email => 'test@example.com',
+            username => 'test@example.com',
         },
         changes => {
             name => 'A User',
@@ -772,7 +883,7 @@ for my $test (
             state => 'confirmed',
             name => 'A User',
             anonymous => 1,
-            email => 'test@example.com',
+            username => 'test@example.com',
         },
         changes => {
             anonymous => 0,
@@ -787,11 +898,10 @@ for my $test (
             state => 'confirmed',
             name => 'A User',
             anonymous => 0,
-            email => $update->user->email,
-            email => 'test@example.com',
+            username => 'test@example.com',
         },
         changes => {
-            email => 'test2@example.com',
+            username => 'test2@example.com',
         },
         log_count => 4,
         log_entries => [qw/edit edit edit edit/],
@@ -804,7 +914,7 @@ for my $test (
             state => 'confirmed',
             name => 'A User',
             anonymous => 0,
-            email => 'test2@example.com',
+            username => 'test2@example.com',
         },
         changes => {
             state => 'unconfirmed',
@@ -819,7 +929,7 @@ for my $test (
             state => 'unconfirmed',
             name => 'A User',
             anonymous => 0,
-            email => 'test2@example.com',
+            username => 'test2@example.com',
         },
         changes => {
             text => 'this is a twice changed update',
@@ -849,7 +959,7 @@ for my $test (
 
         $update->discard_changes;
 
-        is $update->$_, $test->{changes}->{$_} for grep { $_ ne 'email' } keys %{ $test->{changes} };
+        is $update->$_, $test->{changes}->{$_} for grep { $_ ne 'username' } keys %{ $test->{changes} };
         if ( $test->{changes}{state} && $test->{changes}{state} eq 'confirmed' ) {
             isnt $update->confirmed, undef;
         }
@@ -935,9 +1045,7 @@ for my $test (
 }
 
 subtest 'editing update email creates new user if required' => sub {
-    my $user = FixMyStreet::App->model('DB::User')->find(
-        { email => 'test4@example.com' } 
-    );
+    my $user = FixMyStreet::App->model('DB::User')->find( { email => 'test4@example.com' } );
 
     $user->delete if $user;
 
@@ -946,14 +1054,12 @@ subtest 'editing update email creates new user if required' => sub {
             state => 'hidden',
             name => 'A User',
             anonymous => 0,
-            email => 'test4@example.com',
+            username => 'test4@example.com',
     };
 
     $mech->submit_form_ok( { with_fields => $fields } );
 
-    $user = FixMyStreet::App->model('DB::User')->find(
-        { email => 'test4@example.com' } 
-    );
+    $user = FixMyStreet::App->model('DB::User')->find( { email => 'test4@example.com' } );
 
     is_deeply $mech->visible_form_values, $fields, 'submitted form values';
 
@@ -970,18 +1076,18 @@ subtest 'adding email to abuse list from update page' => sub {
     $abuse->delete if $abuse;
 
     $mech->get_ok( '/admin/update_edit/' . $update->id );
-    $mech->content_contains('Ban email address');
+    $mech->content_contains('Ban user');
 
     $mech->click_ok('banuser');
 
-    $mech->content_contains('Email added to abuse list');
-    $mech->content_contains('<small>(Email in abuse table)</small>');
+    $mech->content_contains('User added to abuse list');
+    $mech->content_contains('<small>User in abuse table</small>');
 
     $abuse = FixMyStreet::App->model('DB::Abuse')->find( { email => $email } );
     ok $abuse, 'entry created in abuse table';
 
     $mech->get_ok( '/admin/update_edit/' . $update->id );
-    $mech->content_contains('<small>(Email in abuse table)</small>');
+    $mech->content_contains('<small>User in abuse table</small>');
 };
 
 subtest 'flagging user from update page' => sub {
@@ -1029,13 +1135,12 @@ subtest 'hiding comment marked as fixed reopens report' => sub {
     $report->state('fixed - user');
     $report->update;
 
-
     my $fields = {
             text => 'this is a changed update',
             state => 'hidden',
             name => 'A User',
             anonymous => 0,
-            email => 'test2@example.com',
+            username => 'test2@example.com',
     };
 
     $mech->submit_form_ok( { with_fields => $fields } );
@@ -1092,7 +1197,7 @@ subtest 'report search' => sub {
 
 subtest 'search abuse' => sub {
     $mech->get_ok( '/admin/users?search=example' );
-    $mech->content_like(qr{test4\@example.com.*</td>\s*<td>.*?</td>\s*<td>\(Email in abuse table}s);
+    $mech->content_like(qr{test4\@example.com.*</td>\s*<td>.*?</td>\s*<td>User in abuse table}s);
 };
 
 subtest 'show flagged entries' => sub {
@@ -1168,6 +1273,69 @@ $user->update;
 
 my $southend = $mech->create_body_ok(2607, 'Southend-on-Sea Borough Council');
 
+for my $test (
+    {
+        desc => 'add user - blank form',
+        fields => {
+            email => '', email_verified => 0,
+            phone => '', phone_verified => 0,
+        },
+        error => ['Please verify at least one of email/phone', 'Please enter a name'],
+    },
+    {
+        desc => 'add user - blank, verify phone',
+        fields => {
+            email => '', email_verified => 0,
+            phone => '', phone_verified => 1,
+        },
+        error => ['Please enter a valid email or phone number', 'Please enter a name'],
+    },
+    {
+        desc => 'add user - bad email',
+        fields => {
+            name => 'Norman',
+            email => 'bademail', email_verified => 0,
+            phone => '', phone_verified => 0,
+        },
+        error => ['Please enter a valid email'],
+    },
+    {
+        desc => 'add user - bad phone',
+        fields => {
+            name => 'Norman',
+            phone => '01214960000000', phone_verified => 1,
+        },
+         error => ['Please check your phone number is correct'],
+    },
+    {
+        desc => 'add user - landline',
+        fields => {
+            name => 'Norman Name',
+            phone => '+441214960000',
+            phone_verified => 1,
+        },
+        error => ['Please enter a mobile number'],
+    },
+    {
+        desc => 'add user - good details',
+        fields => {
+            name => 'Norman Name',
+            phone => '+61491570156',
+            phone_verified => 1,
+        },
+    },
+) {
+    subtest $test->{desc} => sub {
+        $mech->get_ok('/admin/users');
+        $mech->submit_form_ok( { with_fields => $test->{fields} } );
+        if ($test->{error}) {
+            $mech->content_contains($_) for @{$test->{error}};
+        } else {
+            $mech->content_contains('Updated');
+        }
+    };
+}
+
 my %default_perms = (
     "permissions[moderate]" => undef,
     "permissions[planned_reports]" => undef,
@@ -1190,6 +1358,10 @@ my %default_perms = (
     trusted_bodies => undef,
 );
 
+# Start this section with user having no name
+# Regression test for mysociety/fixmystreetforcouncils#250
+$user->update({ name => '' });
+
 FixMyStreet::override_config {
     MAPIT_URL => 'http://mapit.uk/',
 }, sub {
@@ -1197,7 +1369,7 @@ FixMyStreet::override_config {
         {
             desc => 'edit user name',
             fields => {
-                name => 'Test User',
+                name => '',
                 email => 'test@example.com',
                 body => $haringey->id,
                 phone => '',
@@ -1358,6 +1530,32 @@ FixMyStreet::override_config {
     }
 };
 
+FixMyStreet::override_config {
+    MAPIT_URL => 'http://mapit.uk/',
+    SMS_AUTHENTICATION => 1,
+}, sub {
+    subtest "Test edit user add verified phone" => sub {
+        $mech->get_ok( '/admin/user_edit/' . $user->id );
+        $mech->submit_form_ok( { with_fields => {
+            phone => '+61491570157',
+            phone_verified => 1,
+        } } );
+        $mech->content_contains( 'Updated!' );
+    };
+
+    subtest "Test changing user to an existing one" => sub {
+        my $existing_user = $mech->create_user_ok('existing@example.com', name => 'Existing User');
+        $mech->create_problems_for_body(2, 2514, 'Title', { user => $existing_user });
+        my $count = FixMyStreet::DB->resultset('Problem')->search({ user_id => $user->id })->count;
+        $mech->get_ok( '/admin/user_edit/' . $user->id );
+        $mech->submit_form_ok( { with_fields => { email => 'existing@example.com' } }, 'submit email change' );
+        is $mech->uri->path, '/admin/user_edit/' . $existing_user->id, 'redirected';
+        my $p = FixMyStreet::DB->resultset('Problem')->search({ user_id => $existing_user->id })->count;
+        is $p, $count + 2, 'reports merged';
+    };
+
+};
+
 subtest "Test setting a report from unconfirmed to something else doesn't cause a front end error" => sub {
     $report->update( { confirmed => undef, state => 'unconfirmed', non_public => 0 } );
     $mech->get_ok("/admin/report_edit/$report_id");
@@ -1380,6 +1578,7 @@ subtest "Check admin_base_url" => sub {
 $mech->log_out_ok;
 
 subtest "Users without from_body can't access admin" => sub {
+    $user = FixMyStreet::App->model('DB::User')->find( { email => 'existing@example.com' } );
     $user->from_body( undef );
     $user->update;
 
@@ -1460,6 +1659,108 @@ subtest "response templates are included on page" => sub {
     };
 };
 
+subtest "auto-response templates that duplicate a single category can't be added" => sub {
+    $mech->delete_response_template($_) for $oxfordshire->response_templates;
+    my $template = $oxfordshire->response_templates->create({
+        title => "Report fixed - potholes",
+        text => "Thank you for your report. This problem has been fixed.",
+        auto_response => 1,
+        state => 'fixed - council',
+    });
+    $template->contact_response_templates->find_or_create({
+        contact_id => $oxfordshirecontact->id,
+    });
+    is $oxfordshire->response_templates->count, 1, "Initial response template was created";
+
+
+    $mech->log_in_ok( $superuser->email );
+    $mech->get_ok( "/admin/templates/" . $oxfordshire->id . "/new" );
+
+    # This response template has the same category & state as an existing one
+    # so won't be allowed.
+    my $fields = {
+        title => "Report marked fixed - potholes",
+        text => "Thank you for your report. This pothole has been fixed.",
+        auto_response => 'on',
+        state => 'fixed - council',
+        "contacts[".$oxfordshirecontact->id."]" => 1,
+    };
+    $mech->submit_form_ok( { with_fields => $fields } );
+    is $mech->uri->path, '/admin/templates/' . $oxfordshire->id . '/new', 'not redirected';
+    $mech->content_contains( 'Please correct the errors below' );
+    $mech->content_contains( 'There is already an auto-response template for this category/state.' );
+
+    is $oxfordshire->response_templates->count, 1, "Duplicate response template wasn't added";
+};
+
+subtest "auto-response templates that duplicate all categories can't be added" => sub {
+    $mech->delete_response_template($_) for $oxfordshire->response_templates;
+    $oxfordshire->response_templates->create({
+        title => "Report investigating - all cats",
+        text => "Thank you for your report. This problem has been fixed.",
+        auto_response => 1,
+        state => 'fixed - council',
+    });
+    is $oxfordshire->response_templates->count, 1, "Initial response template was created";
+
+
+    $mech->log_in_ok( $superuser->email );
+    $mech->get_ok( "/admin/templates/" . $oxfordshire->id . "/new" );
+
+    # There's already a response template for all categories and this state, so
+    # this new template won't be allowed.
+    my $fields = {
+        title => "Report investigating - single cat",
+        text => "Thank you for your report. This problem has been fixed.",
+        auto_response => 'on',
+        state => 'fixed - council',
+        "contacts[".$oxfordshirecontact->id."]" => 1,
+    };
+    $mech->submit_form_ok( { with_fields => $fields } );
+    is $mech->uri->path, '/admin/templates/' . $oxfordshire->id . '/new', 'not redirected';
+    $mech->content_contains( 'Please correct the errors below' );
+    $mech->content_contains( 'There is already an auto-response template for this category/state.' );
+
+
+    is $oxfordshire->response_templates->count, 1, "Duplicate response template wasn't added";
+};
+
+subtest "all-category auto-response templates that duplicate a single category can't be added" => sub {
+    $mech->delete_response_template($_) for $oxfordshire->response_templates;
+    my $template = $oxfordshire->response_templates->create({
+        title => "Report fixed - potholes",
+        text => "Thank you for your report. This problem has been fixed.",
+        auto_response => 1,
+        state => 'fixed - council',
+    });
+    $template->contact_response_templates->find_or_create({
+        contact_id => $oxfordshirecontact->id,
+    });
+    is $oxfordshire->response_templates->count, 1, "Initial response template was created";
+
+
+    $mech->log_in_ok( $superuser->email );
+    $mech->get_ok( "/admin/templates/" . $oxfordshire->id . "/new" );
+
+    # This response template is implicitly for all categories, but there's
+    # already a template for a specific category in this state, so it won't be
+    # allowed.
+    my $fields = {
+        title => "Report marked fixed - all cats",
+        text => "Thank you for your report. This problem has been fixed.",
+        auto_response => 'on',
+        state => 'fixed - council',
+    };
+    $mech->submit_form_ok( { with_fields => $fields } );
+    is $mech->uri->path, '/admin/templates/' . $oxfordshire->id . '/new', 'not redirected';
+    $mech->content_contains( 'Please correct the errors below' );
+    $mech->content_contains( 'There is already an auto-response template for this category/state.' );
+
+    is $oxfordshire->response_templates->count, 1, "Duplicate response template wasn't added";
+};
+
+
+
 $mech->log_in_ok( $superuser->email );
 
 subtest "response priorities can be added" => sub {
@@ -1475,8 +1776,8 @@ subtest "response priorities can be added" => sub {
     };
     $mech->submit_form_ok( { with_fields => $fields } );
 
-     is $oxfordshire->response_priorities->count, 1, "Response template was added to body";
-     is $oxfordshirecontact->response_priorities->count, 1, "Response template was added to contact";
+     is $oxfordshire->response_priorities->count, 1, "Response priority was added to body";
+     is $oxfordshirecontact->response_priorities->count, 1, "Response priority was added to contact";
 };
 
 subtest "response priorities can set to default" => sub {
@@ -1494,7 +1795,7 @@ subtest "response priorities can set to default" => sub {
     $mech->submit_form_ok( { with_fields => $fields } );
 
      is $oxfordshire->response_priorities->count, 1, "Still one response priority";
-     is $oxfordshirecontact->response_priorities->count, 1, "Still one response template";
+     is $oxfordshirecontact->response_priorities->count, 1, "Still one response priority";
      ok $oxfordshire->response_priorities->first->is_default, "Response priority set to default";
 };
 
@@ -1511,8 +1812,8 @@ subtest "response priorities are limited by body" => sub {
         name => "Bromley Cat 0",
     } );
 
-     is $bromley->response_priorities->count, 1, "Response template was added to Bromley";
-     is $oxfordshire->response_priorities->count, 1, "Response template wasn't added to Oxfordshire";
+     is $bromley->response_priorities->count, 1, "Response priority was added to Bromley";
+     is $oxfordshire->response_priorities->count, 1, "Response priority wasn't added to Oxfordshire";
 
      $mech->get_ok( "/admin/responsepriorities/" . $oxfordshire->id );
      $mech->content_lacks( $bromleypriority->name );
@@ -1545,6 +1846,12 @@ subtest "response priorities can't be viewed across councils" => sub {
         ok !$mech->res->is_success(), "want a bad response";
         is $mech->res->code, 404, "got 404";
     };
+};
+
+subtest "smoke view some stats pages" => sub {
+    $mech->log_in_ok( $superuser->email );
+    $mech->get_ok('/admin/stats/fix-rate');
+    $mech->get_ok('/admin/stats/questionnaire');
 };
 
 done_testing();

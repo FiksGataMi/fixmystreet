@@ -8,6 +8,7 @@ use FixMyStreet::Map;
 use Encode;
 use JSON::MaybeXS;
 use Utils;
+use Try::Tiny;
 
 =head1 NAME
 
@@ -32,19 +33,24 @@ If no search redirect back to the homepage.
 sub index : Path : Args(0) {
     my ( $self, $c ) = @_;
 
-    # handle old coord systems
-    $c->forward('redirect_en_or_xy_to_latlon');
-
-    # Check if we have a partial report
-    my $partial_report = $c->forward('load_partial');
+    if ($c->get_param('ajax')) {
+        $c->detach('ajax');
+    }
 
     # Check if the user is searching for a report by ID
     if ( $c->get_param('pc') && $c->get_param('pc') =~ $c->cobrand->lookup_by_ref_regex ) {
         $c->go('lookup_by_ref', [ $1 ]);
     }
 
+    # handle old coord systems
+    $c->forward('redirect_en_or_xy_to_latlon');
+
+    # Check if we have a partial report
+    my $partial_report = $c->forward('load_partial');
+
     # Try to create a location for whatever we have
-    my $ret = $c->forward('/location/determine_location_from_coords')
+    my $ret = $c->forward('/location/determine_location_from_bbox')
+        || $c->forward('/location/determine_location_from_coords')
         || $c->forward('/location/determine_location_from_pc');
     unless ($ret) {
         return $c->res->redirect('/') unless $c->get_param('pc') || $partial_report;
@@ -54,18 +60,22 @@ sub index : Path : Args(0) {
     # Check to see if the spot is covered by a area - if not show an error.
     return unless $c->forward('check_location_is_acceptable', []);
 
-    # If we have a partial - redirect to /report/new so that it can be
-    # completed.
-    if ($partial_report) {
-        my $new_uri = $c->uri_for(
-            '/report/new',
-            {
-                partial   => $c->stash->{partial_token}->token,
-                latitude  => $c->stash->{latitude},
-                longitude => $c->stash->{longitude},
-                pc        => $c->stash->{pc},
-            }
-        );
+    # Redirect to /report/new in two cases:
+    #  - if we have a partial report, so that it can be completed.
+    #  - if the cobrand doesn't show anything on /around (e.g. a private
+    #    reporting site)
+    if ($partial_report || $c->cobrand->call_hook("skip_around_page")) {
+        my $params = {
+            latitude  => $c->stash->{latitude},
+            longitude => $c->stash->{longitude},
+            pc        => $c->stash->{pc}
+        };
+        if ($partial_report) {
+            $params->{partial} = $c->stash->{partial_token}->token;
+        } elsif ($c->get_param("category")) {
+            $params->{category} = $c->get_param("category");
+        }
+        my $new_uri = $c->uri_for('/report/new', $params);
         return $c->res->redirect($new_uri);
     }
 
@@ -169,7 +179,11 @@ sub display_location : Private {
     my $latitude  = $c->stash->{latitude};
     my $longitude = $c->stash->{longitude};
 
-    $c->forward('map_features', [ { latitude => $latitude, longitude => $longitude } ] );
+    if (my $bbox = $c->stash->{bbox}) {
+        $c->forward('map_features', [ { bbox => $bbox } ]);
+    } else {
+        $c->forward('map_features', [ { latitude => $latitude, longitude => $longitude } ]);
+    }
 
     FixMyStreet::Map::display_map(
         $c,
@@ -244,16 +258,11 @@ sub map_features : Private {
     $c->forward( '/reports/stash_report_filter_status' );
     $c->forward( '/reports/stash_report_sort', [ 'created-desc' ]);
 
-    # Deal with pin hiding/age
-    my $all_pins = $c->get_param('all_pins') ? 1 : undef;
-    $c->stash->{all_pins} = $all_pins;
-    my $interval = $all_pins ? undef : $c->cobrand->on_map_default_max_pin_age;
-
     return if $c->get_param('js'); # JS will request the same (or more) data client side
 
-    my ( $on_map_all, $on_map_list, $nearby, $distance ) =
+    my ( $on_map, $nearby, $distance ) =
       FixMyStreet::Map::map_features(
-        $c, interval => $interval, %$extra,
+        $c, %$extra,
         categories => [ keys %{$c->stash->{filter_category}} ],
         states => $c->stash->{filter_problem_states},
         order => $c->stash->{sort_order},
@@ -265,16 +274,16 @@ sub map_features : Private {
             # Here we might have a DB::Problem or a DB::Result::Nearby, we always want the problem.
             my $p = (ref $_ eq 'FixMyStreet::DB::Result::Nearby') ? $_->problem : $_;
             $p->pin_data($c, 'around');
-        } @$on_map_all, @$nearby;
+        } @$on_map, @$nearby;
     }
 
     $c->stash->{pins} = \@pins;
-    $c->stash->{on_map} = $on_map_list;
+    $c->stash->{on_map} = $on_map;
     $c->stash->{around_map} = $nearby;
     $c->stash->{distance} = $distance;
 }
 
-=head2 /ajax
+=head2 ajax
 
 Handle the ajax calls that the map makes when it is dragged. The info returned
 is used to update the pins on the map and the text descriptions on the side of
@@ -282,11 +291,11 @@ the map.
 
 =cut
 
-sub ajax : Path('/ajax') {
+sub ajax : Private {
     my ( $self, $c ) = @_;
 
-    my $bbox = $c->get_param('bbox');
-    unless ($bbox) {
+    my $ret = $c->forward('/location/determine_location_from_bbox');
+    unless ($ret) {
         $c->res->status(404);
         $c->res->body('');
         return;
@@ -295,7 +304,7 @@ sub ajax : Path('/ajax') {
     my %valid_categories = map { $_ => 1 } $c->get_param_list('filter_category', 1);
     $c->stash->{filter_category} = \%valid_categories;
 
-    $c->forward('map_features', [ { bbox => $bbox } ]);
+    $c->forward('map_features', [ { bbox => $c->stash->{bbox} } ]);
     $c->forward('/reports/ajax', [ 'around/on_map_list_items.html' ]);
 }
 
@@ -338,10 +347,8 @@ sub _geocode : Private {
     } else {
         if ( ref($suggestions) eq 'ARRAY' ) {
             foreach (@$suggestions) {
-                my $address = $_->{address};
-                $address = decode_utf8($address) if !utf8::is_utf8($address);
-                push @addresses, $address;
-                push @locations, { address => $address, lat => $_->{latitude}, long => $_->{longitude} };
+                push @addresses, $_->{address};
+                push @locations, { address => $_->{address}, lat => $_->{latitude}, long => $_->{longitude} };
             }
             $response = { suggestions => \@addresses, locations => \@locations };
         } else {
@@ -366,13 +373,17 @@ sub lookup_by_ref : Private {
         external_id => $ref
     ]);
 
-    if ( $problems->count == 0) {
-        $c->detach( '/page_error_404_not_found', [] );
-    } elsif ( $problems->count == 1 ) {
-        $c->res->redirect( $c->uri_for( '/report', $problems->first->id ) );
-    } else {
+    my $count = try {
+        $problems->count;
+    } catch {
+        0;
+    };
+
+    if ($count > 1) {
         $c->stash->{ref} = $ref;
         $c->stash->{matching_reports} = [ $problems->all ];
+    } elsif ($count == 1) {
+        $c->res->redirect( $c->uri_for( '/report', $problems->first->id ) );
     }
 }
 

@@ -7,7 +7,6 @@ use FixMyStreet;
 use FixMyStreet::DB;
 use FixMyStreet::Geocode::Bing;
 use DateTime;
-use Encode;
 use List::MoreUtils 'none';
 use URI;
 use Digest::MD5 qw(md5_hex);
@@ -437,22 +436,6 @@ The order_by clause to use for reports on all reports page
 sub reports_ordering {
     return 'updated-desc';
 }
-
-=head2 on_map_list_limit
-
-Return the maximum number of items to be given in the list of reports on the map
-
-=cut
-
-sub on_map_list_limit { return undef; }
-
-=head2 on_map_default_max_pin_age
-
-Return the default maximum age for pins.
-
-=cut
-
-sub on_map_default_max_pin_age { return '6 months'; }
 
 =head2 on_map_default_status
 
@@ -896,9 +879,8 @@ sub _fallback_body_sender {
 };
 
 sub example_places {
-    my $e = FixMyStreet->config('EXAMPLE_PLACES') || [ 'High Street', 'Main Street' ];
-    $e = [ map { Encode::decode('UTF-8', $_) } @$e ];
-    return $e;
+    # uncoverable branch true
+    FixMyStreet->config('EXAMPLE_PLACES') || [ 'High Street', 'Main Street' ];
 }
 
 =head2 title_list
@@ -1085,9 +1067,12 @@ sub state_groups_inspect {
         [ $rs->display('confirmed'), [ grep { $_ ne 'planned' } FixMyStreet::DB::Result::Problem->open_states ] ],
         @fixed ? [ $rs->display('fixed'), [ 'fixed - council' ] ] : (),
         [ $rs->display('closed'), [ grep { $_ ne 'closed' } FixMyStreet::DB::Result::Problem->closed_states ] ],
-        [ $rs->display('hidden'), [ 'hidden' ] ]
     ]
 }
+
+sub max_detailed_info_length { 0 }
+
+sub prefill_report_fields_for_inspector { 0 }
 
 =head2 never_confirm_updates
 
@@ -1258,6 +1243,25 @@ admin.
 
 sub allow_report_extra_fields { 0 }
 
+sub social_auth_enabled {
+    my $self = shift;
+    my $key_present = FixMyStreet->config('FACEBOOK_APP_ID') or FixMyStreet->config('TWITTER_KEY');
+    return $key_present && !$self->call_hook("social_auth_disabled");
+}
 
+
+=head2 send_moderation_notifications
+
+Used to control whether an email is sent to the problem reporter when a report
+is moderated.
+
+Note that this is called in the context of the cobrand used to perform the
+moderation, so e.g. if a UK council cobrand disables the moderation
+notifications and a report is moderated on fixmystreet.com, the email will
+still be sent (because it wasn't disabled on the FixMyStreet cobrand).
+
+=cut
+
+sub send_moderation_notifications { 1 }
 
 1;

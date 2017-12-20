@@ -220,4 +220,8 @@ sub available_permissions {
     return $perms;
 }
 
+sub prefill_report_fields_for_inspector { 1 }
+
+sub social_auth_disabled { 1 }
+
 1;

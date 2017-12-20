@@ -229,13 +229,24 @@ sub meta_line {
 
     if ($self->anonymous or !$self->name) {
         $meta = sprintf( _( 'Posted anonymously at %s' ), Utils::prettify_dt( $self->confirmed ) )
-    } elsif ($self->user->from_body) {
+    } elsif ($self->user->from_body || $self->get_extra_metadata('is_body_user') || $self->get_extra_metadata('is_superuser') ) {
         my $user_name = FixMyStreet::Template::html_filter($self->user->name);
-        my $body = $self->user->body;
-        if ($body eq 'Bromley Council') {
-            $body = "$body <img src='/cobrands/bromley/favicon.png' alt=''>";
-        } elsif ($body eq 'Royal Borough of Greenwich') {
-            $body = "$body <img src='/cobrands/greenwich/favicon.png' alt=''>";
+        my $body;
+        if ($self->get_extra_metadata('is_superuser')) {
+            $body = _('an administrator');
+        } else {
+            # use this meta data in preference to the user's from_body setting
+            # in case they are no longer with the body, or have changed body.
+            if (my $body_id = $self->get_extra_metadata('is_body_user')) {
+                $body = FixMyStreet::App->model('DB::Body')->find({id => $body_id})->name;
+            } else {
+                $body = $self->user->body;
+            }
+            if ($body eq 'Bromley Council') {
+                $body = "$body <img src='/cobrands/bromley/favicon.png' alt=''>";
+            } elsif ($body eq 'Royal Borough of Greenwich') {
+                $body = "$body <img src='/cobrands/greenwich/favicon.png' alt=''>";
+            }
         }
         my $can_view_contribute = $c->user_exists && $c->user->has_permission_to('view_body_contribute_details', $self->problem->bodies_str_ids);
         if ($self->text) {
@@ -274,14 +285,9 @@ sub problem_state_display {
         return FixMyStreet::DB->resultset("State")->display('confirmed', 1);
     } elsif ($self->problem_state) {
         my $state = $self->problem_state;
-        if ($state eq 'not responsible') {
-            $update_state = _( "not the council's responsibility" );
-            if ($cobrand eq 'bromley' || $self->problem->to_body_named('Bromley')) {
-                $update_state = 'third party responsibility';
-            }
-        } else {
-            $update_state = FixMyStreet::DB->resultset("State")->display($state, 1);
-        }
+        my $cobrand_name = $cobrand;
+        $cobrand_name = 'bromley' if $self->problem->to_body_named('Bromley');
+        $update_state = FixMyStreet::DB->resultset("State")->display($state, 1, $cobrand_name);
     }
 
     return $update_state;

@@ -196,7 +196,7 @@ for my $test (
     {
         desc => 'No email, no message',
         fields => {
-            rznvy  => '',
+            username  => '',
             update => '',
             name   => '',
             photo1 => '',
@@ -215,7 +215,7 @@ for my $test (
     {
         desc => 'Invalid email, no message',
         fields => {
-            rznvy  => 'test',
+            username  => 'test',
             update => '',
             name   => '',
             photo1 => '',
@@ -234,7 +234,7 @@ for my $test (
     {
         desc => 'email with spaces, no message',
         fields => {
-            rznvy  => 'test @ example. com',
+            username => 'test @ example. com',
             update => '',
             name   => '',
             photo1 => '',
@@ -248,14 +248,14 @@ for my $test (
             password_sign_in => '',
         },
         changes => {
-            rznvy => 'test@example.com',
+            username => 'test@example.com',
         },
         field_errors => [ 'Please enter a message', 'Please enter your name' ]
     },
     {
         desc => 'email with uppercase, no message',
         fields => {
-            rznvy  => 'test@EXAMPLE.COM',
+            username => 'test@EXAMPLE.COM',
             update => '',
             name   => '',
             photo1 => '',
@@ -269,7 +269,7 @@ for my $test (
             password_sign_in => '',
         },
         changes => {
-            rznvy => 'test@example.com',
+            username => 'test@example.com',
         },
         field_errors => [ 'Please enter a message', 'Please enter your name' ]
     },
@@ -297,7 +297,7 @@ for my $test (
         desc => 'submit an update for a non registered user',
         initial_values => {
             name          => '',
-            rznvy         => '',
+            username => '',
             may_show_name => 1,
             add_alert     => 1,
             photo1 => '',
@@ -311,7 +311,7 @@ for my $test (
         },
         form_values => {
             submit_update => 1,
-            rznvy         => 'unregistered@example.com',
+            username => 'unregistered@example.com',
             update        => 'Update from an unregistered user',
             add_alert     => undef,
             name          => 'Unreg User',
@@ -323,7 +323,7 @@ for my $test (
         desc => 'submit an update for a non registered user and sign up',
         initial_values => {
             name          => '',
-            rznvy         => '',
+            username => '',
             may_show_name => 1,
             add_alert     => 1,
             photo1 => '',
@@ -337,7 +337,7 @@ for my $test (
         },
         form_values => {
             submit_update => 1,
-            rznvy         => 'unregistered@example.com',
+            username => 'unregistered@example.com',
             update        => "update from an\r\n\r\nunregistered user",
             add_alert     => 1,
             name          => 'Unreg User',
@@ -395,14 +395,14 @@ for my $test (
 
         ok $update, 'found update in database';
         is $update->state, 'unconfirmed', 'update unconfirmed';
-        is $update->user->email, $details->{rznvy}, 'update email';
+        is $update->user->email, $details->{username}, 'update email';
         is $update->text, $details->{update}, 'update text';
         is $add_alerts, $details->{add_alert} ? 1 : 0, 'do not sign up for alerts';
 
         $mech->get_ok( $url );
         $mech->content_contains("/report/$report_id#update_$update_id");
 
-        my $unreg_user = FixMyStreet::App->model( 'DB::User' )->find( { email => $details->{rznvy} } );
+        my $unreg_user = FixMyStreet::App->model( 'DB::User' )->find( { email => $details->{username} } );
 
         ok $unreg_user, 'found user';
 
@@ -427,7 +427,7 @@ for my $test (
         desc => 'overriding email confirmation allows report confirmation with no email sent',
         initial_values => {
             name          => '',
-            rznvy         => '',
+            username => '',
             may_show_name => 1,
             add_alert     => 1,
             photo1 => '',
@@ -441,7 +441,7 @@ for my $test (
         },
         form_values => {
             submit_update => 1,
-            rznvy         => 'unregistered@example.com',
+            username => 'unregistered@example.com',
             update        => "update no email confirm",
             add_alert     => 1,
             name          => 'Unreg User',
@@ -493,10 +493,10 @@ for my $test (
 
         ok $update, 'found update in database';
         is $update->state, 'confirmed', 'update confirmed';
-        is $update->user->email, $details->{rznvy}, 'update email';
+        is $update->user->email, $details->{username}, 'update email';
         is $update->text, $details->{update}, 'update text';
 
-        my $unreg_user = FixMyStreet::App->model( 'DB::User' )->find( { email => $details->{rznvy} } );
+        my $unreg_user = FixMyStreet::App->model( 'DB::User' )->find( { email => $details->{username} } );
 
         ok $unreg_user, 'found user';
 
@@ -918,16 +918,96 @@ subtest 'check meta correct for second comment marking as reopened' => sub {
     like $update_meta->[2], qr/Open/, 'update meta says reopened';
 };
 
-subtest "check first comment with status change but no text is displayed" => sub {
-    $user->from_body( $body->id );
-    $user->update;
+subtest 'check meta correct for comment after mark_fixed with not problem_state' => sub {
+    $report->comments->delete;
+    my $comment = FixMyStreet::App->model('DB::Comment')->create(
+        {
+            user          => $user,
+            problem_id    => $report->id,
+            text          => 'update text',
+            confirmed     => DateTime->now( time_zone => 'local'),
+            problem_state => '',
+            anonymous     => 0,
+            mark_open     => 0,
+            mark_fixed    => 1,
+            state         => 'confirmed',
+        }
+    );
+
+    $mech->get_ok( "/report/" . $report->id );
+    my $update_meta = $mech->extract_update_metas;
+    like $update_meta->[0], qr/fixed/i, 'update meta says fixed';
+
+    $comment = FixMyStreet::App->model('DB::Comment')->create(
+        {
+            user          => $user,
+            problem_id    => $report->id,
+            text          => 'update text',
+            confirmed     => DateTime->now( time_zone => 'local' ) + DateTime::Duration->new( minutes => 1 ),
+            problem_state => 'fixed - user',
+            anonymous     => 0,
+            mark_open     => 0,
+            mark_fixed    => 0,
+            state         => 'confirmed',
+        }
+    );
+
+    $mech->get_ok( "/report/" . $report->id );
+    $update_meta = $mech->extract_update_metas;
+    unlike $update_meta->[2], qr/Fixed/i, 'update meta does not say fixed';
+};
+
+for my $test(
+    {
+      user => $user2,
+      name => $body->name,
+      body => $body,
+      superuser => 0,
+      desc =>"check first comment from body user with status change but no text is displayed"
+    },
+    {
+      user => $user2,
+      name => $body->name,
+      superuser => 0,
+      bodyuser => 1,
+      desc =>"check first comment from ex body user with status change but no text is displayed"
+    },
+    {
+      user => $user2,
+      name => $body->name,
+      body => $body,
+      superuser => 1,
+      desc =>"check first comment from body super user with status change but no text is displayed"
+    },
+    {
+      user => $user2,
+      name => 'an administrator',
+      superuser => 1,
+      desc =>"check first comment from super user with status change but no text is displayed"
+    }
+) {
+subtest $test->{desc} => sub {
+    my $extra = {};
+    if ($test->{body}) {
+        $extra->{is_body_user} = $test->{body}->id;
+        $user2->from_body( $test->{body}->id );
+    } else {
+        if ($test->{superuser}) {
+            $extra->{is_superuser} = 1;
+        } elsif ($test->{bodyuser}) {
+            $extra->{is_body_user} = $body->id;
+        }
+        $user2->from_body(undef);
+    }
+    $user2->is_superuser($test->{superuser});
+    $user2->update;
 
     $report->comments->delete;
 
     my $comment = FixMyStreet::App->model('DB::Comment')->create(
         {
-            user          => $user,
-            name          => $user->from_body->name,
+            user          => $test->{user},
+            name          => $test->{name},
             problem_id    => $report->id,
             text          => '',
             confirmed     => DateTime->now( time_zone => 'local'),
@@ -936,16 +1016,29 @@ subtest "check first comment with status change but no text is displayed" => sub
             mark_open     => 0,
             mark_fixed    => 0,
             state         => 'confirmed',
+            extra         => $extra,
         }
     );
     $mech->log_in_ok( $user->email );
+
+
+    ok $user->user_body_permissions->search({
+      body_id => $body->id,
+      permission_type => 'view_body_contribute_details'
+    })->delete, 'Remove user view_body_contribute_details permissions';
 
     $mech->get_ok("/report/$report_id");
 
     my $update_meta = $mech->extract_update_metas;
     like $update_meta->[1], qr/Updated by/, 'updated by meta if no text';
-    unlike $update_meta->[1], qr/Test User/, 'commenter name not included';
+    unlike $update_meta->[1], qr/Commenter/, 'commenter name not included';
     like $update_meta->[0], qr/investigating/i, 'update meta includes state change';
+
+    if ($test->{body} || $test->{bodyuser}) {
+        like $update_meta->[1], qr/Westminster/, 'body user update uses body name';
+    } elsif ($test->{superuser}) {
+        like $update_meta->[1], qr/an administrator/, 'superuser update says an administrator';
+    }
 
     ok $user->user_body_permissions->create({
       body => $body,
@@ -955,10 +1048,108 @@ subtest "check first comment with status change but no text is displayed" => sub
     $mech->get_ok("/report/$report_id");
     $update_meta = $mech->extract_update_metas;
     like $update_meta->[1], qr/Updated by/, 'updated by meta if no text';
-    like $update_meta->[1], qr/Test User/, 'commenter name included if user has view contribute permission';
+    like $update_meta->[1], qr/Commenter/, 'commenter name included if user has view contribute permission';
     like $update_meta->[0], qr/investigating/i, 'update meta includes state change';
 };
+}
 
+for my $test(
+    {
+      desc =>"check comment from super user hiding report is not displayed",
+      problem_state => 'hidden',
+    },
+    {
+      desc =>"check comment from super user unconfirming report is not displayed",
+      problem_state => 'unconfirmed',
+    }
+) {
+subtest $test->{desc} => sub {
+    my $extra = { is_superuser => 1 };
+    $user2->is_superuser(1);
+    $user2->update;
+
+    $report->comments->delete;
+
+    my $comment = FixMyStreet::App->model('DB::Comment')->create(
+        {
+            user          => $user2,
+            name          => 'an administrator',
+            problem_id    => $report->id,
+            text          => '',
+            confirmed     => DateTime->now( time_zone => 'local'),
+            problem_state => $test->{problem_state},
+            anonymous     => 0,
+            mark_open     => 0,
+            mark_fixed    => 0,
+            state         => 'confirmed',
+            extra         => $extra,
+        }
+    );
+    $mech->log_in_ok( $user->email );
+    $mech->get_ok("/report/$report_id");
+
+    my $update_meta = $mech->extract_update_metas;
+    is scalar(@$update_meta), 0, 'no comments on report';
+  };
+}
+
+for my $test(
+    {
+      desc =>"check comments from super user hiding and unhiding report are not displayed",
+      problem_states => [qw/hidden confirmed/],
+      comment_count => 0,
+    },
+    {
+      desc =>"check comment from super user unconfirming and confirming report are is not displayed",
+      problem_states => [qw/unconfirmed confirmed/],
+      comment_count => 0,
+    },
+    {
+      desc =>"check comment after unconfirming and confirming a report is displayed",
+      problem_states => [qw/unconfirmed confirmed investigating/],
+      comment_count => 2, # state change line + who updated line
+    },
+    {
+      desc =>"check comment after confirming a report after blank state is not displayed",
+      problem_states => ['unconfirmed', '', 'confirmed'],
+      comment_count => 0, # state change line + who updated line
+    },
+) {
+subtest $test->{desc} => sub {
+    my $extra = { is_superuser => 1 };
+    $user2->is_superuser(1);
+    $user2->update;
+
+    $report->comments->delete;
+
+    for my $state (@{$test->{problem_states}}) {
+        my $comment = FixMyStreet::App->model('DB::Comment')->create(
+            {
+                user          => $user2,
+                name          => 'an administrator',
+                problem_id    => $report->id,
+                text          => '',
+                confirmed     => DateTime->now( time_zone => 'local'),
+                problem_state => $state,
+                anonymous     => 0,
+                mark_open     => 0,
+                mark_fixed    => 0,
+                state         => 'confirmed',
+                extra         => $extra,
+            }
+        );
+    }
+    $mech->log_in_ok( $user->email );
+    $mech->get_ok("/report/$report_id");
+
+    my $update_meta = $mech->extract_update_metas;
+    is scalar(@$update_meta), $test->{comment_count}, 'expected number of comments on report';
+  };
+}
+
+$user2->is_superuser(0);
+$user2->from_body(undef);
+$user2->update;
 
 $user->from_body(undef);
 $user->update;
@@ -966,19 +1157,20 @@ $user->update;
 $report->state('confirmed');
 $report->bodies_str($body->id);
 $report->update;
+$report->comments->delete;
 
 for my $test (
     {
         desc => 'submit an update for a registered user, signing in with wrong password',
         form_values => {
             submit_update => 1,
-            rznvy         => 'registered@example.com',
+            username => 'registered@example.com',
             update        => 'Update from a user',
             add_alert     => undef,
             password_sign_in => 'secret',
         },
         field_errors => [
-            "There was a problem with your email/password combination. If you cannot remember your password, or do not have one, please fill in the \x{2018}sign in by email\x{2019} section of the form.",
+            "There was a problem with your login information. If you cannot remember your password, or do not have one, please fill in the \x{2018}No\x{2019} section of the form.",
             'Please enter your name', # FIXME Not really necessary error
         ],
     },
@@ -986,7 +1178,7 @@ for my $test (
         desc => 'submit an update for a registered user and sign in',
         form_values => {
             submit_update => 1,
-            rznvy         => 'registered@example.com',
+            username => 'registered@example.com',
             update        => 'Update from a user',
             add_alert     => undef,
             password_sign_in => 'secret2',
@@ -996,7 +1188,7 @@ for my $test (
 ) {
     subtest $test->{desc} => sub {
         # Set things up
-        my $user = $mech->create_user_ok( $test->{form_values}->{rznvy} );
+        my $user = $mech->create_user_ok( $test->{form_values}->{username} );
         my $pw = 'secret2';
         $user->update( { name => 'Mr Reg', password => $pw } );
         $report->comments->delete;
@@ -1036,7 +1228,7 @@ for my $test (
             my $update = $report->comments->first;
             ok $update, 'found update';
             is $update->text, $test->{form_values}->{update}, 'update text';
-            is $update->user->email, $test->{form_values}->{rznvy}, 'update user';
+            is $update->user->email, $test->{form_values}->{username}, 'update user';
             is $update->state, 'confirmed', 'update confirmed';
             $mech->delete_user( $update->user );
         }
@@ -1053,7 +1245,7 @@ subtest 'submit an update for a registered user, creating update by email' => su
     $mech->submit_form_ok( {
         with_fields => {
             submit_update => 1,
-            rznvy         => 'registered@example.com',
+            username => 'registered@example.com',
             update        => 'Update from a user',
             add_alert     => undef,
             name          => 'New Name',
@@ -1502,7 +1694,7 @@ for my $test (
         fields => {
             submit_update => 1,
             name          => 'Test User',
-            rznvy         => 'test@example.com',
+            username => 'test@example.com',
             may_show_name => 1,
             update        => 'update from owner',
             add_alert     => undef,
@@ -1524,7 +1716,7 @@ for my $test (
             submit_update => 1,
             name          => 'Test User',
             may_show_name => 1,
-            rznvy         => 'test@example.com',
+            username => 'test@example.com',
             update        => 'update from owner',
             add_alert     => undef,
             fixed         => 1,
@@ -1589,7 +1781,7 @@ for my $test (
         my $update = $report->comments->first;
         ok $update, 'found update';
         is $update->text, $results->{update}, 'update text';
-        is $update->user->email, $test->{fields}->{rznvy}, 'update user';
+        is $update->user->email, $test->{fields}->{username}, 'update user';
         is $update->state, 'unconfirmed', 'update confirmed';
         is $update->anonymous, $test->{anonymous}, 'user anonymous';
 

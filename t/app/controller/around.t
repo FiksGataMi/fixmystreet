@@ -1,3 +1,5 @@
+use Test::MockModule;
+
 use FixMyStreet::TestMech;
 my $mech = FixMyStreet::TestMech->new;
 
@@ -92,15 +94,22 @@ foreach my $test (
     };
 }
 
-subtest 'check non public reports are not displayed on around page' => sub {
-    my $params = {
-        postcode  => 'EH1 1BB',
-        latitude  => 55.9519637512,
-        longitude => -3.17492254484,
-    };
-    my @edinburgh_problems =
-      $mech->create_problems_for_body( 5, 2651, 'Around page', $params );
+my @edinburgh_problems = $mech->create_problems_for_body( 5, 2651, 'Around page', {
+    postcode  => 'EH1 1BB',
+    latitude  => 55.9519637512,
+    longitude => -3.17492254484,
+});
 
+subtest 'check lookup by reference' => sub {
+    $mech->get_ok('/');
+    $mech->submit_form_ok( { with_fields => { pc => 'ref:12345' } }, 'bad ref');
+    $mech->content_contains('Searching found no reports');
+    my $id = $edinburgh_problems[0]->id;
+    $mech->submit_form_ok( { with_fields => { pc => "ref:$id" } }, 'good ref');
+    is $mech->uri->path, "/report/$id", "redirected to report page";
+};
+
+subtest 'check non public reports are not displayed on around page' => sub {
     $mech->get_ok('/');
     FixMyStreet::override_config {
         ALLOWED_COBRANDS => [ { 'fixmystreet' => '.' } ],
@@ -128,7 +137,7 @@ subtest 'check non public reports are not displayed on around page' => sub {
 };
 
 
-subtest 'check category and status filtering works on /ajax' => sub {
+subtest 'check category and status filtering works on /around?ajax' => sub {
     my $categories = [ 'Pothole', 'Vegetation', 'Flytipping' ];
     my $params = {
         postcode  => 'OX1 1ND',
@@ -150,21 +159,35 @@ subtest 'check category and status filtering works on /ajax' => sub {
         }
     }
 
-    my $json = $mech->get_ok_json( '/ajax?bbox=' . $bbox );
+    my $json = $mech->get_ok_json( '/around?ajax=1&bbox=' . $bbox );
     my $pins = $json->{pins};
     is scalar @$pins, 6, 'correct number of reports when no filters';
 
-    $json = $mech->get_ok_json( '/ajax?filter_category=Pothole&bbox=' . $bbox );
+    $json = $mech->get_ok_json( '/around?ajax=1&filter_category=Pothole&bbox=' . $bbox );
     $pins = $json->{pins};
     is scalar @$pins, 2, 'correct number of Pothole reports';
 
-    $json = $mech->get_ok_json( '/ajax?status=open&bbox=' . $bbox );
+    $json = $mech->get_ok_json( '/around?ajax=1&status=open&bbox=' . $bbox );
     $pins = $json->{pins};
     is scalar @$pins, 3, 'correct number of open reports';
 
-    $json = $mech->get_ok_json( '/ajax?status=fixed&filter_category=Vegetation&bbox=' . $bbox );
+    $json = $mech->get_ok_json( '/around?ajax=1&status=fixed&filter_category=Vegetation&bbox=' . $bbox );
     $pins = $json->{pins};
     is scalar @$pins, 1, 'correct number of fixed Vegetation reports';
+};
+
+subtest 'check skip_around skips around page' => sub {
+    my $cobrand = Test::MockModule->new('FixMyStreet::Cobrand::Default');
+    $cobrand->mock('skip_around_page', sub { 1 });
+    $cobrand->mock('country', sub { 1 });
+
+    FixMyStreet::override_config {
+        MAPIT_URL => 'http://mapit.uk/',
+    }, sub {
+        $mech->get('/around?latitude=51.754926&longitude=-1.256179');
+        is $mech->res->code, 302, "around page is a redirect";
+        is $mech->uri->path, '/report/new', "and redirects to /report/new";
+    };
 };
 
 done_testing();

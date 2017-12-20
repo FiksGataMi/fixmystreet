@@ -171,7 +171,7 @@ $.extend(fixmystreet.set_up, {
         var opt = this.options[this.selectedIndex],
             val = opt.value,
             txt = opt.text;
-        var $emailInput = $('input[name=email]').add('input[name=rznvy]');
+        var $emailInput = $('input[name=username]');
         var $nameInput = $('input[name=name]');
         var $phoneInput = $('input[name=phone]');
         var $showNameCheckbox = $('input[name=may_show_name]');
@@ -299,8 +299,23 @@ $.extend(fixmystreet.set_up, {
         toggle_public_update();
     });
 
-    if (geo_position_js.init()) {
-        fixmystreet.geolocate.setup(function(pos) {
+    if ($('#detailed_information').data('max-length')) {
+        $('#detailed_information').on('keyup', function() {
+            var $this = $(this),
+            counter = $('#detailed_information_length');
+            var chars_left = $this.data('max-length') - $this.val().length;
+            counter.html(chars_left);
+            if (chars_left < 0) {
+                counter.addClass('error');
+            } else {
+                counter.removeClass('error');
+            }
+        });
+    }
+
+    if ('geolocation' in navigator) {
+        var el = document.querySelector('.btn--geolocate');
+        fixmystreet.geolocate(el, function(pos) {
             var latlon = new OpenLayers.LonLat(pos.coords.longitude, pos.coords.latitude);
             var bng = latlon.clone().transform(
                 new OpenLayers.Projection("EPSG:4326"),
@@ -315,16 +330,11 @@ $.extend(fixmystreet.set_up, {
         });
     }
 
-    // Make the "Provide an update" form toggleable, and hide it by default.
+    // Make the "Provide an update" form toggleable, hidden by default.
     // (Inspectors will normally just use the #public_update box instead).
-    var $updateFormH2 = $('.update-form-heading');
-    var $updateFormBtn = $('<button>').insertBefore( $updateFormH2 );
-    $updateFormH2.hide().nextAll().hide();
-    $updateFormBtn.addClass('btn btn--provide-update');
-    $updateFormBtn.text( $updateFormH2.text() );
-    $updateFormBtn.on('click', function(e) {
+    $('.js-provide-update').on('click', function(e) {
         e.preventDefault();
-        $updateFormH2.nextAll().toggle();
+        $(this).next().toggleClass('hidden-js');
     });
   },
 
@@ -415,10 +425,10 @@ $.extend(fixmystreet.set_up, {
 });
 
 $.extend(fixmystreet.hooks, {
-    update_problem_fields: function(role, body, args) {
-        if (role == 'inspector') {
+    update_problem_fields: function(args) {
+        if (args.prefill_reports && args.role == 'inspector') {
             var title = args.category + ' problem has been scheduled for fixing';
-            var description = args.category + ' problem found - scheduled for fixing by ' + body;
+            var description = args.category + ' problem found - scheduled for fixing by ' + args.body;
 
             var $title_field = $('#form_title');
             var $description_field = $('#form_detail');

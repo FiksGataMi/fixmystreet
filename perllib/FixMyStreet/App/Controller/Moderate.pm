@@ -21,10 +21,7 @@ data to change.
 (Authentication requires:
 
   - user to be from_body
-  - user to have a "moderate" record in user_body_permissions (there is
-        currently no admin interface for this.  Should be added, but
-        while we're trialing this, it's a simple case of adding a DB record
-        manually)
+  - user to have a "moderate" record in user_body_permissions
 
 The original data of the report is stored in moderation_original_data, so
 that it can be reverted/consulted if required.  All moderation events are
@@ -85,7 +82,7 @@ sub moderate_report : Chained('report') : PathPart('') : Args(0) {
 
 sub moderating_user_name {
     my $user = shift;
-    return $user->from_body ? $user->from_body->name : 'a FixMyStreet administrator';
+    return $user->from_body ? $user->from_body->name : _('an administrator');
 }
 
 sub report_moderate_audit : Private {
@@ -106,19 +103,21 @@ sub report_moderate_audit : Private {
         reason => (sprintf '%s (%s)', $reason, $types_csv),
     });
 
-    my $token = $c->model("DB::Token")->create({
-        scope => 'moderation',
-        data => { id => $problem->id }
-    });
+    if ($problem->user->email_verified && $c->cobrand->send_moderation_notifications) {
+        my $token = $c->model("DB::Token")->create({
+            scope => 'moderation',
+            data => { id => $problem->id }
+        });
 
-    $c->send_email( 'problem-moderated.txt', {
-        to => [ [ $problem->user->email, $problem->name ] ],
-        types => $types_csv,
-        user => $problem->user,
-        problem => $problem,
-        report_uri => $c->stash->{report_uri},
-        report_complain_uri => $c->stash->{cobrand_base} . '/contact?m=' . $token->token,
-    });
+        $c->send_email( 'problem-moderated.txt', {
+            to => [ [ $problem->user->email, $problem->name ] ],
+            types => $types_csv,
+            user => $problem->user,
+            problem => $problem,
+            report_uri => $c->stash->{report_uri},
+            report_complain_uri => $c->stash->{cobrand_base} . '/contact?m=' . $token->token,
+        });
+    }
 }
 
 sub report_moderate_hide : Private {

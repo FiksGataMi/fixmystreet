@@ -84,7 +84,6 @@ sub send(;$) {
         $h{query} = $row->postcode;
         $h{url} = $email_base_url . $row->url;
         $h{admin_url} = $row->admin_url($cobrand);
-        $h{phone_line} = $h{phone} ? _('Phone:') . " $h{phone}\n\n" : '';
         if ($row->photo) {
             $h{has_photo} = _("This web page also contains a photo of the problem, provided by the user.") . "\n\n";
             $h{image_url} = $email_base_url . $row->photos->[0]->{url_full};
@@ -223,7 +222,9 @@ sub send(;$) {
         for my $sender ( keys %reporters ) {
             debug_print("sending using " . $sender, $row->id) if $debug_mode;
             $sender = $reporters{$sender};
-            $result *= $sender->send( $row, \%h );
+            my $res = $sender->send( $row, \%h );
+            $result *= $res;
+            $row->add_send_method($sender) if !$res;
             if ( $sender->unconfirmed_counts) {
                 foreach my $e (keys %{ $sender->unconfirmed_counts } ) {
                     foreach my $c (keys %{ $sender->unconfirmed_counts->{$e} }) {
@@ -298,6 +299,9 @@ sub _send_report_sent_email {
     my $h = shift;
     my $nomail = shift;
     my $cobrand = shift;
+
+    # Don't send 'report sent' text
+    return unless $row->user->email_verified;
 
     FixMyStreet::Email::send_cron(
         $row->result_source->schema,

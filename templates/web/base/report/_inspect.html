@@ -6,7 +6,7 @@
 
     [% INCLUDE 'errors.html' %]
 
-    <form id="report_inspect_form" method="post" action="[% c.uri_for( '/report', problem.id ) %]" class="validate">
+    <form name="report_inspect_form" id="report_inspect_form" method="post" action="[% c.uri_for( '/report', problem.id ) %]" class="validate">
       <input type="hidden" name="js" value="">
 
       <div class="inspect-section">
@@ -34,11 +34,17 @@
           <input type="hidden" name="longitude" value="[% problem.longitude %]">
           <input type="hidden" name="latitude" value="[% problem.latitude %]">
         </p>
+        [% IF problem.nearest_address() %]
+        <p>
+            <strong>[% loc('Nearest calculated address:') %]</strong>
+            [% problem.nearest_address() %]
+        </p>
+        [% END %]
         <p>
           <a target="_blank" href="https://www.google.com/maps/dir/Current+Location/[% problem.latitude %],[% problem.longitude %]" class="btn btn--block btn--navigate">[% loc('Navigate to this problem') %]</a>
         </p>
         <p>
-          <a href="#" class="btn btn--block btn--geolocate" id="geolocate_link">[% loc('Set to my current location') %]</a>
+          <a href="#" class="btn btn--block btn--geolocate">[% loc('Set to my current location') %]</a>
         </p>
       </div>
 
@@ -141,8 +147,9 @@
           </select>
         </p>
         <p>
-          <label for="detailed_information">[% loc('Extra details') %]</label>
-          <textarea rows="2" name="detailed_information" id="detailed_information" class="form-control">[% problem.get_extra_metadata('detailed_information') | html %]</textarea>
+          <label for="detailed_information">[% loc('Extra details') %]</label> <span id="detailed_information_length"></span>
+          <textarea rows="2" name="detailed_information" id="detailed_information" class="form-control"
+            [% IF max_detailed_info_length %]data-max-length="[% max_detailed_info_length %]" placeholder="[% tprintf(loc('%d characters maximum'), max_detailed_info_length) %]"[% END %]>[% problem.get_extra_metadata('detailed_information') | html %]</textarea>
         </p>
         [% END %]
 

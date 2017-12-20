@@ -1,5 +1,7 @@
 <div id="update_form">
-    <h2 class="update-form-heading">[% loc( 'Provide an update') %]</h2>
+  [% UNLESS hide_header %]
+    <h2[% IF two_column_sidebar %] class="hidden-js"[% END %]>[% loc('Provide an update') %]</h2>
+  [% END %]
 
     [% INCLUDE 'errors.html' %]
 
@@ -71,21 +73,21 @@
 
         [% IF c.user_exists %]
 
-            [% INCLUDE name %]
+            [% INCLUDE 'report/update/form_name.html' %]
 
             <input class="final-submit green-btn js-submit_register" type="submit" name="submit_register" value="[% loc('Post') %]">
 
 
         [% ELSE %]
 
-            <label for="form_rznvy">[% loc('Email' ) %]
+            <label for="form_username">[% loc('Email' ) %]
                 <span class="muted">([% loc('We never show your email') %])</span>
             </label>
 
-            [% IF field_errors.email %]
-                <p class='form-error'>[% field_errors.email %]</p>
+            [% IF field_errors.username %]
+                <p class='form-error'>[% field_errors.username %]</p>
             [% END %]
-            <input class="form-control" type="email" name="rznvy" id="form_rznvy" value="[% update.user.email | html %]" placeholder="[% loc('Your email address' ) %]" required>
+            <input class="form-control" type="email" name="username" id="form_username" value="[% update.user.email | html %]" placeholder="[% loc('Your email address' ) %]" required>
 
             <div id="form_sign_in">
                 <p>To submit your update you now need to confirm it either by email or by using a FixMyStreet password.</p>
@@ -93,7 +95,7 @@
                 <div id="form_sign_in_no" class="form-box">
                     <h5>Confirm my report by email</h5>
 
-                    [% INCLUDE name %]
+                    [% INCLUDE 'report/update/form_name.html' %]
 
                     <label for="password_register">[% loc('Password (optional)') %]</label>
 

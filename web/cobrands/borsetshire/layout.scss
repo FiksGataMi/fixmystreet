@@ -9,7 +9,7 @@
     background-size: 180px 48px;
     height: 48px;
     width: 180px;
-    @include high-dpi-background-image('images/site-logo');
+    @include svg-background-image('images/site-logo');
 }
 
 #site-header {
@@ -45,4 +45,60 @@
         padding: 0.5em 0.75em;
         margin: 0 0.5em 0 0;
     }
+}
+
+.homepage-login-hint {
+    .container {
+        &:before {
+            right: 16.4em;
+        }
+    }
+}
+
+body.authpage {
+    .content {
+        width: auto;
+        max-width: 30em;
+    }
+
+    input {
+        max-width: none;
+    }
+}
+
+#demo-user-list {
+    li {
+        @include clearfix();
+    }
+
+    button {
+        float: left;
+        width: 40%;
+    }
+
+    span {
+        float: right;
+        width: 55%;
+        margin-top: 0;
+    }
+}
+
+.fms-pro-promo {
+  margin: 1em 0 3em 0;
+  padding: 2em;
+
+  p {
+    font-size: 1.2em;
+    max-width: 26em;
+  }
+
+  h2 {
+    font-family: inherit;
+    font-weight: bold;
+    font-size: 2em;
+  }
+
+  @media (min-width: 60em) {
+    padding: 3em;
+  }
 }

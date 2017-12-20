@@ -11,7 +11,6 @@ FixMyStreet::App::Controller::Offline - Catalyst Controller
 =head1 DESCRIPTION
 
 Offline pages Catalyst Controller.
-On staging site, appcache only for people who want it.
 
 =head1 METHODS
 
@@ -20,7 +19,7 @@ On staging site, appcache only for people who want it.
 sub have_appcache : Private {
     my ($self, $c) = @_;
     return $c->user_exists && $c->user->has_body_permission_to('planned_reports')
-        && !FixMyStreet->staging_flag('enable_appcache', 0);
+        && !($c->user->is_superuser && FixMyStreet->staging_flag('enable_appcache', 0));
 }
 
 sub manifest : Path("/offline/appcache.manifest") {

@@ -112,17 +112,38 @@ function isR2L() {
     },
 
     make_multi: function() {
-        var $this = $(this),
-            all = $this.data('all');
-        $this.multiSelect({
-            allText: all,
-            noneText: all,
-            positionMenuWithin: $('#side'),
-            presets: [{
-                name: all,
-                options: []
-            }]
-        });
+        // A convenience wrapper around $.multiSelect() that translates HTML
+        // data-* attributes into settings for the multiSelect constructor.
+        var $select = $(this);
+        var settings = {};
+
+        if ( $select.data('none') ) {
+            settings.noneText = $select.data('none');
+        }
+
+        if ( $select.data('all') ) {
+            settings.allText = $select.data('all');
+            settings.noneText = settings.noneText || settings.allText;
+            settings.presets = [];
+            settings.presets.push({
+                name: settings.allText,
+                options: $select.data('all-options') || []
+            });
+        }
+
+        if ( $select.data('extra') && $select.data('extra-options') ) {
+            settings.presets = settings.presets || [];
+            settings.presets.push({
+                name: $select.data('extra'),
+                options: $select.data('extra-options')
+            });
+        }
+
+        if ( document.querySelector('#side') && document.querySelector('#side').contains($select[0]) ) {
+            settings.positionMenuWithin = $('#side');
+        }
+
+        $select.multiSelect(settings);
     }
 
   });
@@ -161,12 +182,12 @@ fixmystreet.resize_to = {
     if ($rapSidebar.length) {
         $rapSidebar.hide();
         $('<a>')
-            .addClass('rap-notes-trigger button-fwd')
+            .addClass('rap-notes-trigger btn btn--block btn--forward')
             .html(translation_strings.how_to_send)
             .insertBefore($rapSidebar)
             .on('click', function(){
                 $rapSidebar.slideToggle(100);
-                $(this).toggleClass('clicked');
+                $(this).toggleClass('btn--forward btn--cancel');
             });
     }
 
@@ -193,40 +214,6 @@ fixmystreet.resize_to = {
     // like an innert span again.
     $('span.report-a-problem-btn').css({ cursor:'' }).off('.reportBtn');
   }
-};
-
-fixmystreet.geolocate = {
-    setup: function(success_callback) {
-        $('#geolocate_link').click(function(e) {
-            var $link = $(this);
-            e.preventDefault();
-            // Spinny thing!
-            if ($('.mobile').length) {
-                $link.append(' <img src="/cobrands/fixmystreet/images/spinner-black.gif" alt="" align="bottom">');
-            } else {
-                var spincolor = $('<span>').css("color","white").css("color") === $('#front-main').css("background-color") ? 'white' : 'yellow';
-                $link.append(' <img src="/cobrands/fixmystreet/images/spinner-' + spincolor + '.gif" alt="" align="bottom">');
-            }
-            geo_position_js.getCurrentPosition(function(pos) {
-                $link.find('img').remove();
-                success_callback(pos);
-            }, function(err) {
-                $link.find('img').remove();
-                if (err.code === 1) { // User said no
-                    $link.html(translation_strings.geolocation_declined);
-                } else if (err.code === 2) { // No position
-                    $link.html(translation_strings.geolocation_no_position);
-                } else if (err.code === 3) { // Too long
-                    $link.html(translation_strings.geolocation_no_result);
-                } else { // Unknown
-                    $link.html(translation_strings.geolocation_unknown);
-                }
-            }, {
-                enableHighAccuracy: true,
-                timeout: 10000
-            });
-        });
-    }
 };
 
 fixmystreet.update_list_item_buttons = function($list) {
@@ -293,8 +280,10 @@ $.extend(fixmystreet.set_up, {
 
   form_validation: function() {
     // FIXME - needs to use translated string
-    jQuery.validator.addMethod('validCategory', function(value, element) {
-        return this.optional(element) || value != '-- Pick a category --'; }, translation_strings.category );
+    if (jQuery.validator) {
+        jQuery.validator.addMethod('validCategory', function(value, element) {
+            return this.optional(element) || value != '-- Pick a category --'; }, translation_strings.category );
+    }
 
     var submitted = false;
 
@@ -343,9 +332,8 @@ $.extend(fixmystreet.set_up, {
     } );
 
     $('#facebook_sign_in, #twitter_sign_in').click(function(e){
-        $('#form_email').removeClass();
-        $('#form_rznvy').removeClass();
-        $('#email').removeClass();
+        $('#form_username').removeClass();
+        $('#username').removeClass();
     });
 
     $('#planned_form').submit(function(e) {
@@ -399,27 +387,6 @@ $.extend(fixmystreet.set_up, {
     });
   },
 
-  report_geolocation: function() {
-    if (!geo_position_js.init()) {
-        return;
-    }
-    if ($('.js-geolocate').length) {
-        var link = $('.js-geolocate').attr('action');
-        link = '<a href="' + link + '" id="geolocate_link">&hellip; ' + translation_strings.geolocate + '</a>';
-        if ($('body.frontpage').length) {
-            $('.js-geolocate').after(link);
-        } else{
-            $('.js-geolocate').append(link);
-        }
-        fixmystreet.geolocate.setup(function(pos) {
-            var latitude = pos.coords.latitude;
-            var longitude = pos.coords.longitude;
-            var page = $('#geolocate_link').attr('href');
-            location.href = page + '?latitude=' + latitude + ';longitude=' + longitude;
-        });
-    }
-  },
-
   category_change: function() {
     // Deal with changes to report category.
 
@@ -427,11 +394,10 @@ $.extend(fixmystreet.set_up, {
     // Delegation is necessary because #form_category may be replaced during the lifetime of the page
     $("#problem_form").on("change.category", "select#form_category", function(){
         var args = {
-            category: $(this).val()
+            category: $(this).val(),
+            latitude: $('input[name="latitude"]').val(),
+            longitude: $('input[name="longitude"]').val()
         };
-
-        args.latitude = $('input[name="latitude"]').val();
-        args.longitude = $('input[name="longitude"]').val();
 
         $.getJSON('/report/new/category_extras', args, function(data) {
             var $category_meta = $('#category_meta');
@@ -449,9 +415,82 @@ $.extend(fixmystreet.set_up, {
         });
 
         if (fixmystreet.hooks.update_problem_fields) {
-            fixmystreet.hooks.update_problem_fields($(this).data('role'), $(this).data('body'), args);
+            args.prefill_reports = $(this).data('prefill');
+            args.role = $(this).data('role');
+            args.body = $(this).data('body');
+
+            fixmystreet.hooks.update_problem_fields(args);
         }
     });
+  },
+
+  category_groups: function() {
+    var $category_select = $("select#form_category.js-grouped-select");
+    if ($category_select.length === 0) {
+        return;
+    }
+    var $group_select = $("<select></select>").addClass("form-control");
+    var $subcategory_label = $("#form_subcategory_label");
+    var $empty_option = $category_select.find("option").first();
+
+    $group_select.change(function() {
+        var subcategory_id = $(this).find(":selected").data("subcategory_id");
+        $(".js-subcategory").hide();
+        if (subcategory_id === undefined) {
+            $subcategory_label.addClass("hidden");
+            $category_select.val($(this).val()).change();
+        } else {
+            $("#" + subcategory_id).show().change();
+            $("#form_subcategory_label").removeClass("hidden");
+        }
+    });
+
+    var subcategory_change = function() {
+        $category_select.val($(this).val()).change();
+    };
+
+    var add_optgroup = function(el) {
+        var $el = $(el);
+        var $options = $el.find("option");
+
+        if ($options.length == 1) {
+            add_option($options.get(0));
+        } else {
+            var label = $el.attr("label");
+            var subcategory_id = "subcategory_" + label.replace(/[^a-zA-Z]+/g, '');
+            var $opt = $("<option></option>").text(label).val(label);
+            $opt.data("subcategory_id", subcategory_id);
+            $group_select.append($opt);
+
+            var $sub_select = $("<select></select>").addClass("form-control js-subcategory");
+            $sub_select.attr("id", subcategory_id);
+            $sub_select.append($empty_option.clone());
+            $options.each(function() {
+                var $newopt = $(this).clone();
+                $sub_select.append($newopt);
+                // Make sure any preselected value is preserved in the new UI:
+                if ($newopt.attr('selected')) {
+                    $group_select.val(label);
+                }
+            });
+            $sub_select.hide().insertAfter($subcategory_label).change(subcategory_change);
+        }
+    };
+
+    var add_option = function(el) {
+        $group_select.append($(el).clone());
+    };
+
+    $category_select.hide();
+    $group_select.insertAfter($category_select);
+    $category_select.find("optgroup, > option").each(function() {
+        if (this.tagName.toLowerCase() === 'optgroup') {
+            add_optgroup(this);
+        } else if (this.tagName.toLowerCase() === 'option') {
+            add_option(this);
+        }
+    });
+    $group_select.change();
   },
 
   hide_name: function() {
@@ -592,31 +631,17 @@ $.extend(fixmystreet.set_up, {
     }
   },
 
-  fixed_thead: function() {
-    var thead = $('.nicetable thead');
-    if (thead.fixedThead) {
-        thead.fixedThead();
-    }
-  },
-
   report_list_filters: function() {
     // Hide the pin filter submit button. Not needed because we'll use JS
     // to refresh the map when the filter inputs are changed.
     $(".report-list-filters [type=submit]").hide();
 
-    $('#statuses').make_multi();
-    $('#filter_categories').make_multi();
+    $('.js-multiple').make_multi();
   },
 
   mobile_ui_tweaks: function() {
     //move 'skip this step' link on mobile
     $('.mobile #skip-this-step').addClass('chevron').wrap('<li>').parent().appendTo('#key-tools');
-
-    // nicetable - on mobile shift 'name' col to be a row
-    $('.mobile .nicetable th.title').remove();
-    $('.mobile .nicetable td.title').each(function(i) {
-        $(this).attr('colspan', 5).insertBefore($(this).parent('tr')).wrap('<tr class="heading" />');
-    });
   },
 
   on_mobile_nav_click: function() {
@@ -660,7 +685,7 @@ $.extend(fixmystreet.set_up, {
         }
         $('#key-tools li:empty').remove();
         $('#report-updates-data').insertAfter($('#map_box'));
-        if (fixmystreet.page === 'report' || fixmystreet.page === 'reports') {
+        if (fixmystreet.page !== 'around' && !$('#toggle-fullscreen').length) {
             $('#sub_map_links').append('<a href="#" id="toggle-fullscreen" class="expand" data-expand-text="'+ translation_strings.expand_map +'" data-compress-text="'+ translation_strings.collapse_map +'" >'+ translation_strings.expand_map +'</span>');
         }
     }
@@ -675,7 +700,6 @@ $.extend(fixmystreet.set_up, {
     //add open/close toggle button (if its not there)
     if ($('#map_links_toggle').length === 0) {
         $('<span>')
-            .html('&nbsp;')
             .attr('id', 'map_links_toggle')
             .on('click', function() {
                 var sub_map_links_css = {},
@@ -692,7 +716,7 @@ $.extend(fixmystreet.set_up, {
             .prependTo('#sub_map_links');
     }
 
-    $('#toggle-fullscreen').click(function() {
+    $('#toggle-fullscreen').off('click').on('click', function() {
       var btnClass = $('html').hasClass('map-fullscreen') ? 'expand' : 'compress';
       var text = $(this).data(btnClass + '-text');
 
@@ -735,6 +759,19 @@ $.extend(fixmystreet.set_up, {
     if ($('.form-error').length) {
         button.click();
     }
+  },
+
+  reporting_hide_phone_email: function() {
+    $('#form_username').on('keyup change', function() {
+        var username = $(this).val();
+        if (/^[^a-z]+$/i.test(username)) {
+            $('#js-hide-if-username-phone').hide();
+            $('#js-hide-if-username-email').show();
+        } else {
+            $('#js-hide-if-username-phone').show();
+            $('#js-hide-if-username-email').hide();
+        }
+    });
   },
 
   fancybox_images: function() {
@@ -780,26 +817,6 @@ $.extend(fixmystreet.set_up, {
         });
         $('body').append(form);
         form.submit();
-    });
-  },
-
-  promo_elements: function() {
-    // Add close buttons for .promo's
-    if ($('.promo').length) {
-        $('.promo').append('<a href="#" class="close-promo">x</a>');
-    }
-    //only close its own parent
-    $('.promo').on('click', '.close-promo', function(e) {
-        e.preventDefault();
-        $(this).parent('.promo').animate({
-            'height':0,
-            'margin-bottom':0,
-            'padding-top':0,
-            'padding-bottom':0
-        },{
-            duration:500,
-            queue:false
-        }).fadeOut(500);
     });
   },
 
@@ -914,6 +931,7 @@ fixmystreet.update_pin = function(lonlat, savePushState) {
         if (category_select.val() != '-- Pick a category --') {
             category_select.change();
         }
+        fixmystreet.run(fixmystreet.set_up.category_groups);
 
         if (data.contribute_as) {
             var $select = $('.js-contribute-as');
@@ -930,6 +948,7 @@ fixmystreet.update_pin = function(lonlat, savePushState) {
             if (!data.contribute_as.body) {
                 $select.find('option[value=body]').remove();
             }
+            $select.change();
             $('#js-contribute-as-wrapper').show();
         } else {
             $('#js-contribute-as-wrapper').hide();
@@ -993,6 +1012,7 @@ fixmystreet.display = {
     }
 
     $('#sub_map_links').hide();
+    $('.big-hide-pins-link').hide();
     if ($('html').hasClass('mobile')) {
         var $map_box = $('#map_box'),
             width = $map_box.width(),
@@ -1072,6 +1092,8 @@ fixmystreet.display = {
                 fixmystreet.map.updateSize();
             }
 
+            $('.big-hide-pins-link').hide();
+
             // If this is the first individual report we've loaded, remove the
             // "all reports" sub_map_links but store them in a global variable
             // so we can reinsert them when the user returns to the all reports
@@ -1132,8 +1154,12 @@ fixmystreet.display = {
   reports_list: function(reportListUrl, callback) {
     // If the report list is already in the DOM,
     // just reveal it, rather than loading new page.
-    if ($('#side').length) {
-        $('#side').show();
+    var side = document.getElementById('side');
+    if (side) {
+        if (side.style.display !== 'none') {
+            return;
+        }
+        side.style.display = '';
         $('#side-form').hide();
         // Report page may have been one or two columns, remove either
         $('#side-report').remove();
@@ -1151,6 +1177,7 @@ fixmystreet.display = {
             $('#sub_map_links').replaceWith(fixmystreet.original.sub_map_links);
             delete fixmystreet.original.sub_map_links;
         }
+        $('.big-hide-pins-link').show();
         fixmystreet.set_up.map_controls();
 
         window.selected_problem_id = undefined;
@@ -1216,17 +1243,27 @@ $(function() {
                     $('#filter_categories').add('#statuses').add('#sort').find('option')
                         .prop('selected', function() { return this.defaultSelected; })
                         .trigger('change.multiselect');
+                    if (fixmystreet.utils && fixmystreet.utils.parse_query_string) {
+                        var qs = fixmystreet.utils.parse_query_string();
+                        var page = qs.p || 1;
+                        $('.pagination').data('page', page)
+                            .trigger('change.filters');
+                    }
                     fixmystreet.display.reports_list(location.href);
                 } else if ('reportId' in e.state) {
                     fixmystreet.display.report(e.state.reportPageUrl, e.state.reportId);
                 } else if ('newReportAtLonlat' in e.state) {
                     fixmystreet.display.begin_report(e.state.newReportAtLonlat, false);
+                } else if ('page_change' in e.state) {
+                    $('.pagination').data('page', e.state.page_change.page)
+                        .trigger('change.filters');
                 } else if ('filter_change' in e.state) {
                     $('#filter_categories').val(e.state.filter_change.filter_categories);
                     $('#statuses').val(e.state.filter_change.statuses);
                     $('#sort').val(e.state.filter_change.sort);
                     $('#filter_categories').add('#statuses')
                         .trigger('change.filters').trigger('change.multiselect');
+                    fixmystreet.display.reports_list(location.href);
                 } else if ('hashchange' in e.state) {
                     // This popstate was just here because the hash changed.
                     // (eg: mobile nav click.) We want to ignore it.

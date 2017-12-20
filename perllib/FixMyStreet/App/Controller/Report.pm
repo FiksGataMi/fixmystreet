@@ -326,6 +326,8 @@ sub inspect : Private {
         $c->stash->{has_default_priority} = scalar( grep { $_->is_default } $problem->response_priorities );
     }
 
+    $c->stash->{max_detailed_info_length} = $c->cobrand->max_detailed_info_length;
+
     if ( $c->get_param('save') ) {
         $c->forward('/auth/check_csrf_token');
 
@@ -335,8 +337,20 @@ sub inspect : Private {
         my %update_params = ();
 
         if ($permissions->{report_inspect}) {
-            foreach (qw/detailed_information traffic_information/) {
-                $problem->set_extra_metadata( $_ => $c->get_param($_) );
+            $problem->set_extra_metadata( traffic_information => $c->get_param('traffic_information') );
+
+            if ( my $info = $c->get_param('detailed_information') ) {
+                $problem->set_extra_metadata( detailed_information => $info );
+                if ($c->cobrand->max_detailed_info_length &&
+                    length($info) > $c->cobrand->max_detailed_info_length
+                ) {
+                    $valid = 0;
+                    push @{ $c->stash->{errors} },
+                        sprintf(
+                            _('Detailed information is limited to %d characters.'),
+                            $c->cobrand->max_detailed_info_length
+                        );
+                }
             }
 
             if ( $c->get_param('defect_type') ) {
@@ -363,15 +377,15 @@ sub inspect : Private {
             if ( $problem->state eq 'hidden' ) {
                 $problem->get_photoset->delete_cached;
             }
-            if ( $problem->state eq 'duplicate' && $old_state ne 'duplicate' ) {
-                # If the report is being closed as duplicate, make sure the
-                # update records this.
-                $update_params{problem_state} = "duplicate";
-            }
-            if ( $problem->state ne 'duplicate' ) {
+            if ( $problem->state eq 'duplicate') {
+                if (my $duplicate_of = $c->get_param('duplicate_of')) {
+                    $problem->set_duplicate_of($duplicate_of);
+                } elsif (not $c->get_param('public_update')) {
+                    $valid = 0;
+                    push @{ $c->stash->{errors} }, _('Please provide a duplicate ID or public update for this report.');
+                }
+            } else {
                 $problem->unset_extra_metadata('duplicate_of');
-            } elsif (my $duplicate_of = $c->get_param('duplicate_of')) {
-                $problem->set_duplicate_of($duplicate_of);
             }
 
             if ( $problem->state ne $old_state ) {
@@ -410,7 +424,11 @@ sub inspect : Private {
         }
 
         if ($permissions->{report_inspect} || $permissions->{report_edit_category}) {
-            $c->forward( '/admin/report_edit_category', [ $problem ] );
+            $c->forward( '/admin/report_edit_category', [ $problem, 1 ] );
+
+            if ($c->stash->{update_text}) {
+                $update_text .= "\n\n" . $c->stash->{update_text};
+            }
 
             # The new category might require extra metadata (e.g. pothole size), so
             # we need to update the problem with the new values.
@@ -502,25 +520,28 @@ sub nearby_json : Private {
     my $p = $c->stash->{problem};
     my $dist = 1;
 
+    # This is for the list template, this is a list on that page.
+    $c->stash->{page} = 'report';
+
     my $nearby = $c->model('DB::Nearby')->nearby(
-        $c, $dist, [ $p->id ], 5, $p->latitude, $p->longitude, undef, [ $p->category ], undef
+        $c, $dist, [ $p->id ], 5, $p->latitude, $p->longitude, [ $p->category ], undef
     );
+    # Want to treat these as if they were on map
+    $nearby = [ map { $_->problem } @$nearby ];
     my @pins = map {
-        my $p = $_->problem;
-        my $colour = $c->cobrand->pin_colour( $p, 'around' );
-        [ $p->latitude, $p->longitude,
-          $colour,
-          $p->id, $p->title_safe, 'small', JSON->false
+        my $p = $_->pin_data($c, 'around');
+        [ $p->{latitude}, $p->{longitude}, $p->{colour},
+          $p->{id}, $p->{title}, 'small', JSON->false
         ]
     } @$nearby;
 
-    my $on_map_list_html = $c->render_fragment(
+    my $list_html = $c->render_fragment(
         'around/on_map_list_items.html',
-        { on_map => [], around_map => $nearby }
+        { around_map => [], on_map => $nearby }
     );
 
     my $json = { pins => \@pins };
-    $json->{reports_list} = $on_map_list_html if $on_map_list_html;
+    $json->{reports_list} = $list_html if $list_html;
     my $body = encode_json($json);
     $c->res->content_type('application/json; charset=utf-8');
     $c->res->body($body);

@@ -485,12 +485,21 @@ Return a url for this problem report that logs a user in
 sub tokenised_url {
     my ($self, $user, $params) = @_;
 
+    my %params;
+    if ($user->email_verified) {
+        $params{email} = $user->email;
+    } elsif ($user->phone_verified) {
+        $params{phone} = $user->phone;
+        # This is so the email token can look up/ log in a phone user
+        $params{login_type} = 'phone';
+    }
+
     my $token = FixMyStreet::App->model('DB::Token')->create(
         {
             scope => 'email_sign_in',
             data  => {
+                %params,
                 id    => $self->id,
-                email => $user->email,
                 r     => $self->url,
                 p     => $params,
             }
@@ -616,6 +625,15 @@ sub meta_line {
     }
 
     return $meta;
+}
+
+sub nearest_address {
+    my $self = shift;
+
+    return '' unless $self->geocode;
+
+    my $address = $self->geocode->{resourceSets}[0]{resources}[0];
+    return $address->{name};
 }
 
 sub body {
@@ -849,9 +867,22 @@ sub update_send_failed {
     } );
 }
 
+sub add_send_method {
+    my $self = shift;
+    my $sender = shift;
+    ($sender = ref $sender) =~ s/^.*:://;
+    if (my $send_method = $self->send_method_used) {
+        $self->send_method_used("$send_method,$sender");
+    } else {
+        $self->send_method_used($sender);
+    }
+}
+
 sub as_hashref {
     my $self = shift;
     my $c    = shift;
+
+    my $state_t = FixMyStreet::DB->resultset("State")->display($self->state);
 
     return {
         id        => $self->id,
@@ -863,12 +894,16 @@ sub as_hashref {
         postcode  => $self->postcode,
         areas     => $self->areas,
         state     => $self->state,
-        state_t   => _( $self->state ),
+        state_t   => $state_t,
         used_map  => $self->used_map,
         is_fixed  => $self->fixed_states->{ $self->state } ? 1 : 0,
         photos    => [ map { $_->{url} } @{$self->photos} ],
         meta      => $self->confirmed ? $self->meta_line( $c ) : '',
-        confirmed_pp => $self->confirmed ? $c->cobrand->prettify_dt( $self->confirmed ): '',
+        ($self->confirmed ? (
+            confirmed => $self->confirmed,
+            confirmed_pp => $c->cobrand->prettify_dt( $self->confirmed ),
+        ) : ()),
+        created => $self->created,
         created_pp => $c->cobrand->prettify_dt( $self->created ),
     };
 }
@@ -896,16 +931,20 @@ sub photos {
         # if LOGIN_REQUIRED is set. To stop this happening, Varnish should be
         # configured to not strip cookies if the cookie_passthrough param is
         # present, which this line ensures will be if LOGIN_REQUIRED is set.
-        my $extra = (FixMyStreet->config('LOGIN_REQUIRED')) ? "&cookie_passthrough=1" : "";
+        my $extra = '';
+        if (FixMyStreet->config('LOGIN_REQUIRED')) {
+            $cachebust .= '&cookie_passthrough=1';
+            $extra = '?cookie_passthrough=1';
+        }
         my ($hash, $format) = split /\./, $_;
         {
             id => $hash,
             url_temp => "/photo/temp.$hash.$format$extra",
             url_temp_full => "/photo/fulltemp.$hash.$format$extra",
-            url => "/photo/$id.$i.$format?$cachebust$extra",
-            url_full => "/photo/$id.$i.full.$format?$cachebust$extra",
-            url_tn => "/photo/$id.$i.tn.$format?$cachebust$extra",
-            url_fp => "/photo/$id.$i.fp.$format?$cachebust$extra",
+            url => "/photo/$id.$i.$format?$cachebust",
+            url_full => "/photo/$id.$i.full.$format?$cachebust",
+            url_tn => "/photo/$id.$i.tn.$format?$cachebust",
+            url_fp => "/photo/$id.$i.fp.$format?$cachebust",
             idx => $i++,
         }
     } $photoset->all_ids;

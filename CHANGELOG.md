@@ -2,6 +2,72 @@
 
 * Unreleased
 
+* v2.3 (18th December 2017)
+    - New features:
+        - Optional verification of reports and updates, and logging in,
+          using confirmation by phone text. #1856 #1872
+        - Improved email/phone management in your profile.
+        - Don't cover whole map with pin loading indicator. #1874
+        - Add Expand map toggle to more mobile maps. #1875
+        - Allow multiple wards to be shown on reports page. #1870
+        - Add functionality to have per-body /reports page. #1880
+        - Open311 category group support. #1923
+    - Front end improvements:
+        - Paginate reports on `/around`. #1805 #1577 #525
+        - Improve performance of various pages, especially front. #1901 #1903
+        - More prominent "Hide pins" link on map pages, to aid reporting in busy areas. #525
+        - Optimised sprite file down from 97 KB to 36 KB. #1852
+        - SVG assets for core elements like button icons and map controls #1888
+        - Remove unneeded 2x PNG fallback images.
+        - Improve location disambiguation page on small screens. #1918
+        - Don't show geolocation link on non-HTTPS pages. #1915
+        - Public report page shows state changes made in admin interface #1846
+    - Bugfixes
+        - Shortlist menu item always remains a link #1855
+        - Fix encoded entities in RSS output. #1859
+        - Only save category changes if staff user update valid #1857
+        - Only create one update when staff user updating category #1857
+        - Do not include blank updates in email alerts #1857
+        - Redirect inspectors correctly on creation in two-tier. #1877
+        - Report status filter All option works for body users #1845
+        - Always allow reports to be removed from shortlist #1882
+        - Remove shortlist form from inspect duplicate list. #1889
+        - Fix pin size when JavaScript unavailable.
+        - Fix display of text only body contacts #1895
+        - Prevent text overflow bug on homepage stats #1722
+        - Stop page jumping too far down on inspect form. #1863
+        - Prevent multiple 'Expand map' links appearing. #1909
+        - Superusers without a from_body can make reports again. #1913
+        - Fix crash when viewing /around in certain locales. #1916
+        - Fix back bug, from report after using list filters. #1920
+        - Fix issues with send method category change. #1933
+    - Admin improvements:
+        - Character length limit can be placed on report detailed information #1848
+        - Inspector panel shows nearest address if available #1850
+        - Return a 200 rather than 404 for ref ID lookup. #1867
+        - Remove hidden from default staff state dropdown. #1878
+        - Marking an item as a duplicate enforces providing ID/update. #1873
+        - Report field pre-filling for inspectors configurable #1854
+        - Admins can now unban users #1881
+        - More JavaScript-enhanced `<select multiple>` elements. #1589 #1892
+        - 'Auto-response' flag on response templates is honoured for fetched
+          Open311 updates. #1924
+        - Individual cobrands can disable social login #1890
+        - Cobrands can disable sending of moderation emails. #1910
+        - Store all successful send methods. #1933
+    - Dashboard/statistics:
+        - Improve/consolidate various admin summary statistics pages,
+          all now under /dashboard. #1834 #1919
+        - Add date range for report generation #1885
+        - CSV export now has token based authentication. #1911
+        - And uses machine-readable dates. #1929
+    - Development improvements:
+        - Add hook for pre-wrapper content.
+        - Include JSON representation of extra fields in category_extras output
+    - UK:
+        - Use SVG logo, inlined on front page. #1887
+        - Inline critical CSS on front page. #1893
+
 * v2.2 (13th September 2017)
     - New features:
         - Body and category names can now be translated in the admin. #1244

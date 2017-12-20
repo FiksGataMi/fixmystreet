@@ -27,7 +27,12 @@ tror medborgaren behöver er uppmärksamhet.</p>
     </tr>
     <tr>
       <th style="[% contact_th_style %]">Epost</th>
-      <td style="[% contact_td_style %]"><a href="mailto:[% email | html %]">[% email | html %]</a></td>
+      <td style="[% contact_td_style %]">
+        [%~ IF email ~%]
+          <a href="mailto:[% email | html %]">[% email | html %]</a>
+        [%~ ELSE ~%]
+        [%~ END ~%]
+      </td>
     </tr>
     [%~ IF phone %]
       <tr>

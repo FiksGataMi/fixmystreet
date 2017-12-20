@@ -24,7 +24,10 @@ sub states {
     my $rs = shift;
 
     my $states = Memcached::get('states');
-    if ($states) {
+    # If tests are run in parallel, the cached state in Memcached could be
+    # corrupted by multiple tests changing it at the same time
+    # uncoverable branch true
+    if ($states && !FixMyStreet->test_mode) {
         # Need to reattach schema
         $states->[0]->result_source->schema( $rs->result_source->schema ) if $states->[0];
         return $states;
@@ -55,7 +58,7 @@ sub fixed { [ $_[0]->_filter(sub { $_->type eq 'fixed' }) ] }
 # This function can be used to return that label's display name.
 
 sub display {
-    my ($rs, $label, $single_fixed) = @_;
+    my ($rs, $label, $single_fixed, $cobrand) = @_;
     my $unchanging = {
         unconfirmed => _("Unconfirmed"),
         hidden => _("Hidden"),
@@ -69,6 +72,10 @@ sub display {
     };
     $label = 'fixed' if $single_fixed && $label =~ /^fixed - (council|user)$/;
     return $unchanging->{$label} if $unchanging->{$label};
+    if ($cobrand && $label eq 'not responsible') {
+        return 'third party responsibility' if $cobrand eq 'bromley';
+        return _("not the council's responsibility");
+    }
     my ($state) = $rs->_filter(sub { $_->label eq $label });
     return $label unless $state;
     $state->name($translate_now->{$label}) if $translate_now->{$label};
