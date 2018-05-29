@@ -22,6 +22,23 @@ $.extend(fixmystreet.utils, {
 
     fixmystreet.maps = fixmystreet.maps || {};
 
+    var drag = {
+        activate: function() {
+            this._drag = new OpenLayers.Control.DragFeatureFMS( fixmystreet.markers, {
+                onComplete: function(feature, e) {
+                    fixmystreet.update_pin( feature.geometry );
+                }
+            } );
+            fixmystreet.map.addControl( this._drag );
+            this._drag.activate();
+        },
+        deactivate: function() {
+            if (this._drag) {
+              this._drag.deactivate();
+            }
+        }
+    };
+
     $.extend(fixmystreet.maps, {
       // This function might be passed either an OpenLayers.LonLat (so has
       // lon and lat), or an OpenLayers.Geometry.Point (so has x and y).
@@ -212,41 +229,50 @@ $.extend(fixmystreet.utils, {
               }
           }
           fixmystreet.markers.redraw();
+      },
+
+      /* Keep track of how many things are loading simultaneously, and only hide
+       * the loading spinner when everything has finished.
+       * This allows multiple layers to be loading at once without each layer
+       * having to keep track of the others or be responsible for manipulating
+       * the spinner in the DOM.
+       */
+      loading_spinner: {
+          count: 0,
+          show: function() {
+              fixmystreet.maps.loading_spinner.count++;
+              if (fixmystreet.maps.loading_spinner.count > 0) {
+                  // Show the loading indicator over the map
+                  $('#loading-indicator').removeClass('hidden');
+                  $('#loading-indicator').attr('aria-hidden', false);
+              }
+          },
+          hide: function() {
+              fixmystreet.maps.loading_spinner.count--;
+              if (fixmystreet.maps.loading_spinner.count <= 0) {
+                  // Remove loading indicator
+                  $('#loading-indicator').addClass('hidden');
+                  $('#loading-indicator').attr('aria-hidden', true);
+              }
+          }
       }
     });
-
-    var drag = {
-        activate: function() {
-            this._drag = new OpenLayers.Control.DragFeatureFMS( fixmystreet.markers, {
-                onComplete: function(feature, e) {
-                    fixmystreet.update_pin( feature.geometry );
-                }
-            } );
-            fixmystreet.map.addControl( this._drag );
-            this._drag.activate();
-        },
-        deactivate: function() {
-            if (this._drag) {
-              this._drag.deactivate();
-            }
-        }
-    };
 
     /* Make sure pins aren't going to reload just because we're zooming out,
      * we already have the pins when the page loaded */
     function zoomToBounds(bounds) {
         if (!bounds) { return; }
-        fixmystreet.markers.strategies[0].deactivate();
+        var strategy = fixmystreet.markers.strategies[0];
+        strategy.deactivate();
         var center = bounds.getCenterLonLat();
         var z = fixmystreet.map.getZoomForExtent(bounds);
-        if ( z < 13 && $('html').hasClass('mobile') ) {
-            z = 13;
-        }
         fixmystreet.map.setCenter(center, z);
         // Reactivate the strategy and make it think it's done an update
-        fixmystreet.markers.strategies[0].activate();
-        fixmystreet.markers.strategies[0].calculateBounds();
-        fixmystreet.markers.strategies[0].resolution = fixmystreet.map.getResolution();
+        strategy.activate();
+        if (strategy instanceof OpenLayers.Strategy.BBOX) {
+            strategy.calculateBounds();
+            strategy.resolution = fixmystreet.map.getResolution();
+        }
     }
 
     function sidebar_highlight(problem_id) {
@@ -542,6 +568,8 @@ $.extend(fixmystreet.utils, {
                 fixmystreet.map.removePopup(fixmystreet.map.popups[0]);
             }
         });
+        fixmystreet.markers.events.register( 'loadstart', null, fixmystreet.maps.loading_spinner.show);
+        fixmystreet.markers.events.register( 'loadend', null, fixmystreet.maps.loading_spinner.hide);
 
         var markers = fixmystreet.maps.markers_list( fixmystreet.pins, true );
         fixmystreet.markers.addFeatures( markers );
@@ -851,19 +879,17 @@ OpenLayers.Protocol.FixMyStreet = OpenLayers.Class(OpenLayers.Protocol.HTTP, {
     use_page: false,
 
     read: function(options) {
-        // Show the loading indicator over the map
-        $('#loading-indicator').removeClass('hidden');
-        $('#loading-indicator').attr('aria-hidden', false);
         // Pass the values of the category, status, and sort fields as query params
+        options.params = options.params || {};
         $.each({ filter_category: 'filter_categories', status: 'statuses', sort: 'sort' }, function(key, id) {
             var val = $('#' + id).val();
             if (val !== undefined) {
-                options.params = options.params || {};
                 options.params[key] = val;
             }
         });
+        var page;
         if (this.use_page) {
-            var page = $('.pagination').data('page');
+            page = $('.pagination').data('page');
             this.use_page = false;
         } else if (this.initial_page) {
             page = 1;
@@ -880,9 +906,7 @@ OpenLayers.Protocol.FixMyStreet = OpenLayers.Class(OpenLayers.Protocol.HTTP, {
 /* Pan data handler */
 OpenLayers.Format.FixMyStreet = OpenLayers.Class(OpenLayers.Format.JSON, {
     read: function(json, filter) {
-        // Remove loading indicator
-        $('#loading-indicator').addClass('hidden');
-        $('#loading-indicator').attr('aria-hidden', true);
+        var obj;
         if (typeof json == 'string') {
             obj = OpenLayers.Format.JSON.prototype.read.apply(this, [json, filter]);
         } else {

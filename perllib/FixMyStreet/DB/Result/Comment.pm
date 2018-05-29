@@ -156,26 +156,6 @@ sub url {
     return "/report/" . $self->problem_id . '#update_' . $self->id;
 }
 
-sub photos {
-    my $self = shift;
-    my $photoset = $self->get_photoset;
-    my $i = 0;
-    my $id = $self->id;
-    my @photos = map {
-        my $cachebust = substr($_, 0, 8);
-        my ($hash, $format) = split /\./, $_;
-        {
-            id => $hash,
-            url_temp => "/photo/temp.$hash.$format",
-            url_temp_full => "/photo/fulltemp.$hash.$format",
-            url => "/photo/c/$id.$i.$format?$cachebust",
-            url_full => "/photo/c/$id.$i.full.$format?$cachebust",
-            idx => $i++,
-        }
-    } $photoset->all_ids;
-    return \@photos;
-}
-
 =head2 latest_moderation_log_entry
 
 Return most recent ModerationLog object
@@ -291,6 +271,31 @@ sub problem_state_display {
     }
 
     return $update_state;
+}
+
+sub is_latest {
+    my $self = shift;
+    my $latest_update = $self->result_source->resultset->search(
+        { problem_id => $self->problem_id, state => 'confirmed' },
+        { order_by => [ { -desc => 'confirmed' }, { -desc => 'id' } ] }
+    )->first;
+    return $latest_update->id == $self->id;
+}
+
+sub hide {
+    my $self = shift;
+
+    my $ret = {};
+
+    # If we're hiding an update, see if it marked as fixed and unfix if so
+    if ($self->mark_fixed && $self->is_latest && $self->problem->state =~ /^fixed/) {
+        $self->problem->state('confirmed');
+        $self->problem->update;
+        $ret->{reopened} = 1;
+    }
+    $self->get_photoset->delete_cached;
+    $self->update({ state => 'hidden' });
+    return $ret;
 }
 
 1;

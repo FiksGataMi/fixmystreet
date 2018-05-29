@@ -19,7 +19,7 @@ verifying email, phone, password.
 
 =cut
 
-sub auto {
+sub auto : Private {
     my ( $self, $c ) = @_;
 
     $c->detach( '/auth/redirect' ) unless $c->user;
@@ -49,10 +49,20 @@ sub change_password : Path('/auth/change_password') {
     my $new = $c->get_param('new_password') // '';
     my $confirm = $c->get_param('confirm') // '';
 
+    my $password_error;
+
+    # Check existing password, if available
+    if ($c->user->password) {
+        my $current = $c->get_param('current_password') // '';
+        $c->stash->{current_password} = $current;
+        $password_error = 'incorrect' unless $c->user->check_password($current);
+    }
+
     # check for errors
-    my $password_error =
+    $password_error ||=
        !$new && !$confirm ? 'missing'
       : $new ne $confirm ? 'mismatch'
+      : !$c->forward('/auth/test_password', [ $new ]) ? 'failed'
       :                    '';
 
     if ($password_error) {
@@ -62,10 +72,17 @@ sub change_password : Path('/auth/change_password') {
         return;
     }
 
-    # we should have a usable password - save it to the user
-    $c->user->obj->update( { password => $new } );
-    $c->stash->{password_changed} = 1;
-
+    if ($c->user->password) {
+        # we should have a usable password - save it to the user
+        $c->user->obj->update( { password => $new } );
+        $c->stash->{password_changed} = 1;
+    } else {
+        # Set up arguments for code sign in
+        $c->set_param('username', $c->user->username);
+        $c->set_param('password_register', $new);
+        $c->set_param('r', 'auth/change_password/success');
+        $c->detach('/auth/code_sign_in');
+    }
 }
 
 =head2 change_email
@@ -148,6 +165,12 @@ sub change_phone_success : Path('/auth/change_phone/success') {
     $c->res->redirect('/my');
 }
 
+sub change_password_success : Path('/auth/change_password/success') {
+    my ( $self, $c ) = @_;
+    $c->flash->{flash_message} = _('Your password has been changed');
+    $c->res->redirect('/my');
+}
+
 sub generate_token : Path('/auth/generate_token') {
     my ($self, $c) = @_;
 
@@ -157,14 +180,34 @@ sub generate_token : Path('/auth/generate_token') {
     $c->stash->{template} = 'auth/generate_token.html';
     $c->forward('/auth/get_csrf_token');
 
+    my $has_2fa = $c->user->get_extra_metadata('2fa_secret');
+
     if ($c->req->method eq 'POST') {
         $c->forward('/auth/check_csrf_token');
-        my $token = mySociety::AuthToken::random_token();
-        $c->user->set_extra_metadata('access_token', $token);
+
+        if ($c->get_param('generate_token')) {
+            my $token = mySociety::AuthToken::random_token();
+            $c->user->set_extra_metadata('access_token', $token);
+            $c->stash->{token_generated} = 1;
+        }
+
+        if ($c->get_param('toggle_2fa') && $c->user->is_superuser) {
+            if ($has_2fa) {
+                $c->user->unset_extra_metadata('2fa_secret');
+                $c->stash->{toggle_2fa_off} = 1;
+            } else {
+                my $auth = Auth::GoogleAuth->new;
+                $c->stash->{qr_code} = $auth->qr_code(undef, $c->user->email, 'FixMyStreet');
+                $c->stash->{secret32} = $auth->secret32;
+                $c->user->set_extra_metadata('2fa_secret', $auth->secret32);
+                $c->stash->{toggle_2fa_on} = 1;
+            }
+        }
+
         $c->user->update();
-        $c->stash->{token_generated} = 1;
     }
 
+    $c->stash->{has_2fa} = $has_2fa ? 1 : 0;
     $c->stash->{existing_token} = $c->user->get_extra_metadata('access_token');
 }
 

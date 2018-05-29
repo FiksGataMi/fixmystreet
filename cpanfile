@@ -13,10 +13,12 @@ requires 'PadWalker', '2.2';
 requires 'aliased', '0.34';
 requires 'Net::SSLeay', '1.81';
 requires 'Module::ScanDeps', '1.24';
+requires 'CGI', '4.38';
 
 # Catalyst itself, and modules/plugins used
 requires 'Catalyst', '5.80031';
 requires 'Catalyst::Action::RenderView';
+requires 'Catalyst::Authentication::Credential::MultiFactor';
 requires 'Catalyst::Authentication::Store::DBIx::Class';
 requires 'Catalyst::Devel';
 requires 'Catalyst::Model::Adaptor';
@@ -29,11 +31,12 @@ requires 'Catalyst::Plugin::Unicode::Encoding';
 requires 'Catalyst::View::TT';
 
 # Modules used by FixMyStreet
+requires 'Auth::GoogleAuth';
 requires 'Authen::SASL';
 requires 'Cache::Memcached';
 requires 'Carp';
-requires 'CGI';
 requires 'Crypt::Eksblowfish::Bcrypt';
+requires 'Data::Password::Common';
 requires 'DateTime';
 requires 'DateTime::Format::HTTP';
 requires 'DateTime::Format::ISO8601';
@@ -81,7 +84,7 @@ requires 'Net::Domain::TLD', '1.75';
 requires 'Net::Facebook::Oauth2', '0.10';
 requires 'Net::OAuth';
 requires 'Net::Twitter::Lite::WithAPIv1_1', '0.12008';
-requires 'Number::Phone';
+requires 'Number::Phone', '3.4003';
 requires 'Path::Class';
 requires 'POSIX';
 requires 'Readonly';

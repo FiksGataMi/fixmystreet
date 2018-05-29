@@ -225,10 +225,7 @@ sub check_and_stash_category : Private {
     my ( $self, $c ) = @_;
 
     my $all_areas = $c->stash->{all_areas};
-    my @bodies = $c->model('DB::Body')->search(
-        { 'body_areas.area_id' => [ keys %$all_areas ], deleted => 0 },
-        { join => 'body_areas' }
-    )->all;
+    my @bodies = $c->model('DB::Body')->active->for_areas(keys %$all_areas)->all;
     my %bodies = map { $_->id => $_ } @bodies;
 
     my @contacts = $c->model('DB::Contact')->not_deleted->search(
@@ -243,7 +240,7 @@ sub check_and_stash_category : Private {
     )->all;
     my @categories = map { { name => $_->category, value => $_->category_display } } @contacts;
     $c->stash->{filter_categories} = \@categories;
-    my %categories_mapped = map { $_ => 1 } @categories;
+    my %categories_mapped = map { $_->{name} => 1 } @categories;
 
     my $categories = [ $c->get_param_list('filter_category', 1) ];
     my %valid_categories = map { $_ => 1 } grep { $_ && $categories_mapped{$_} } @$categories;
@@ -287,11 +284,11 @@ sub map_features : Private {
 
 Handle the ajax calls that the map makes when it is dragged. The info returned
 is used to update the pins on the map and the text descriptions on the side of
-the map.
+the map. Used via /around?ajax=1 but also available at /ajax for mobile app.
 
 =cut
 
-sub ajax : Private {
+sub ajax : Path('/ajax') {
     my ( $self, $c ) = @_;
 
     my $ret = $c->forward('/location/determine_location_from_bbox');

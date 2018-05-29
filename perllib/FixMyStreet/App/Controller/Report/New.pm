@@ -109,8 +109,8 @@ sub report_new : Path : Args(0) {
     return unless $c->forward('check_form_submitted');
 
     $c->forward('/auth/check_csrf_token');
-    $c->forward('process_user');
     $c->forward('process_report');
+    $c->forward('process_user');
     $c->forward('/photo/process_photo');
     return unless $c->forward('check_for_errors');
     $c->forward('save_user_and_report');
@@ -147,8 +147,8 @@ sub report_new_ajax : Path('mobile') : Args(0) {
 
     $c->forward('setup_categories_and_bodies');
     $c->forward('setup_report_extra_fields');
-    $c->forward('process_user');
     $c->forward('process_report');
+    $c->forward('process_user');
     $c->forward('/photo/process_photo');
 
     unless ($c->forward('check_for_errors')) {
@@ -418,7 +418,9 @@ sub report_import : Path('/import') {
 
 sub oauth_callback : Private {
     my ( $self, $c, $token_code ) = @_;
-    $c->stash->{oauth_report} = $token_code;
+    my $auth_token = $c->forward(
+        '/tokens/load_auth_token', [ $token_code, 'problem/social' ]);
+    $c->stash->{oauth_report} = $auth_token->data;
     $c->detach('report_new');
 }
 
@@ -475,9 +477,7 @@ sub initialize_report : Private {
     }
 
     if (!$report && $c->stash->{oauth_report}) {
-        my $auth_token = $c->forward( '/tokens/load_auth_token',
-            [ $c->stash->{oauth_report}, 'problem/social' ] );
-        $report = $c->model("DB::Problem")->new($auth_token->data);
+        $report = $c->model("DB::Problem")->new($c->stash->{oauth_report});
     }
 
     if ($report) {
@@ -617,10 +617,7 @@ sub setup_categories_and_bodies : Private {
     my $all_areas = $c->stash->{all_areas};
     my $first_area = ( values %$all_areas )[0];
 
-    my @bodies = $c->model('DB::Body')->search(
-        { 'body_areas.area_id' => [ keys %$all_areas ], deleted => 0 },
-        { join => 'body_areas' }
-    )->all;
+    my @bodies = $c->model('DB::Body')->active->for_areas(keys %$all_areas)->all;
     my %bodies = map { $_->id => $_ } @bodies;
     my $first_body = ( values %bodies )[0];
 
@@ -775,7 +772,7 @@ sub process_user : Private {
     if ( $c->user_exists ) { {
         my $user = $c->user->obj;
 
-        if ($c->stash->{contributing_as_another_user} = $user->contributing_as('another_user', $c, $c->stash->{bodies})) {
+        if ($c->stash->{contributing_as_another_user}) {
             # Act as if not logged in (and it will be auto-confirmed later on)
             $report->user(undef);
             last;
@@ -784,8 +781,7 @@ sub process_user : Private {
         $report->user( $user );
         $c->forward('update_user', [ \%params ]);
 
-        if ($c->stash->{contributing_as_body} = $user->contributing_as('body', $c, $c->stash->{bodies}) or
-            $c->stash->{contributing_as_anonymous_user} = $user->contributing_as('anonymous_user', $c, $c->stash->{bodies})) {
+        if ($c->stash->{contributing_as_body} or $c->stash->{contributing_as_anonymous_user}) {
             $report->name($user->from_body->name);
             $user->name($user->from_body->name) unless $user->name;
             $c->stash->{no_reporter_alert} = 1;
@@ -794,14 +790,27 @@ sub process_user : Private {
         return 1;
     } }
 
+    if ( $c->stash->{contributing_as_another_user} && !$params{username} ) {
+        # If the 'username' (i.e. email) field is blank, then use the phone
+        # field for the username.
+        $params{username} = $params{phone};
+    }
+
     my $parsed = FixMyStreet::SMS->parse_username($params{username});
     my $type = $parsed->{type} || 'email';
-    $type = 'email' unless FixMyStreet->config('SMS_AUTHENTICATION');
+    $type = 'email' unless FixMyStreet->config('SMS_AUTHENTICATION') || $c->stash->{contributing_as_another_user};
     $report->user( $c->model('DB::User')->find_or_new( { $type => $parsed->{username} } ) )
         unless $report->user;
 
+    $c->stash->{phone_may_be_mobile} = $type eq 'phone' && $parsed->{may_be_mobile};
+
     # The user is trying to sign in. We only care about username from the params.
     if ( $c->get_param('submit_sign_in') || $c->get_param('password_sign_in') ) {
+        $c->stash->{tfa_data} = {
+            detach_to => '/report/new/report_new',
+            login_success => 1,
+            oauth_report => { $report->get_inflated_columns }
+        };
         unless ( $c->forward( '/auth/sign_in', [ $params{username} ] ) ) {
             $c->stash->{field_errors}->{password} = _('There was a problem with your login information. If you cannot remember your password, or do not have one, please fill in the &lsquo;No&rsquo; section of the form.');
             return 1;
@@ -816,8 +825,10 @@ sub process_user : Private {
     }
 
     $c->forward('update_user', [ \%params ]);
-    $report->user->password( Utils::trim_text( $params{password_register} ) )
-        if $params{password_register};
+    if ($params{password_register}) {
+        $c->forward('/auth/test_password', [ $params{password_register} ]);
+        $report->user->password(Utils::trim_text($params{password_register}));
+    }
 
     return 1;
 }
@@ -869,6 +880,13 @@ sub process_report : Private {
     $report->latitude( $c->stash->{latitude} );
     $report->longitude( $c->stash->{longitude} );
     $report->send_questionnaire( $c->cobrand->send_questionnaires() );
+
+    if ( $c->user_exists ) {
+        my $user = $c->user->obj;
+        $c->stash->{contributing_as_another_user} = $user->contributing_as('another_user', $c, $c->stash->{bodies});
+        $c->stash->{contributing_as_body} = $user->contributing_as('body', $c, $c->stash->{bodies});
+        $c->stash->{contributing_as_anonymous_user} = $user->contributing_as('anonymous_user', $c, $c->stash->{bodies});
+    }
 
     # set some simple bool values (note they get inverted)
     if ($c->stash->{contributing_as_body}) {
@@ -960,7 +978,7 @@ sub contacts_to_bodies : Private {
 
     my @contacts = grep { $_->category eq $category } @{$c->stash->{contacts}};
 
-    if ($c->stash->{unresponsive}{$category} || $c->stash->{unresponsive}{ALL}) {
+    if ($c->stash->{unresponsive}{$category} || $c->stash->{unresponsive}{ALL} || !@contacts) {
         [];
     } else {
         if ( $c->cobrand->call_hook('singleton_bodies_str') ) {
@@ -1064,6 +1082,12 @@ sub check_for_errors : Private {
     if ( $c->stash->{is_social_user} ) {
         delete $field_errors{name};
         delete $field_errors{username};
+    }
+
+    # if we're contributing as someone else then allow landline numbers
+    if ( $field_errors{phone} && $c->stash->{contributing_as_another_user} && !$c->stash->{phone_may_be_mobile}) {
+        delete $field_errors{username};
+        delete $field_errors{phone};
     }
 
     # add the photo error if there is one.
@@ -1374,10 +1398,11 @@ sub redirect_or_confirm_creation : Private {
     if ( $report->confirmed ) {
         # Subscribe problem reporter to email updates
         $c->forward( 'create_reporter_alert' );
-        if ($c->stash->{contributing_as_another_user}) {
-            $c->send_email( 'other-reported.txt', {
-                to => [ [ $report->user->email, $report->name ] ],
-            } );
+        if ($c->stash->{contributing_as_another_user} && $report->user->email
+            && !$c->cobrand->report_sent_confirmation_email) {
+                $c->send_email( 'other-reported.txt', {
+                    to => [ [ $report->user->email, $report->name ] ],
+                } );
         }
         # If the user has shortlist permission, and either we're not on a
         # council cobrand or the just-created problem is owned by the cobrand
@@ -1393,6 +1418,9 @@ sub redirect_or_confirm_creation : Private {
         }
         return 1;
     }
+
+    # Superusers using 2FA can not log in by code
+    $c->detach( '/page_error_403_access_denied', [] ) if $report->user->has_2fa;
 
     # otherwise email or text a confirm token to them.
     my $thing = 'email';

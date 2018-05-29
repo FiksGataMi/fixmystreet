@@ -39,7 +39,7 @@ subtest "Body user, has permission to add report as council" => sub {
 };
 
 my @users;
-subtest "Body user, has permission to add report as another user" => sub {
+subtest "Body user, has permission to add report as another user with email" => sub {
     my $report = add_report(
         'contribute_as_another_user',
         form_as => 'another_user',
@@ -57,7 +57,49 @@ subtest "Body user, has permission to add report as another user" => sub {
     push @users, $report->user;
 };
 
-subtest "Body user, has permission to add report as another (existing) user" => sub {
+subtest "Body user, has permission to add report as another user with mobile phone number" => sub {
+    my $report = add_report(
+        'contribute_as_another_user',
+        form_as => 'another_user',
+        title => "Test Report",
+        detail => 'Test report details.',
+        category => 'Potholes',
+        name => 'Another User',
+        username => '07906 111111',
+    );
+    is $report->name, 'Another User', 'report name is given name';
+    is $report->user->name, 'Another User', 'user name matches';
+    is $report->user->phone, '+447906111111', 'user phone correct';
+    is $report->user->phone_verified, 1, 'user phone verified';
+    is $report->user->email, undef, 'user email correct';
+    is $report->user->email_verified, 0, 'user email not verified';
+    isnt $report->user->id, $user->id, 'user does not match';
+    $mech->email_count_is(0);
+    push @users, $report->user;
+};
+
+subtest "Body user, has permission to add report as another user with landline number" => sub {
+    my $report = add_report(
+        'contribute_as_another_user',
+        form_as => 'another_user',
+        title => "Test Report",
+        detail => 'Test report details.',
+        category => 'Potholes',
+        name => 'Another User',
+        username => '01685 222222',
+    );
+    is $report->name, 'Another User', 'report name is given name';
+    is $report->user->name, 'Another User', 'user name matches';
+    is $report->user->phone, '+441685222222', 'user phone correct';
+    is $report->user->phone_verified, 1, 'user phone verified';
+    is $report->user->email, undef, 'user email correct';
+    is $report->user->email_verified, 0, 'user email not verified';
+    isnt $report->user->id, $user->id, 'user does not match';
+    $mech->email_count_is(0);
+    push @users, $report->user;
+};
+
+subtest "Body user, has permission to add report as another (existing) user with email" => sub {
     $mech->create_user_ok('existing@example.net', name => 'Existing User');
     my $report = add_report(
         'contribute_as_another_user',
@@ -73,6 +115,25 @@ subtest "Body user, has permission to add report as another (existing) user" => 
     is $report->user->email, 'existing@example.net', 'user email correct';
     isnt $report->user->id, $user->id, 'user does not match';
     like $mech->get_text_body_from_email, qr/Your report to Oxfordshire County Council has been logged/;
+    push @users, $report->user;
+};
+
+subtest "Body user, has permission to add report as another (existing) user with phone" => sub {
+    $mech->create_user_ok('+447906333333', name => 'Existing User');
+    my $report = add_report(
+        'contribute_as_another_user',
+        form_as => 'another_user',
+        title => "Test Report",
+        detail => 'Test report details.',
+        category => 'Potholes',
+        name => 'Existing Yooser',
+        username => '07906 333333',
+    );
+    is $report->name, 'Existing Yooser', 'report name is given name';
+    is $report->user->name, 'Existing User', 'user name remains same';
+    is $report->user->phone, '+447906333333', 'user phone correct';
+    isnt $report->user->id, $user->id, 'user does not match';
+    $mech->email_count_is(0);
     push @users, $report->user;
 };
 
@@ -102,7 +163,7 @@ subtest "Body user, has permission to add update as council" => sub {
     is $update->anonymous, 0, 'update not anonymous';
 };
 
-subtest "Body user, has permission to add update as another user" => sub {
+subtest "Body user, has permission to add update as another user with email" => sub {
     my $update = add_update(
         'contribute_as_another_user',
         form_as => 'another_user',
@@ -118,7 +179,39 @@ subtest "Body user, has permission to add update as another user" => sub {
     push @users, $update->user;
 };
 
-subtest "Body user, has permission to add update as another (existing) user" => sub {
+subtest "Body user, has permission to add update as another user with mobile phone" => sub {
+    my $update = add_update(
+        'contribute_as_another_user',
+        form_as => 'another_user',
+        update => 'Test Update',
+        name => 'Another User',
+        username => '07906 444444',
+    );
+    is $update->name, 'Another User', 'update name is given name';
+    is $update->user->name, 'Another User', 'user name matches';
+    is $update->user->phone, '+447906444444', 'user phone correct';
+    isnt $update->user->id, $user->id, 'user does not match';
+    $mech->email_count_is(0);
+    push @users, $update->user;
+};
+
+subtest "Body user, has permission to add update as another user with landline phone" => sub {
+    my $update = add_update(
+        'contribute_as_another_user',
+        form_as => 'another_user',
+        update => 'Test Update',
+        name => 'Another User',
+        username => '01685 555555',
+    );
+    is $update->name, 'Another User', 'update name is given name';
+    is $update->user->name, 'Another User', 'user name matches';
+    is $update->user->phone, '+441685555555', 'user phone correct';
+    isnt $update->user->id, $user->id, 'user does not match';
+    $mech->email_count_is(0);
+    push @users, $update->user;
+};
+
+subtest "Body user, has permission to add update as another (existing) user with email" => sub {
     my $update = add_update(
         'contribute_as_another_user',
         form_as => 'another_user',
@@ -131,6 +224,21 @@ subtest "Body user, has permission to add update as another (existing) user" => 
     is $update->user->email, 'existing@example.net', 'user email correct';
     isnt $update->user->id, $user->id, 'user does not match';
     like $mech->get_text_body_from_email, qr/Your update has been logged/;
+};
+
+subtest "Body user, has permission to add update as another (existing) user with phone" => sub {
+    my $update = add_update(
+        'contribute_as_another_user',
+        form_as => 'another_user',
+        update => 'Test Update',
+        name => 'Existing Yooser',
+        username => '07906 333333',
+    );
+    is $update->name, 'Existing Yooser', 'update name is given name';
+    is $update->user->name, 'Existing User', 'user name remains same';
+    is $update->user->phone, '+447906333333', 'user phone correct';
+    isnt $update->user->id, $user->id, 'user does not match';
+    $mech->email_count_is(0);
 };
 
 subtest "Body user, has permission to add update as anonymous user" => sub {
@@ -155,6 +263,7 @@ sub start_report {
     FixMyStreet::override_config {
         ALLOWED_COBRANDS => [ 'fixmystreet' ],
         MAPIT_URL => 'http://mapit.uk/',
+        PHONE_COUNTRY => 'GB',
     }, sub {
         $mech->get_ok('/report/new?latitude=51.7549262252&longitude=-1.25617899435');
     };
@@ -166,6 +275,7 @@ sub add_report {
     FixMyStreet::override_config {
         ALLOWED_COBRANDS => [ 'fixmystreet' ],
         MAPIT_URL => 'http://mapit.uk/',
+        PHONE_COUNTRY => 'GB',
     }, sub {
         dropdown_shown(1);
         $mech->submit_form_ok({
@@ -184,16 +294,28 @@ sub start_update {
     $_->delete for $user->user_body_permissions;
     $user->user_body_permissions->create({ body => $body, permission_type => $permission })
         if $permission;
-    $mech->get_ok('/report/' . $report_to_update->id);
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => [ 'fixmystreet' ],
+        MAPIT_URL => 'http://mapit.uk/',
+        PHONE_COUNTRY => 'GB',
+    }, sub {
+        $mech->get_ok('/report/' . $report_to_update->id);
+    };
 }
 
 sub add_update {
     my ($permission, %fields) = @_;
     start_update($permission);
-    dropdown_shown(1, 'updateForm');
-    $mech->submit_form_ok({
-        with_fields => \%fields,
-    }, "submit details");
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => [ 'fixmystreet' ],
+        MAPIT_URL => 'http://mapit.uk/',
+        PHONE_COUNTRY => 'GB',
+    }, sub {
+        dropdown_shown(1, 'updateForm');
+        $mech->submit_form_ok({
+            with_fields => \%fields,
+        }, "submit details");
+    };
     $mech->content_contains('Thank you for updating this issue');
     my $update = FixMyStreet::DB->resultset("Comment")->search(undef, { order_by => { -desc => 'id' } })->first;
     ok $update, "Found the update";

@@ -125,11 +125,15 @@ with 'FixMyStreet::Roles::Extra';
 
 __PACKAGE__->many_to_many( planned_reports => 'user_planned_reports', 'report' );
 
+sub cost {
+    FixMyStreet->test_mode ? 1 : 12;
+}
+
 __PACKAGE__->add_columns(
     "password" => {
         encode_column => 1,
         encode_class => 'Crypt::Eksblowfish::Bcrypt',
-        encode_args => { cost => 8 },
+        encode_args => { cost => cost() },
         encode_check_method => 'check_password',
     },
 );
@@ -150,8 +154,9 @@ sub username {
 sub phone_display {
     my $self = shift;
     return $self->phone unless $self->phone;
+    my $country = FixMyStreet->config('PHONE_COUNTRY');
     my $parsed = FixMyStreet::SMS->parse_username($self->phone);
-    return $parsed->{phone} ? $parsed->{phone}->format : $self->phone;
+    return $parsed->{phone} ? $parsed->{phone}->format_for_country($country) : $self->phone;
 }
 
 sub latest_anonymity {
@@ -195,9 +200,13 @@ sub check_for_errors {
     } elsif ($self->phone_verified) {
         my $parsed = FixMyStreet::SMS->parse_username($self->phone);
         if (!$parsed->{phone}) {
+            # Errors with the phone number may apply to both the username or
+            # phone field depending on the form.
             $errors{username} = _('Please check your phone number is correct');
+            $errors{phone} = _('Please check your phone number is correct');
         } elsif (!$parsed->{may_be_mobile}) {
             $errors{username} = _('Please enter a mobile number');
+            $errors{phone} = _('Please enter a mobile number');
         }
     }
 
@@ -393,6 +402,11 @@ sub admin_user_body_permissions {
     return $self->user_body_permissions->search({
         permission_type => { '!=' => 'trusted' },
     });
+}
+
+sub has_2fa {
+    my $self = shift;
+    return $self->is_superuser && $self->get_extra_metadata('2fa_secret');
 }
 
 sub contributing_as {

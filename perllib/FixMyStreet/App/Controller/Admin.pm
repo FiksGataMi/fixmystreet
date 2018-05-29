@@ -892,7 +892,7 @@ sub report_edit : Path('report_edit') : Args(1) {
             $self->remove_photo($c, $problem, $remove_photo_param);
         }
 
-        if ( $remove_photo_param || $problem->state eq 'hidden' ) {
+        if ($problem->state eq 'hidden') {
             $problem->get_photoset->delete_cached;
         }
 
@@ -1274,8 +1274,14 @@ sub update_edit : Path('update_edit') : Args(1) {
             $self->remove_photo($c, $update, $remove_photo_param);
         }
 
-        if ( $remove_photo_param || $new_state eq 'hidden' ) {
-            $update->get_photoset->delete_cached;
+        $c->stash->{status_message} = '<p><em>' . _('Updated!') . '</em></p>';
+
+        # Must call update->hide while it's not hidden (so is_latest works)
+        if ($new_state eq 'hidden') {
+            my $outcome = $update->hide;
+            $c->stash->{status_message} .=
+              '<p><em>' . _('Problem marked as open.') . '</em></p>'
+                if $outcome->{reopened};
         }
 
         $update->name( $c->get_param('name') || '' );
@@ -1295,19 +1301,6 @@ sub update_edit : Path('update_edit') : Args(1) {
         }
 
         $update->update;
-
-        $c->stash->{status_message} = '<p><em>' . _('Updated!') . '</em></p>';
-
-        # If we're hiding an update, see if it marked as fixed and unfix if so
-        if ( $new_state eq 'hidden' && $update->mark_fixed ) {
-            if ( $update->problem->state =~ /^fixed/ ) {
-                $update->problem->state('confirmed');
-                $update->problem->update;
-            }
-
-            $c->stash->{status_message} .=
-              '<p><em>' . _('Problem marked as open.') . '</em></p>';
-        }
 
         if ( $new_state ne $old_state ) {
             $c->forward( 'log_edit',
@@ -1426,11 +1419,19 @@ sub user_edit : Path('user_edit') : Args(1) {
             '<p><em>' . $c->flash->{status_message} . '</em></p>';
     }
 
+    $c->forward('/auth/check_csrf_token') if $c->get_param('submit');
+
     if ( $c->get_param('submit') and $c->get_param('unban') ) {
-        $c->forward('/auth/check_csrf_token');
         $c->forward('unban_user', [ $user ]);
+    } elsif ( $c->get_param('submit') and $c->get_param('logout_everywhere') ) {
+        $c->forward('user_logout_everywhere', [ $user ]);
+    } elsif ( $c->get_param('submit') and $c->get_param('anon_everywhere') ) {
+        $c->forward('user_anon_everywhere', [ $user ]);
+    } elsif ( $c->get_param('submit') and $c->get_param('hide_everywhere') ) {
+        $c->forward('user_hide_everywhere', [ $user ]);
+    } elsif ( $c->get_param('submit') and $c->get_param('remove_account') ) {
+        $c->forward('user_remove_account', [ $user ]);
     } elsif ( $c->get_param('submit') ) {
-        $c->forward('/auth/check_csrf_token');
 
         my $edited = 0;
 
@@ -1759,6 +1760,58 @@ sub ban_user : Private {
     return 1;
 }
 
+sub user_logout_everywhere : Private {
+    my ( $self, $c, $user ) = @_;
+    my $sessions = $user->get_extra_metadata('sessions');
+    foreach (grep { $_ ne $c->sessionid } @$sessions) {
+        $c->delete_session_data("session:$_");
+    }
+    $c->stash->{status_message} = _('That user has been logged out.');
+}
+
+sub user_anon_everywhere : Private {
+    my ( $self, $c, $user ) = @_;
+    $user->problems->update({anonymous => 1});
+    $user->comments->update({anonymous => 1});
+    $c->stash->{status_message} = _('That user has been made anonymous on all reports and updates.');
+}
+
+sub user_hide_everywhere : Private {
+    my ( $self, $c, $user ) = @_;
+    my $problems = $user->problems->search({ state => { '!=' => 'hidden' } });
+    while (my $problem = $problems->next) {
+        $problem->get_photoset->delete_cached;
+        $problem->update({ state => 'hidden' });
+    }
+    my $updates = $user->comments->search({ state => { '!=' => 'hidden' } });
+    while (my $update = $updates->next) {
+        $update->hide;
+    }
+    $c->stash->{status_message} = _('That user’s reports and updates have been hidden.');
+}
+
+# Anonymize and remove name from all problems/updates, disable all alerts.
+# Remove their account's email address, phone number, password, etc.
+sub user_remove_account : Private {
+    my ( $self, $c, $user ) = @_;
+    $c->forward('user_logout_everywhere', [ $user ]);
+    $user->problems->update({ anonymous => 1, name => '', send_questionnaire => 0 });
+    $user->comments->update({ anonymous => 1, name => '' });
+    $user->alerts->update({ whendisabled => \'current_timestamp' });
+    $user->password('', 1);
+    $user->update({
+        email => 'removed-' . $user->id . '@' . FixMyStreet->config('EMAIL_DOMAIN'),
+        email_verified => 0,
+        name => '',
+        phone => '',
+        phone_verified => 0,
+        title => undef,
+        twitter_id => undef,
+        facebook_id => undef,
+    });
+    $c->stash->{status_message} = _('That user’s personal details have been removed.');
+}
+
 sub unban_user : Private {
     my ( $self, $c, $user ) = @_;
 
@@ -1904,6 +1957,7 @@ sub remove_photo : Private {
     my ($self, $c, $object, $keys) = @_;
     if ($keys eq 'ALL') {
         $object->photo(undef);
+        $object->get_photoset->delete_cached;
     } else {
         my $fileids = $object->get_photoset->remove_images($keys);
         $object->photo($fileids);
@@ -1938,11 +1992,9 @@ sub check_page_allowed : Private {
 sub fetch_all_bodies : Private {
     my ($self, $c ) = @_;
 
-    my @bodies = $c->model('DB::Body')->all_translated;
+    my @bodies = $c->model('DB::Body')->translated->all_sorted;
     if ( $c->cobrand->moniker eq 'zurich' ) {
         @bodies = $c->cobrand->admin_fetch_all_bodies( @bodies );
-    } else {
-        @bodies = sort { strcoll($a->name, $b->name) } @bodies;
     }
     $c->stash->{bodies} = \@bodies;
 
@@ -1952,20 +2004,15 @@ sub fetch_all_bodies : Private {
 sub fetch_body_areas : Private {
     my ($self, $c, $body ) = @_;
 
-    my $body_area = $body->body_areas->first;
-
-    unless ( $body_area ) {
+    my $children = $body->first_area_children;
+    unless ($children) {
         # Body doesn't have any areas defined.
         delete $c->stash->{areas};
         delete $c->stash->{fetched_areas_body_id};
         return;
     }
 
-    my $areas = mySociety::MaPit::call('area/children', [ $body_area->area_id ],
-        type => $c->cobrand->area_types_children,
-    );
-
-    $c->stash->{areas} = [ sort { strcoll($a->{name}, $b->{name}) } values %$areas ];
+    $c->stash->{areas} = [ sort { strcoll($a->{name}, $b->{name}) } values %$children ];
     # Keep track of the areas we've fetched to prevent a duplicate fetch later on
     $c->stash->{fetched_areas_body_id} = $body->id;
 }

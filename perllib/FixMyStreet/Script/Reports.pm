@@ -45,6 +45,7 @@ sub send(;$) {
     while (my $row = $unsent->next) {
 
         my $cobrand = FixMyStreet::Cobrand->get_class_for_moniker($row->cobrand)->new();
+        FixMyStreet::DB->schema->cobrand($cobrand);
 
         if ($debug_mode) {
             $debug_unsent_count++;
@@ -105,10 +106,6 @@ sub send(;$) {
              $row->user->email eq $cobrand->anonymous_account->{'email'}
          ) {
             $h{anonymous_report} = 1;
-            $h{user_details} = _('This report was submitted anonymously');
-        } else {
-            $h{user_details} = sprintf(_('Name: %s'), $row->name) . "\n\n";
-            $h{user_details} .= sprintf(_('Email: %s'), $row->user->email) . "\n\n";
         }
 
         $cobrand->call_hook(process_additional_metadata_for_email => $row, \%h);
@@ -158,7 +155,7 @@ sub send(;$) {
                 }
             }
 
-            if ( $reporters{ $sender }->should_skip( $row ) ) {
+            if ( $reporters{ $sender }->should_skip( $row, $debug_mode ) ) {
                 $skip = 1;
                 debug_print("skipped by sender " . $sender_info->{method} . " (might be due to previous failed attempts?)", $row->id) if $debug_mode;
             } else {
@@ -309,9 +306,9 @@ sub _send_report_sent_email {
         $h,
         {
             To => $row->user->email,
-            From => [ FixMyStreet->config('CONTACT_EMAIL'), $cobrand->contact_name ],
+            From => [ $cobrand->contact_email, $cobrand->contact_name ],
         },
-        FixMyStreet->config('CONTACT_EMAIL'),
+        $cobrand->contact_email,
         $nomail,
         $cobrand,
         $row->lang,

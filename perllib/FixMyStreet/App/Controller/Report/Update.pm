@@ -125,12 +125,19 @@ sub process_user : Private {
 
     my $parsed = FixMyStreet::SMS->parse_username($params{username});
     my $type = $parsed->{type} || 'email';
-    $type = 'email' unless FixMyStreet->config('SMS_AUTHENTICATION');
+    $type = 'email' unless FixMyStreet->config('SMS_AUTHENTICATION') || $c->stash->{contributing_as_another_user};
     $update->user( $c->model('DB::User')->find_or_new( { $type => $parsed->{username} } ) )
         unless $update->user;
 
+    $c->stash->{phone_may_be_mobile} = $type eq 'phone' && $parsed->{may_be_mobile};
+
     # The user is trying to sign in. We only care about username from the params.
     if ( $c->get_param('submit_sign_in') || $c->get_param('password_sign_in') ) {
+        $c->stash->{tfa_data} = {
+            detach_to => '/report/update/report_update',
+            login_success => 1,
+            oauth_update => { $update->get_inflated_columns }
+        };
         unless ( $c->forward( '/auth/sign_in', [ $params{username} ] ) ) {
             $c->stash->{field_errors}->{password} = _('There was a problem with your login information. If you cannot remember your password, or do not have one, please fill in the &lsquo;No&rsquo; section of the form.');
             return 1;
@@ -144,10 +151,13 @@ sub process_user : Private {
 
     $update->user->name( Utils::trim_text( $params{name} ) )
         if $params{name};
-    $update->user->password( Utils::trim_text( $params{password_register} ) )
-        if $params{password_register};
     $update->user->title( Utils::trim_text( $params{fms_extra_title} ) )
         if $params{fms_extra_title};
+
+    if ($params{password_register}) {
+        $c->forward('/auth/test_password', [ $params{password_register} ]);
+        $update->user->password(Utils::trim_text($params{password_register}));
+    }
 
     return 1;
 }
@@ -161,7 +171,9 @@ what we have so far.
 
 sub oauth_callback : Private {
     my ( $self, $c, $token_code ) = @_;
-    $c->stash->{oauth_update} = $token_code;
+    my $auth_token = $c->forward('/tokens/load_auth_token',
+        [ $token_code, 'update/social' ]);
+    $c->stash->{oauth_update} = $auth_token->data;
     $c->detach('report_update');
 }
 
@@ -176,9 +188,7 @@ sub initialize_update : Private {
 
     my $update;
     if ($c->stash->{oauth_update}) {
-        my $auth_token = $c->forward( '/tokens/load_auth_token',
-            [ $c->stash->{oauth_update}, 'update/social' ] );
-        $update = $c->model("DB::Comment")->new($auth_token->data);
+        $update = $c->model("DB::Comment")->new($c->stash->{oauth_update});
     }
 
     if ($update) {
@@ -356,6 +366,12 @@ sub check_for_errors : Private {
         delete $field_errors{username};
     }
 
+    # if we're contributing as someone else then allow landline numbers
+    if ( $field_errors{phone} && $c->stash->{contributing_as_another_user} && !$c->stash->{phone_may_be_mobile}) {
+        delete $field_errors{username};
+        delete $field_errors{phone};
+    }
+
     if ( my $photo_error  = delete $c->stash->{photo_error} ) {
         $field_errors{photo} = $photo_error;
     }
@@ -469,7 +485,7 @@ sub redirect_or_confirm_creation : Private {
     if ( $update->confirmed ) {
         $c->forward( 'update_problem' );
         $c->forward( 'signup_for_alerts' );
-        if ($c->stash->{contributing_as_another_user}) {
+        if ($c->stash->{contributing_as_another_user} && $update->user->email) {
             $c->send_email( 'other-updated.txt', {
                 to => [ [ $update->user->email, $update->name ] ],
             } );
@@ -477,6 +493,9 @@ sub redirect_or_confirm_creation : Private {
         $c->stash->{template} = 'tokens/confirm_update.html';
         return 1;
     }
+
+    # Superusers using 2FA can not log in by code
+    $c->detach( '/page_error_403_access_denied', [] ) if $update->user->has_2fa;
 
     my $data = $c->stash->{token_data};
     $data->{id} = $update->id;

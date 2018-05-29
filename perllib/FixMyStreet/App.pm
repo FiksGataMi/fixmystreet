@@ -18,13 +18,14 @@ use URI;
 use URI::QueryParam;
 
 use Catalyst (
-    'Static::Simple',    #
+    'Static::Simple',
     'Unicode::Encoding',
     'Session',
     'Session::Store::DBIC',
     'Session::State::Cookie',    # FIXME - we're using our own override atm
     'Authentication',
     'SmartURI',
+    'FixMyStreet::Session::StoreSessions',
 );
 
 extends 'Catalyst';
@@ -61,10 +62,19 @@ __PACKAGE__->config(
     'Plugin::Authentication' => {
         default_realm => 'default',
         default       => {
-            credential => {    # Catalyst::Authentication::Credential::Password
-                class              => 'Password',
-                password_field     => 'password',
-                password_type      => 'self_check',
+            credential => {
+                class => 'MultiFactor',
+                factors => [
+                  # Catalyst::Authentication::Credential::Password
+                  {
+                      class => 'Password',
+                      password_field => 'password',
+                      password_type => 'self_check',
+                  },
+                  {
+                      class => '2FA',
+                  },
+                ],
             },
             store => {         # Catalyst::Authentication::Store::DBIx::Class
                 class      => 'DBIx::Class',

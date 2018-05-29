@@ -8,7 +8,7 @@ LWP::Protocol::PSGI->register($twilio->to_psgi_app, host => 'api.twilio.com');
 
 my $test_email    = 'test@example.com';
 my $test_email2   = 'test@example.net';
-my $test_password = 'foobar';
+my $test_password = 'foobar123';
 
 END {
     done_testing();
@@ -75,9 +75,68 @@ subtest "Test change password page" => sub {
         {
             form_name => 'change_password',
             fields =>
-              { new_password => $test_password, confirm => $test_password, },
+              { new_password => 'new_password', confirm => 'new_password', },
         },
-        "change_password with '$test_password' and '$test_password'"
+        "change_password with 'new_password' and 'new_password'"
+    );
+    is $mech->uri->path, '/auth/change_password',
+      "still on change password page";
+    $mech->content_contains('check your email');
+
+    $link = $mech->get_link_from_email;
+    $mech->get_ok($link);
+    is $mech->uri->path, '/my', "redirected to /my";
+
+    $mech->content_contains( 'password has been changed',
+        "found password changed" );
+
+    $user->discard_changes();
+    ok $user->password, "user now has a password";
+};
+
+# Change password, when already got one
+subtest "Test change password page with current password" => sub {
+    $mech->get_ok('/auth/change_password');
+
+    ok my $form = $mech->form_name('change_password'),
+      "found change password form";
+    is_deeply [ sort grep { $_ } map { $_->name } $form->inputs ],    #
+      [ 'confirm', 'current_password', 'new_password', 'token' ],
+      "check we got expected fields (ie not old_password)";
+
+    # check the various ways the form can be wrong
+    for my $test (
+        { current => '', new => '', conf => '', err => 'check the passwords', },
+        { current => 'new_password', new => '', conf => '', err => 'enter a password', },
+        { current => 'new_password', new => 'secret', conf => '', err => 'do not match', },
+        { current => 'new_password', new => '', conf => 'secret', err => 'do not match', },
+        { current => 'new_password', new => 'secret', conf => 'not_secret', err => 'do not match', },
+      )
+    {
+        $mech->get_ok('/auth/change_password');
+        $mech->content_lacks( $test->{err}, "did not find expected error" );
+        $mech->submit_form_ok(
+            {
+                form_name => 'change_password',
+                fields =>
+                  { current_password => $test->{current}, new_password => $test->{new}, confirm => $test->{conf}, },
+            },
+            "change_password with '$test->{current}', '$test->{new}' and '$test->{conf}'"
+        );
+        $mech->content_contains( $test->{err}, "found expected error" );
+    }
+
+    my $user = FixMyStreet::App->model('DB::User')->find( { email => $test_email } );
+    ok $user, "got a user";
+
+    $mech->get_ok('/auth/change_password');
+    $mech->submit_form_ok(
+        {
+            form_name => 'change_password',
+            fields =>
+              { current_password => 'new_password', new_password => $test_password, confirm => $test_password },
+        },
+        "change_password with 'new_password' and '$test_password'"
     );
     is $mech->uri->path, '/auth/change_password',
       "still on change password page";
@@ -86,6 +145,20 @@ subtest "Test change password page" => sub {
 
     $user->discard_changes();
     ok $user->password, "user now has a password";
+};
+
+subtest 'check password length/common' => sub {
+    $mech->get_ok('/auth/change_password');
+    $mech->submit_form_ok({
+        form_name => 'change_password',
+        fields => { current_password => $test_password, new_password => 'short', confirm => 'short' },
+    });
+    $mech->content_contains("Please make sure your password is at least");
+    $mech->submit_form_ok({
+        form_name => 'change_password',
+        fields => { current_password => $test_password, new_password => 'common', confirm => 'common' },
+    });
+    $mech->content_contains("Please choose a less commonly-used password");
 };
 
 subtest "Test change email page" => sub {
@@ -274,7 +347,7 @@ subtest "Test superuser can access generate token page" => sub {
         },
     });
 
-    $mech->content_lacks('Generate token');
+    $mech->content_lacks('Security');
 
     $mech->get('/auth/generate_token');
     is $mech->res->code, 403, "access denied";
@@ -282,7 +355,7 @@ subtest "Test superuser can access generate token page" => sub {
     ok $user->update({ is_superuser => 1 }), 'user is superuser';
 
     $mech->get_ok('/my');
-    $mech->content_contains('Generate token');
+    $mech->content_contains('Security');
     $mech->get_ok('/auth/generate_token');
 };
 
@@ -299,7 +372,7 @@ subtest "Test staff user can access generate token page" => sub {
         },
     });
 
-    $mech->content_lacks('Generate token');
+    $mech->content_lacks('Security');
 
     my $body = $mech->create_body_ok(2237, 'Oxfordshire');
 
@@ -309,7 +382,7 @@ subtest "Test staff user can access generate token page" => sub {
     ok $user->update({ from_body => $body }), 'user is staff user';
 
     $mech->get_ok('/my');
-    $mech->content_contains('Generate token');
+    $mech->content_contains('Security');
     $mech->get_ok('/auth/generate_token');
 };
 
@@ -333,7 +406,7 @@ subtest "Test generate token page" => sub {
     $mech->follow_link_ok({url => '/auth/generate_token'});
     $mech->content_lacks('Token:');
     $mech->submit_form_ok(
-        { with_fields => { generate_token => 'Generate token' } },
+        { button => 'generate_token' },
         "submit generate token form"
     );
     $mech->content_contains( 'Your token has been generated', "token generated" );
@@ -352,4 +425,28 @@ subtest "Test generate token page" => sub {
     $mech->log_out_ok;
     $mech->add_header('Authorization', "Bearer $token");
     $mech->logged_in_ok;
-}
+};
+
+subtest "Test two-factor authentication admin" => sub {
+    my $user = FixMyStreet::App->model('DB::User')->find( { email => $test_email } );
+    ok $user->update({ is_superuser => 1 }), 'user set to superuser';
+
+    $mech->log_in_ok($test_email);
+    $mech->get_ok('/auth/generate_token');
+    ok !$user->get_extra_metadata('2fa_secret');
+
+    $mech->submit_form_ok({ button => 'toggle_2fa' }, "submit 2FA activation");
+    $mech->content_contains('has been activated', "2FA activated");
+
+    $user->discard_changes();
+    my $token = $user->get_extra_metadata('2fa_secret');
+    ok $token, '2FA secret set';
+
+    $mech->content_contains($token, 'secret displayed');
+
+    $mech->get_ok('/auth/generate_token');
+    $mech->content_lacks($token, 'secret no longer displayed');
+
+    $mech->submit_form_ok({ button => 'toggle_2fa' }, "submit 2FA deactivation");
+    $mech->content_contains('has been deactivated', "2FA deactivated");
+};

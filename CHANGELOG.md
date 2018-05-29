@@ -2,6 +2,40 @@
 
 * Unreleased
 
+* v2.3.1 (12th February 2018)
+    - Front end improvements:
+        - Zoom out as much as necessary on body map page, even on mobile. #1958
+        - Show loading message on initial /around map load #1976
+        - Ask for current password/send email on password change. #1974
+        - Add minimum password length and common password checking. #1981
+        - Nicer display of national phone numbers. #1982
+        - 'Report as another user' allows phone number without email. #1978
+        - Display loading spinner on map when asset layers are loading. #1991
+    - Bugfixes:
+        - Fix bug specifying category in URL on /around. #1950
+        - Fix bug with multiple select-multiples on a page. #1951
+        - Make sure dashboard filters all fit onto one line. #1938
+        - Fix issue with red bars on bar graph of many categories. #1938
+        - Prefetch translations in /reports list of bodies. #1941
+        - Ignore deleted/area-less bodies in dashboard list. #1941
+        - Add missing CSS class from final questionnaire question. #1953
+        - Fix JavaScript error on /my calculating bounds #1954
+        - Change text on /reports to match lower down (fix translation).
+        - Ensure all reports graph can't dip downward. #1956
+        - Fix error sending `requires_inspection` reports. #1961
+        - Fix timezone related test failure. #1984
+        - Restore display of extra fields on inspector form. #1994
+    - Admin improvements:
+        - Admin can anonymize/hide all a user's reports. #1942 #1943
+        - Admin can log a user out. #1975
+        - Admin can remove a user's account details. #1944
+        - Superusers can have optional two-factor authentication. #1973
+    - Development improvements:
+        - Add script to remove expired sessions. #1987
+        - 'components' parameter can be passed to Google geocoder. #1994
+    - UK:
+        - Lazy load images in the footer.
+
 * v2.3 (18th December 2017)
     - New features:
         - Optional verification of reports and updates, and logging in,
@@ -64,6 +98,7 @@
     - Development improvements:
         - Add hook for pre-wrapper content.
         - Include JSON representation of extra fields in category_extras output
+        - send-reports will never skip failed reports when using --debug
     - UK:
         - Use SVG logo, inlined on front page. #1887
         - Inline critical CSS on front page. #1893

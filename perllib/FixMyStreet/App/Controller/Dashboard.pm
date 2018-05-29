@@ -86,11 +86,7 @@ sub index : Path : Args(0) {
     if ($body) {
         $c->stash->{body_name} = $body->name;
 
-        my $area_id = $body->body_areas->first->area_id;
-        my $children = mySociety::MaPit::call('area/children', $area_id,
-            type => $c->cobrand->area_types_children,
-        );
-        $c->stash->{children} = $children;
+        my $children = $c->stash->{children} = $body->first_area_children;
 
         $c->forward('/admin/fetch_contacts');
         $c->stash->{contacts} = [ $c->stash->{contacts}->all ];
@@ -103,7 +99,8 @@ sub index : Path : Args(0) {
             $c->stash->{body_name} = join "", map { $children->{$_}->{name} } grep { $children->{$_} } $c->user->area_id;
         }
     } else {
-        $c->forward('/admin/fetch_all_bodies');
+        my @bodies = $c->model('DB::Body')->active->translated->with_area_count->all_sorted;
+        $c->stash->{bodies} = \@bodies;
     }
 
     $c->stash->{start_date} = $c->get_param('start_date');

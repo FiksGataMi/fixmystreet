@@ -137,6 +137,11 @@ $(function(){
                         setUpLabelsForChart(this);
                     }
                 },
+                elements: {
+                    line: {
+                        cubicInterpolationMode: 'monotone'
+                    }
+                },
                 layout: {
                     padding: {
                         top: 4
@@ -179,8 +184,8 @@ $(function(){
             rowValues.push( parseInt($(this).find('td').text(), 10) );
         });
 
-        for (var i=colours.length; i<rowLabels.length; i++) {
-            colours[i] = colours[i % colours.length];
+        for (var l=colours.length, i=l; i<rowLabels.length; i++) {
+            colours[i] = colours[i % l];
         }
 
         var barChart = new Chart($canvas, {

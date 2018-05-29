@@ -5,6 +5,7 @@ use namespace::autoclean;
 BEGIN { extends 'Catalyst::Controller'; }
 
 use Email::Valid;
+use Data::Password::Common 'found';
 use Digest::HMAC_SHA1 qw(hmac_sha1);
 use JSON::MaybeXS;
 use MIME::Base64;
@@ -84,6 +85,12 @@ sub sign_in : Private {
     my $parsed = FixMyStreet::SMS->parse_username($username);
 
     if ($parsed->{username} && $password && $c->forward('authenticate', [ $parsed->{type}, $parsed->{username}, $password ])) {
+        # Upgrade hash count if necessary
+        my $cost = sprintf("%02d", FixMyStreet::DB::Result::User->cost);
+        if ($c->user->password !~ /^\$2a\$$cost\$/) {
+            $c->user->update({ password => $password });
+        }
+
         # unless user asked to be remembered limit the session to browser
         $c->set_session_cookie_expire(0)
           unless $remember_me;
@@ -143,6 +150,11 @@ sub email_sign_in : Private {
         return;
     }
 
+    my $password = $c->get_param('password_register');
+    if ($password) {
+        return unless $c->forward('/auth/test_password', [ $password ]);
+    }
+
     # If user registration is disabled then bail out at this point
     # if there's not already a user with this email address.
     # NB this uses the same template as a successful sign in to stop
@@ -156,8 +168,7 @@ sub email_sign_in : Private {
     }
 
     my $user_params = {};
-    $user_params->{password} = $c->get_param('password_register')
-        if $c->get_param('password_register');
+    $user_params->{password} = $password if $password;
     my $user = $c->model('DB::User')->new( $user_params );
 
     my $token_data = {
@@ -232,6 +243,9 @@ sub process_login : Private {
     $c->detach( '/page_error_403_access_denied', [] )
         if FixMyStreet->config('SIGNUPS_DISABLED') && !$user->in_storage && !$data->{old_user_id};
 
+    # Superusers using 2FA can not log in by code
+    $c->detach( '/page_error_403_access_denied', [] ) if $user->has_2fa;
+
     if ($data->{old_user_id}) {
         # Were logged in as old_user_id, want to switch to $user
         if ($user->in_storage) {
@@ -270,6 +284,11 @@ Used after signing in to take the person back to where they were.
 
 sub redirect_on_signin : Private {
     my ( $self, $c, $redirect, $params ) = @_;
+
+    if ($c->stash->{detach_to}) {
+        $c->detach($c->stash->{detach_to}, $c->stash->{detach_args});
+    }
+
     unless ( $redirect ) {
         $c->detach('redirect_to_categories') if $c->user->from_body && scalar @{ $c->user->categories };
         $redirect = 'my';
@@ -346,6 +365,55 @@ sub check_csrf_token : Private {
 sub no_csrf_token : Private {
     my ($self, $c) = @_;
     $c->detach('/page_error_400_bad_request', []);
+}
+
+=item common_password
+
+Returns 1/0 depending on if password is common or not.
+
+=cut
+
+sub common_password : Local : Args(0) {
+    my ($self, $c) = @_;
+
+    my $password = $c->get_param('password_register');
+
+    my $return = JSON->true;
+    if (!$c->cobrand->call_hook('bypass_password_checks') && found($password)) {
+        $return = _('Please choose a less commonly-used password');
+    }
+
+    my $body = JSON->new->utf8->allow_nonref->encode($return);
+    $c->res->content_type('application/json; charset=utf-8');
+    $c->res->body($body);
+}
+
+=item test_password
+
+Checks a password is not too weak; returns true if okay,
+false if weak (and sets stash error).
+
+=cut
+
+sub test_password : Private {
+    my ($self, $c, $password) = @_;
+
+    return 1 if $c->cobrand->call_hook('bypass_password_checks');
+
+    my @errors;
+
+    my $min_length = $c->cobrand->password_minimum_length;
+    push @errors, sprintf(_('Please make sure your password is at least %d characters long'), $min_length)
+        if length($password) < $min_length;
+
+    push @errors, _('Please choose a less commonly-used password')
+        if found($password);
+
+    if (@errors) {
+        $c->stash->{field_errors}->{password_register} = join('<br>', @errors);
+        return 0;
+    }
+    return 1;
 }
 
 =head2 sign_out
