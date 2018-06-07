@@ -7,12 +7,18 @@
     [% INCLUDE 'errors.html' %]
 
     <form name="report_inspect_form" id="report_inspect_form" method="post" action="[% c.uri_for( '/report', problem.id ) %]" class="validate">
-      <input type="hidden" name="js" value="">
 
       <div class="inspect-section">
+        <p style="float: right">
+          <label for="non_public">[% loc('Private') %]</label>
+          <input type="checkbox" id="non_public" name="non_public" value="1"[% ' checked' IF problem.non_public %]>
+        </p>
         <p>
           <strong>[% loc('Report ID:') %]</strong>
           <span class="js-report-id">[% problem.id %]</span>
+          [% IF c.user_exists AND c.cobrand.admin_allow_user(c.user) AND c.user.has_permission_to('report_edit', problem.bodies_str_ids) %]
+            (<a href="[% c.uri_for_action( "admin/report_edit", problem.id ) %]">[% loc('admin') %]</a>)
+          [% END %]
         </p>
         [% IF permissions.report_inspect AND problem.user.phone %]
           <p>
@@ -46,6 +52,11 @@
         <p>
           <a href="#" class="btn btn--block btn--geolocate">[% loc('Set to my current location') %]</a>
         </p>
+        [% IF permissions.report_reject %]
+          <p>
+            <a href="[% c.uri_for( '/contact', { id => problem.id, reject => 1 } ) %]" class="btn btn--block">[% loc('Reject report') %]</a>
+          </p>
+        [% END %]
       </div>
 
     [% IF permissions.report_edit_category OR permissions.report_inspect %]
@@ -55,19 +66,19 @@
           [% INCLUDE 'admin/report-category.html' %]
         </p>
 
-        [% FOREACH category IN category_options_copy %]
-          [% cat_name = category.name;
+        [% FOREACH category IN category_options %]
+          [% cat_name = category.category;
              cat_prefix = cat_name | lower | replace('[^a-z]', '');
              cat_prefix = "category_" _ cat_prefix _ "_" %]
             <p data-category="[% cat_name | html %]"
                [%~ IF cat_name != problem.category %] class="hidden"[% END %]
-               data-priorities='[% priorities_by_category.$cat_name %]'
-               data-defect-types='[% category_defect_types.$cat_name %]'
-               data-templates='[% templates_by_category.$cat_name %]'>
+               data-priorities='[% priorities_by_category.$cat_name | html %]'
+               data-defect-types='[% category_defect_types.$cat_name | html %]'
+               data-templates='[% templates_by_category.$cat_name | html %]'>
               [% IF cat_name == problem.category %]
-                  [% INCLUDE 'report/new/category_extras_fields.html' metas=category_extras.$cat_name hide_notices=1 %]
+                  [% INCLUDE 'report/new/category_extras_fields.html' metas=category_extras.$cat_name hide_notices=1 show_hidden=1 %]
               [% ELSE %]
-                  [% INCLUDE 'report/new/category_extras_fields.html' report_meta='' metas=category_extras.$cat_name hide_notices=1 %]
+                  [% INCLUDE 'report/new/category_extras_fields.html' report_meta='' metas=category_extras.$cat_name hide_notices=1 show_hidden=1 %]
               [% END %]
             </p>
         [% END %]
@@ -190,6 +201,7 @@
         </p>
       </div>
 
+      <input type="hidden" name="js" value="">
     </form>
   </div>
 [%- END %]

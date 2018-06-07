@@ -341,7 +341,7 @@ around service => sub {
 
 sub title_safe {
     my $self = shift;
-    return _('Awaiting moderation') if $self->cobrand eq 'zurich' && $self->state eq 'unconfirmed';
+    return _('Awaiting moderation') if $self->cobrand eq 'zurich' && $self->state eq 'submitted';
     return $self->title;
 }
 
@@ -509,6 +509,18 @@ sub tokenised_url {
     return "/M/". $token->token;
 }
 
+=head2 is_hidden
+
+Returns 1 if the problem is in an hidden state otherwise 0.
+
+=cut
+
+sub is_hidden {
+    my $self = shift;
+
+    return exists $self->hidden_states->{ $self->state } ? 1 : 0;
+}
+
 =head2 is_open
 
 Returns 1 if the problem is in a open state otherwise 0.
@@ -641,22 +653,27 @@ sub body {
     my $body;
     if ($problem->external_body) {
         if ($problem->cobrand eq 'zurich') {
-            $body = $c->model('DB::Body')->find({ id => $problem->external_body });
+            my $cache = $problem->result_source->schema->cache;
+            return $cache->{bodies}{$problem->external_body} //= $c->model('DB::Body')->find({ id => $problem->external_body });
         } else {
             $body = $problem->external_body;
         }
     } else {
         my $bodies = $problem->bodies;
-        $body = join( _(' and '),
-            map {
-                my $name = $_->name;
-                if ($c and FixMyStreet->config('AREA_LINKS_FROM_PROBLEMS')) {
-                    '<a href="' . $_->url($c) . '">' . $name . '</a>';
-                } else {
-                    $name;
-                }
-            } values %$bodies
-        );
+        my @body_names = sort map {
+            my $name = $_->name;
+            if ($c and FixMyStreet->config('AREA_LINKS_FROM_PROBLEMS')) {
+                '<a href="' . $_->url($c) . '">' . $name . '</a>';
+            } else {
+                $name;
+            }
+        } values %$bodies;
+        if ( scalar @body_names > 2 ) {
+            $body = join( ', ', splice @body_names, 0, -1);
+            $body = join( ',' . _(' and '), ($body, $body_names[-1]));
+        } else {
+            $body = join( _(' and '), @body_names);
+        }
     }
     return $body;
 }
@@ -906,12 +923,11 @@ sub add_send_method {
 }
 
 sub as_hashref {
-    my $self = shift;
-    my $c    = shift;
+    my ($self, $c, $cols) = @_;
 
     my $state_t = FixMyStreet::DB->resultset("State")->display($self->state);
 
-    return {
+    my $out = {
         id        => $self->id,
         title     => $self->title,
         category  => $self->category,
@@ -923,16 +939,17 @@ sub as_hashref {
         state     => $self->state,
         state_t   => $state_t,
         used_map  => $self->used_map,
-        is_fixed  => $self->fixed_states->{ $self->state } ? 1 : 0,
-        photos    => [ map { $_->{url} } @{$self->photos} ],
-        meta      => $self->confirmed ? $self->meta_line( $c ) : '',
-        ($self->confirmed ? (
-            confirmed => $self->confirmed,
-            confirmed_pp => $c->cobrand->prettify_dt( $self->confirmed ),
-        ) : ()),
-        created => $self->created,
-        created_pp => $c->cobrand->prettify_dt( $self->created ),
+        created   => $self->created,
     };
+    $out->{is_fixed} = $self->fixed_states->{ $self->state } ? 1 : 0 if !$cols || $cols->{is_fixed};
+    $out->{photos} = [ map { $_->{url} } @{$self->photos} ] if !$cols || $cols->{photos};
+    $out->{meta} = $self->confirmed ? $self->meta_line( $c ) : '' if !$cols || $cols->{meta};
+    $out->{created_pp} = $c->cobrand->prettify_dt( $self->created ) if !$cols || $cols->{created_pp};
+    if ($self->confirmed) {
+        $out->{confirmed} = $self->confirmed if !$cols || $cols->{confirmed};
+        $out->{confirmed_pp} = $c->cobrand->prettify_dt( $self->confirmed ) if !$cols || $cols->{confirmed_pp};
+    }
+    return $out;
 }
 
 =head2 latest_moderation_log_entry

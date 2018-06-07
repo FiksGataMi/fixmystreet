@@ -30,6 +30,8 @@ create table users (
     from_body       integer,
     flagged         boolean not null default 'f',
     is_superuser    boolean not null default 'f',
+    created         timestamp not null default current_timestamp,
+    last_active     timestamp not null default current_timestamp,
     title           text,
     twitter_id      bigint  unique,
     facebook_id     bigint  unique,
@@ -54,7 +56,11 @@ create table body (
     suppress_alerts boolean not null default 'f',
     can_be_devolved boolean not null default 'f',
     send_extended_statuses boolean not null default 'f',
-    deleted boolean not null default 'f'
+    fetch_problems boolean not null default 'f',
+    blank_updates_permitted boolean not null default 'f',
+    convert_latlong boolean not null default 'f',
+    deleted boolean not null default 'f',
+    extra           text
 );
 
 create table body_areas (
@@ -470,6 +476,7 @@ create table response_templates (
     created timestamp not null default current_timestamp,
     auto_response boolean NOT NULL DEFAULT 'f',
     state text,
+    external_status_code text,
     unique(body_id, title)
 );
 

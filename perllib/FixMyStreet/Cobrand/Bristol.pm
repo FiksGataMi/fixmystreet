@@ -20,7 +20,7 @@ sub example_places {
 }
 
 sub map_type {
-    'OSM';
+    'Bristol';
 }
 
 sub default_link_zoom { 6 }
@@ -69,6 +69,12 @@ sub categories_restriction {
     # Email categories with a devolved send_method, so can identify Open311
     # categories as those which have a blank send_method.
     return $rs->search( { 'me.send_method' => undef } );
+}
+
+sub open311_config {
+    my ($self, $row, $h, $params) = @_;
+
+    $params->{always_send_email} = 1;
 }
 
 1;

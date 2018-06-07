@@ -632,6 +632,8 @@ sub setup_categories_and_bodies : Private {
     my %bodies_to_list = ();       # Bodies with categories assigned
     my @category_options = ();       # categories to show
     my %category_extras  = ();       # extra fields to fill in for open311
+    my %category_extras_hidden =
+      (); # whether all of a category's fields are hidden
     my %non_public_categories =
       ();    # categories for which the reports are not public
     $c->stash->{unresponsive} = {};
@@ -664,10 +666,11 @@ sub setup_categories_and_bodies : Private {
         $bodies_to_list{ $contact->body_id } = $contact->body;
 
         unless ( $seen{$contact->category} ) {
-            push @category_options, { name => $contact->category, value => $contact->category_display, group => $contact->get_extra_metadata('group') || '' };
+            push @category_options, $contact;
 
             my $metas = $contact->get_metadata_for_input;
             $category_extras{$contact->category} = $metas if @$metas;
+            $category_extras_hidden{$contact->category} = (grep { !$c->cobrand->category_extra_hidden($_) } @$metas) ? 0 : 1;
 
             my $body_send_method = $bodies{$contact->body_id}->send_method || '';
             $c->stash->{unresponsive}{$contact->category} = $contact->body_id
@@ -676,15 +679,15 @@ sub setup_categories_and_bodies : Private {
 
             $non_public_categories{ $contact->category } = 1 if $contact->non_public;
         }
-        $seen{$contact->category} = $contact->category_display;
+        $seen{$contact->category} = $contact;
     }
 
     if (@category_options) {
         # If there's an Other category present, put it at the bottom
         @category_options = (
-            { name => _('-- Pick a category --'), value => _('-- Pick a category --'), group => '' },
-            grep { $_->{name} ne _('Other') } @category_options );
-        push @category_options, { name => _('Other'), value => $seen{_('Other')}, group => _('Other') } if $seen{_('Other')};
+            { category => _('-- Pick a category --'), category_display => _('-- Pick a category --'), group => '' },
+            grep { $_->category ne _('Other') } @category_options );
+        push @category_options, $seen{_('Other')} if $seen{_('Other')};
     }
 
     $c->cobrand->call_hook(munge_category_list => \@category_options, \@contacts, \%category_extras);
@@ -692,11 +695,10 @@ sub setup_categories_and_bodies : Private {
     # put results onto stash for display
     $c->stash->{bodies} = \%bodies;
     $c->stash->{contacts} = \@contacts;
-    $c->stash->{bodies_to_list} = [ keys %bodies_to_list ];
-    $c->stash->{bodies_to_list_names} = [ map { $_->name } values %bodies_to_list ];
-    $c->stash->{bodies_to_list_urls} = [ map { $_->external_url } values %bodies_to_list ];
+    $c->stash->{bodies_to_list} = \%bodies_to_list;
     $c->stash->{category_options} = \@category_options;
     $c->stash->{category_extras}  = \%category_extras;
+    $c->stash->{category_extras_hidden}  = \%category_extras_hidden;
     $c->stash->{non_public_categories}  = \%non_public_categories;
     $c->stash->{extra_name_info} = $first_area->{id} == COUNCIL_ID_BROMLEY ? 1 : 0;
 
@@ -709,7 +711,8 @@ sub setup_categories_and_bodies : Private {
     if ( $c->cobrand->call_hook('enable_category_groups') ) {
         my %category_groups = ();
         for my $category (@category_options) {
-            push @{$category_groups{$category->{group}}}, $category;
+            my $group = $category->{group} // $category->get_extra_metadata('group') // '';
+            push @{$category_groups{$group}}, $category;
         }
 
         my @category_groups = ();
@@ -827,7 +830,7 @@ sub process_user : Private {
     $c->forward('update_user', [ \%params ]);
     if ($params{password_register}) {
         $c->forward('/auth/test_password', [ $params{password_register} ]);
-        $report->user->password(Utils::trim_text($params{password_register}));
+        $report->user->password($params{password_register});
     }
 
     return 1;
@@ -870,6 +873,8 @@ sub process_report : Private {
         'subcategory',                              #
         'partial',                               #
         'service',                               #
+        'non_public',
+        'single_body_only'
       );
 
     # load the report
@@ -897,6 +902,8 @@ sub process_report : Private {
         $report->anonymous( $params{may_show_name} ? 0 : 1 );
     }
 
+    $report->non_public($params{non_public} ? 1 : 0);
+
     # clean up text before setting
     $report->title( Utils::cleanup_text( $params{title} ) );
 
@@ -912,6 +919,7 @@ sub process_report : Private {
 
     # set these straight from the params
     $report->category( _ $params{category} ) if $params{category};
+    $c->cobrand->call_hook(report_new_munge_category => $report);
     $report->subcategory( $params{subcategory} );
 
     my $areas = $c->stash->{all_areas_mapit};
@@ -925,7 +933,7 @@ sub process_report : Private {
             return 1;
         }
 
-        my $bodies = $c->forward('contacts_to_bodies', [ $report->category ]);
+        my $bodies = $c->forward('contacts_to_bodies', [ $report->category, $params{single_body_only} ]);
         my $body_string = join(',', map { $_->id } @$bodies) || '-1';
 
         $report->bodies_str($body_string);
@@ -940,7 +948,7 @@ sub process_report : Private {
         if ( $c->stash->{non_public_categories}->{ $report->category } ) {
             $report->non_public( 1 );
         }
-    } elsif ( @{ $c->stash->{bodies_to_list} } ) {
+    } elsif ( %{ $c->stash->{bodies_to_list} } ) {
 
         # There was an area with categories, but we've not been given one. Bail.
         $c->stash->{field_errors}->{category} = _('Please choose a category');
@@ -959,11 +967,19 @@ sub process_report : Private {
         my $value = $c->get_param($form_name) || '';
         $c->stash->{field_errors}->{$form_name} = _('This information is required')
             if $field->{required} && !$value;
+        if ($field->{validator}) {
+            eval {
+                $value = $field->{validator}->($value);
+            };
+            if ($@) {
+                $c->stash->{field_errors}->{$form_name} = $@;
+            }
+        }
         $report->set_extra_metadata( $form_name => $value );
     }
 
     # set defaults that make sense
-    $report->state('unconfirmed');
+    $report->state($c->cobrand->default_problem_state);
 
     # save the cobrand and language related information
     $report->cobrand( $c->cobrand->moniker );
@@ -974,9 +990,17 @@ sub process_report : Private {
 }
 
 sub contacts_to_bodies : Private {
-    my ($self, $c, $category) = @_;
+    my ($self, $c, $category, $single_body_only) = @_;
 
     my @contacts = grep { $_->category eq $category } @{$c->stash->{contacts}};
+
+    # check that we've not indicated we only want to sent to a single body
+    # and if we find a matching one then only send to that. e.g. if we clicked
+    # on a TfL road on the map.
+    if ($single_body_only) {
+        my @contacts_filtered = grep { $_->body->name eq $single_body_only } @contacts;
+        @contacts = @contacts_filtered if scalar @contacts_filtered;
+    }
 
     if ($c->stash->{unresponsive}{$category} || $c->stash->{unresponsive}{ALL} || !@contacts) {
         [];
@@ -999,7 +1023,7 @@ sub set_report_extras : Private {
     foreach my $contact (@$contacts) {
         my $metas = $contact->get_metadata_for_input;
         foreach my $field ( @$metas ) {
-            if ( lc( $field->{required} ) eq 'true' && !$c->cobrand->category_extra_hidden($field->{code})) {
+            if ( lc( $field->{required} ) eq 'true' && !$c->cobrand->category_extra_hidden($field)) {
                 unless ( $c->get_param($param_prefix . $field->{code}) ) {
                     $c->stash->{field_errors}->{ $field->{code} } = _('This information is required');
                 }
@@ -1016,7 +1040,7 @@ sub set_report_extras : Private {
         my $metas = $extra_fields->get_extra_fields;
         $param_prefix = "extra[" . $extra_fields->id . "]";
         foreach my $field ( @$metas ) {
-            if ( lc( $field->{required} ) eq 'true' && !$c->cobrand->category_extra_hidden($field->{code})) {
+            if ( lc( $field->{required} ) eq 'true' && !$c->cobrand->category_extra_hidden($field)) {
                 unless ( $c->get_param($param_prefix . $field->{code}) ) {
                     $c->stash->{field_errors}->{ $field->{code} } = _('This information is required');
                 }
@@ -1296,9 +1320,17 @@ sub save_user_and_report : Private {
     if ( $c->cobrand->never_confirm_reports ) {
         $report->user->update_or_insert;
         $report->confirm();
-    } elsif ( $c->forward('created_as_someone_else', [ $c->stash->{bodies} ]) ) {
-        # If created on behalf of someone else, we automatically confirm it,
-        # but we don't want to update the user account
+    # If created on behalf of someone else, we automatically confirm it,
+    # but we don't want to update the user account
+    } elsif ($c->stash->{contributing_as_another_user}) {
+        $report->set_extra_metadata( contributed_as => 'another_user');
+        $report->set_extra_metadata( contributed_by => $c->user->id );
+        $report->confirm();
+    } elsif ($c->stash->{contributing_as_body}) {
+        $report->set_extra_metadata( contributed_as => 'body' );
+        $report->confirm();
+    } elsif ($c->stash->{contributing_as_anonymous_user}) {
+        $report->set_extra_metadata( contributed_as => 'anonymous_user' );
         $report->confirm();
     } elsif ( !$report->user->in_storage ) {
         # User does not exist.
@@ -1328,6 +1360,8 @@ sub save_user_and_report : Private {
         $c->log->info($report->user->id . ' exists, but is not logged in for this report');
     }
 
+    $c->cobrand->call_hook(report_new_munge_before_insert => $report);
+
     $report->update_or_insert;
 
     # tidy up
@@ -1336,11 +1370,6 @@ sub save_user_and_report : Private {
     }
 
     return 1;
-}
-
-sub created_as_someone_else : Private {
-    my ($self, $c, $bodies) = @_;
-    return $c->stash->{contributing_as_another_user} || $c->stash->{contributing_as_body} || $c->stash->{contributing_as_anonymous_user};
 }
 
 =head2 generate_map

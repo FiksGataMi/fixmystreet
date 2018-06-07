@@ -5,15 +5,18 @@ my $mech = FixMyStreet::TestMech->new();
 
 $mech->clear_emails_ok;
 
-my $opts = {
-    commit => 1,
-};
-
 my $user = $mech->create_user_ok('test@example.com', name => 'Test User');
 my $oxfordshire = $mech->create_body_ok(2237, 'Oxfordshire County Council');
 my $west_oxon = $mech->create_body_ok(2420, 'West Oxfordshire District Council');
 
-$opts->{body} = $oxfordshire->id;
+my $opts = {
+    commit => 1,
+    body => $oxfordshire->id,
+    cobrand => 'oxfordshire',
+    closure_cutoff => "2015-01-01 00:00:00",
+    email_cutoff => "2016-01-01 00:00:00",
+    user => $user->id,
+};
 
 subtest 'sets reports to the correct status' => sub {
     FixMyStreet::override_config {
@@ -65,7 +68,45 @@ subtest 'sets reports to the correct status' => sub {
         is $report4->state, 'closed', 'Report 4 has been set to closed';
         is $report5->state, 'closed', 'Report 5 has been set to closed';
 
+        my $comment = $report1->comments->first;
+        is $comment->problem_state, 'closed';
+
         is $report->state, 'confirmed', 'Recent report has been left alone';
+    };
+};
+
+subtest 'marks alerts as sent' => sub {
+    FixMyStreet::override_config {
+          ALLOWED_COBRANDS => [ 'oxfordshire' ],
+    }, sub {
+        my ($report) = $mech->create_problems_for_body(1, $oxfordshire->id, 'Test', {
+            areas      => ',2237,',
+            lastupdate => '2015-12-01 07:00:00',
+            user_id    => $user->id,
+        });
+        my $alert = FixMyStreet::DB->resultset('Alert')->find_or_create(
+            {
+                user => $user,
+                parameter => $report->id,
+                alert_type => 'new_updates',
+                whensubscribed => '2015-12-01 07:00:00',
+                confirmed => 1,
+                cobrand => 'default',
+            }
+        );
+        is $alert->alerts_sent->count, 0, 'Nothing has been sent for this alert';
+
+        FixMyStreet::Script::ArchiveOldEnquiries::archive($opts);
+
+        $report->discard_changes;
+
+        is $report->state, 'closed', 'Report has been set to closed';
+
+        is $alert->alerts_sent->count, 1, 'Alert marked as sent for this report';
+
+        my $alert_sent = $alert->alerts_sent->first;
+        my $comment = $report->comments->first;
+        is $alert_sent->parameter, $comment->id, 'AlertSent created for new comment';
     };
 };
 

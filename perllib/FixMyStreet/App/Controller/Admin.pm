@@ -12,9 +12,11 @@ use DateTime::Format::Strptime;
 use List::Util 'first';
 use List::MoreUtils 'uniq';
 use mySociety::ArrayUtils;
+use Text::CSV;
 
 use FixMyStreet::SendReport;
 use FixMyStreet::SMS;
+use Utils;
 
 =head1 NAME
 
@@ -216,9 +218,14 @@ sub bodies : Path('bodies') : Args(0) {
         $c->forward('check_for_super_user');
         $c->forward('/auth/check_csrf_token');
 
-        my $params = $c->forward('body_params');
+        my $values = $c->forward('body_params');
         unless ( keys %{$c->stash->{body_errors}} ) {
-            my $body = $c->model('DB::Body')->create( $params );
+            my $body = $c->model('DB::Body')->create( $values->{params} );
+            if ($values->{extras}) {
+                $body->set_extra_metadata( $_ => $values->{extras}->{$_} )
+                    for keys %{$values->{extras}};
+                $body->update;
+            }
             my @area_ids = $c->get_param_list('area_ids');
             foreach (@area_ids) {
                 $c->model('DB::BodyArea')->create( { body => $body, area_id => $_ } );
@@ -264,9 +271,15 @@ sub body_form_dropdowns : Private {
     } else {
         $areas = mySociety::MaPit::call('areas', $c->cobrand->area_types);
     }
+
+    # Some cobrands may want to add extra areas at runtime beyond those
+    # available via MAPIT_WHITELIST or MAPIT_TYPES. This can be used for,
+    # e.g., parish councils on a particular council cobrand.
+    $areas = $c->cobrand->call_hook("add_extra_areas" => $areas) || $areas;
+
     $c->stash->{areas} = [ sort { strcoll($a->{name}, $b->{name}) } values %$areas ];
 
-    my @methods = map { $_ =~ s/FixMyStreet::SendReport:://; $_ } keys %{ FixMyStreet::SendReport->get_senders };
+    my @methods = map { $_ =~ s/FixMyStreet::SendReport:://; $_ } sort keys %{ FixMyStreet::SendReport->get_senders };
     $c->stash->{send_methods} = \@methods;
 }
 
@@ -340,6 +353,7 @@ sub update_contacts : Private {
         }
 
         $c->forward('update_extra_fields', [ $contact ]);
+        $c->forward('contact_cobrand_extra_fields', [ $contact ]);
 
         if ( %errors ) {
             $c->stash->{updated} = _('Please correct the errors below');
@@ -387,9 +401,14 @@ sub update_contacts : Private {
         $c->forward('check_for_super_user');
         $c->forward('/auth/check_csrf_token');
 
-        my $params = $c->forward( 'body_params' );
+        my $values = $c->forward( 'body_params' );
         unless ( keys %{$c->stash->{body_errors}} ) {
-            $c->stash->{body}->update( $params );
+            $c->stash->{body}->update( $values->{params} );
+            if ($values->{extras}) {
+                $c->stash->{body}->set_extra_metadata( $_ => $values->{extras}->{$_} )
+                    for keys %{$values->{extras}};
+                $c->stash->{body}->update;
+            }
             my @current = $c->stash->{body}->body_areas->all;
             my %current = map { $_->area_id => 1 } @current;
             my @area_ids = $c->get_param_list('area_ids');
@@ -444,6 +463,9 @@ sub body_params : Private {
     my %defaults = map { $_ => '' } @fields;
     %defaults = ( %defaults,
         send_comments => 0,
+        fetch_problems => 0,
+        convert_latlong => 0,
+        blank_updates_permitted => 0,
         suppress_alerts => 0,
         comment_user_id => undef,
         send_extended_statuses => 0,
@@ -453,7 +475,10 @@ sub body_params : Private {
     );
     my %params = map { $_ => $c->get_param($_) || $defaults{$_} } keys %defaults;
     $c->forward('check_body_params', [ \%params ]);
-    return \%params;
+    my @extras = qw/fetch_all_problems/;
+    %defaults = map { $_ => '' } @extras;
+    my %extras = map { $_ => $c->get_param($_) || $defaults{$_} } @extras;
+    return { params => \%params, extras => \%extras };
 }
 
 sub check_body_params : Private {
@@ -610,7 +635,7 @@ sub category : Chained('body') : PathPart('') {
         },
     );
     $c->stash->{history} = $history;
-    my @methods = map { $_ =~ s/FixMyStreet::SendReport:://; $_ } keys %{ FixMyStreet::SendReport->get_senders };
+    my @methods = map { $_ =~ s/FixMyStreet::SendReport:://; $_ } sort keys %{ FixMyStreet::SendReport->get_senders };
     $c->stash->{send_methods} = \@methods;
 
     return 1;
@@ -618,6 +643,9 @@ sub category : Chained('body') : PathPart('') {
 
 sub reports : Path('reports') {
     my ( $self, $c ) = @_;
+
+    $c->stash->{edit_body_contacts} = 1
+        if grep { $_ eq 'body' } keys %{$c->stash->{allowed_pages}};
 
     my $query = {};
     if ( $c->cobrand->moniker eq 'zurich' ) {
@@ -640,6 +668,8 @@ sub reports : Path('reports') {
 
     my $p_page = $c->get_param('p') || 1;
     my $u_page = $c->get_param('u') || 1;
+
+    return if $c->cobrand->call_hook(report_search_query => $query, $p_page, $u_page, $order);
 
     if (my $search = $c->get_param('search')) {
         $c->stash->{searched} = $search;
@@ -761,10 +791,6 @@ sub reports : Path('reports') {
         $c->stash->{problems} = [ $problems->all ];
         $c->stash->{problems_pager} = $problems->pager;
     }
-
-    $c->stash->{edit_body_contacts} = 1
-        if ( grep {$_ eq 'body'} keys %{$c->stash->{allowed_pages}});
-
 }
 
 sub update_user : Private {
@@ -778,6 +804,28 @@ sub update_user : Private {
         }
     }
     return 0;
+}
+
+sub report_edit_display : Private {
+    my ( $self, $c ) = @_;
+
+    my $problem = $c->stash->{problem};
+
+    $c->stash->{page} = 'admin';
+    FixMyStreet::Map::display_map(
+        $c,
+        latitude  => $problem->latitude,
+        longitude => $problem->longitude,
+        pins      => $problem->used_map
+        ? [ {
+            latitude  => $problem->latitude,
+            longitude => $problem->longitude,
+            colour    => $c->cobrand->pin_colour($problem, 'admin'),
+            type      => 'big',
+          } ]
+        : [],
+        print_report => 1,
+    );
 }
 
 sub report_edit : Path('report_edit') : Args(1) {
@@ -796,44 +844,31 @@ sub report_edit : Path('report_edit') : Args(1) {
     }
 
     $c->stash->{problem} = $problem;
+    if ( $problem->extra ) {
+        my @fields;
+        if ( my $fields = $problem->get_extra_fields ) {
+            for my $field ( @{$fields} ) {
+                my $name = $field->{description} ?
+                    "$field->{description} ($field->{name})" :
+                    "$field->{name}";
+                push @fields, { name => $name, val => $field->{value} };
+            }
+        }
+        my $extra = $problem->get_extra_metadata;
+        if ( $extra->{duplicates} ) {
+            push @fields, { name => 'Duplicates', val => join( ',', @{ $problem->get_extra_metadata('duplicates') } ) };
+            delete $extra->{duplicates};
+        }
+        for my $key ( keys %$extra ) {
+            push @fields, { name => $key, val => $extra->{$key} };
+        }
+
+        $c->stash->{extra_fields} = \@fields;
+    }
 
     $c->forward('/auth/get_csrf_token');
 
-    $c->stash->{page} = 'admin';
-    FixMyStreet::Map::display_map(
-        $c,
-        latitude  => $problem->latitude,
-        longitude => $problem->longitude,
-        pins      => $problem->used_map
-        ? [ {
-            latitude  => $problem->latitude,
-            longitude => $problem->longitude,
-            colour    => $c->cobrand->pin_colour($problem, 'admin'),
-            type      => 'big',
-          } ]
-        : [],
-        print_report => 1,
-    );
-
-    if (my $rotate_photo_param = $self->_get_rotate_photo_param($c)) {
-        $self->rotate_photo($c, $problem, @$rotate_photo_param);
-        if ( $c->cobrand->moniker eq 'zurich' ) {
-            # Clicking the photo rotation buttons should do nothing
-            # except for rotating the photo, so return the user
-            # to the report screen now.
-            $c->res->redirect( $c->uri_for( 'report_edit', $problem->id ) );
-            return;
-        } else {
-            return 1;
-        }
-    }
-
     $c->forward('categories_for_point');
-
-    if ( $c->cobrand->moniker eq 'zurich' ) {
-        my $done = $c->cobrand->admin_report_edit();
-        return if $done;
-    }
 
     $c->forward('check_username_for_abuse', [ $problem->user ] );
 
@@ -841,6 +876,16 @@ sub report_edit : Path('report_edit') : Args(1) {
       [ $c->model('DB::Comment')
           ->search( { problem_id => $problem->id }, { order_by => 'created' } )
           ->all ];
+
+    if (my $rotate_photo_param = $self->_get_rotate_photo_param($c)) {
+        $self->rotate_photo($c, $problem, @$rotate_photo_param);
+        $c->detach('report_edit_display');
+    }
+
+    if ( $c->cobrand->moniker eq 'zurich' ) {
+        my $done = $c->cobrand->admin_report_edit();
+        $c->detach('report_edit_display') if $done;
+    }
 
     if ( $c->get_param('resend') ) {
         $c->forward('/auth/check_csrf_token');
@@ -882,6 +927,12 @@ sub report_edit : Path('report_edit') : Args(1) {
             $columns{$_} = $c->get_param($_);
         }
         $problem->set_inflated_columns(\%columns);
+
+        if ($c->get_param('closed_updates')) {
+            $problem->set_extra_metadata(closed_updates => 1);
+        } else {
+            $problem->unset_extra_metadata('closed_updates');
+        }
 
         $c->forward( '/admin/report_edit_category', [ $problem, $problem->state ne $old_state ] );
         $c->forward('update_user', [ $problem ]);
@@ -937,7 +988,7 @@ sub report_edit : Path('report_edit') : Args(1) {
         $problem->discard_changes;
     }
 
-    return 1;
+    $c->detach('report_edit_display');
 }
 
 =head2 report_edit_category
@@ -1010,11 +1061,18 @@ sub report_edit_location : Private {
 
     my ($lat, $lon) = map { Utils::truncate_coordinate($_) } $problem->latitude, $problem->longitude;
     if ( $c->stash->{latitude} != $lat || $c->stash->{longitude} != $lon ) {
+        # The two actions below change the stash, setting things up for e.g. a
+        # new report. But here we're only doing it in order to check the found
+        # bodies match; we don't want to overwrite the existing report data if
+        # this lookup is bad. So let's save the stash and restore it after the
+        # comparison.
+        my $safe_stash = { %{$c->stash} };
         $c->forward('/council/load_and_check_areas', []);
         $c->forward('/report/new/setup_categories_and_bodies');
         my %allowed_bodies = map { $_ => 1 } @{$problem->bodies_str_ids};
-        my @new_bodies = @{$c->stash->{bodies_to_list}};
+        my @new_bodies = keys %{$c->stash->{bodies_to_list}};
         my $bodies_match = grep { exists( $allowed_bodies{$_} ) } @new_bodies;
+        $c->stash($safe_stash);
         return unless $bodies_match;
         $problem->latitude($c->stash->{latitude});
         $problem->longitude($c->stash->{longitude});
@@ -1037,8 +1095,7 @@ sub categories_for_point : Private {
     # Remove the "Pick a category" option
     shift @{$c->stash->{category_options}} if @{$c->stash->{category_options}};
 
-    $c->stash->{category_options_copy} = $c->stash->{category_options};
-    $c->stash->{categories_hash} = { map { $_->{name} => 1 } @{$c->stash->{category_options}} };
+    $c->stash->{categories_hash} = { map { $_->category => 1 } @{$c->stash->{category_options}} };
 }
 
 sub templates : Path('templates') : Args(0) {
@@ -1096,6 +1153,7 @@ sub template_edit : Path('templates') : Args(2) {
         id => $_->id,
         category => $_->category_display,
         active => $active_contacts{$_->id},
+        email => $_->email,
     } } @live_contacts;
     $c->stash->{contacts} = \@all_contacts;
 
@@ -1115,8 +1173,15 @@ sub template_edit : Path('templates') : Args(2) {
             $template->title( $c->get_param('title') );
             $template->text( $c->get_param('text') );
             $template->state( $c->get_param('state') );
+            $template->external_status_code( $c->get_param('external_status_code') );
 
-            $template->auto_response( $c->get_param('auto_response') && $template->state ? 1 : 0 );
+            if ( $template->state && $template->external_status_code ) {
+                $c->stash->{errors} ||= {};
+                $c->stash->{errors}->{state} = _("State and external status code cannot be used simultaneously.");
+                $c->stash->{errors}->{external_status_code} = _("State and external status code cannot be used simultaneously.");
+            }
+
+            $template->auto_response( $c->get_param('auto_response') && ( $template->state || $template->external_status_code ) ? 1 : 0 );
             if ($template->auto_response) {
                 my @check_contact_ids = @new_contact_ids;
                 # If the new template has not specific categories (i.e. it
@@ -1128,7 +1193,10 @@ sub template_edit : Path('templates') : Args(2) {
                 my $query = {
                     'auto_response' => 1,
                     'contact.id' => [ @check_contact_ids, undef ],
-                    'me.state' => $template->state,
+                    -or => {
+                        $template->state ? ('me.state' => $template->state) : (),
+                        $template->external_status_code ? ('me.external_status_code' => $template->external_status_code) : (),
+                    },
                 };
                 if ($template->in_storage) {
                     $query->{'me.id'} = { '!=', $template->id };
@@ -1136,9 +1204,8 @@ sub template_edit : Path('templates') : Args(2) {
                 if ($c->stash->{body}->response_templates->search($query, {
                     join => { 'contact_response_templates' => 'contact' },
                 })->count) {
-                    $c->stash->{errors} = {
-                        auto_response => _("There is already an auto-response template for this category/state.")
-                    };
+                    $c->stash->{errors} ||= {};
+                    $c->stash->{errors}->{auto_response} = _("There is already an auto-response template for this category/state.");
                 }
             }
 
@@ -1225,7 +1292,7 @@ sub users: Path('users') : Args(0) {
 sub update_edit : Path('update_edit') : Args(1) {
     my ( $self, $c, $id ) = @_;
 
-    my $update = $c->cobrand->updates->search({ id => $id })->first;
+    my $update = $c->cobrand->updates->search({ 'me.id' => $id })->first;
 
     $c->detach( '/page_error_404_not_found', [] )
       unless $update;
@@ -1612,6 +1679,61 @@ sub user_edit : Path('user_edit') : Args(1) {
     return 1;
 }
 
+sub user_import : Path('user_import') {
+    my ( $self, $c, $id ) = @_;
+
+    $c->forward('/auth/get_csrf_token');
+    return unless $c->user_exists && $c->user->is_superuser;
+
+    if ($c->req->method eq 'POST') {
+        $c->forward('/auth/check_csrf_token');
+        $c->stash->{new_users} = [];
+        $c->stash->{existing_users} = [];
+
+        my @all_permissions = map { keys %$_ } values %{ $c->cobrand->available_permissions };
+        my %available_permissions = map { $_ => 1 } @all_permissions;
+
+        my $csv = Text::CSV->new({ binary => 1});
+        my $fh = $c->req->upload('csvfile')->fh;
+        $csv->getline($fh); # discard the header
+        while (my $row = $csv->getline($fh)) {
+            my ($name, $email, $from_body, $permissions) = @$row;
+            $email = lc Utils::trim_text($email);
+            my @permissions = split(/:/, $permissions);
+
+            my $user = FixMyStreet::DB->resultset("User")->find_or_new({ email => $email, email_verified => 1 });
+            if ($user->in_storage) {
+                push @{$c->stash->{existing_users}}, $user;
+                next;
+            }
+
+            $user->name($name);
+            $user->from_body($from_body || undef);
+            $user->update_or_insert;
+
+            my @user_permissions = grep { $available_permissions{$_} } @permissions;
+            foreach my $permission_type (@user_permissions) {
+                $user->user_body_permissions->find_or_create({
+                    body_id => $user->from_body->id,
+                    permission_type => $permission_type,
+                });
+            }
+
+            push @{$c->stash->{new_users}}, $user;
+        }
+
+    }
+}
+
+sub contact_cobrand_extra_fields : Private {
+    my ( $self, $c, $contact ) = @_;
+
+    my $extra_fields = $c->cobrand->call_hook('contact_extra_fields');
+    foreach ( @$extra_fields ) {
+        $contact->set_extra_metadata( $_ => $c->get_param("extra[$_]") );
+    }
+}
+
 sub user_cobrand_extra_fields : Private {
     my ( $self, $c ) = @_;
 
@@ -1795,20 +1917,7 @@ sub user_hide_everywhere : Private {
 sub user_remove_account : Private {
     my ( $self, $c, $user ) = @_;
     $c->forward('user_logout_everywhere', [ $user ]);
-    $user->problems->update({ anonymous => 1, name => '', send_questionnaire => 0 });
-    $user->comments->update({ anonymous => 1, name => '' });
-    $user->alerts->update({ whendisabled => \'current_timestamp' });
-    $user->password('', 1);
-    $user->update({
-        email => 'removed-' . $user->id . '@' . FixMyStreet->config('EMAIL_DOMAIN'),
-        email_verified => 0,
-        name => '',
-        phone => '',
-        phone_verified => 0,
-        title => undef,
-        twitter_id => undef,
-        facebook_id => undef,
-    });
+    $user->anonymize_account;
     $c->stash->{status_message} = _('That user’s personal details have been removed.');
 }
 

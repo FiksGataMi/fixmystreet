@@ -23,6 +23,7 @@ my $mech = FixMyStreet::TestMech->new;
 
 use FixMyStreet;
 my $cobrand = FixMyStreet::Cobrand::Zurich->new();
+$cobrand->db_state_migration;
 
 my $sample_file = path(__FILE__)->parent->parent->child("app/controller/sample.jpg");
 ok $sample_file->exists, "sample file $sample_file exists";
@@ -48,7 +49,7 @@ sub reset_report_state {
     $report->unset_extra_metadata('closed_overdue');
     $report->unset_extra_metadata('closure_status');
     $report->whensent(undef);
-    $report->state('unconfirmed');
+    $report->state('submitted');
     $report->created($created) if $created;
     $report->update;
 }
@@ -109,7 +110,7 @@ subtest "set up superuser" => sub {
 };
 
 my @reports = $mech->create_problems_for_body( 1, $division->id, 'Test', {
-    state              => 'unconfirmed',
+    state              => 'submitted',
     confirmed          => undef,
     cobrand            => 'zurich',
     areas => ',423017,',
@@ -124,6 +125,89 @@ FixMyStreet::override_config {
 };
 $mech->content_contains('&Uuml;berpr&uuml;fung ausstehend')
     or die $mech->content;
+
+FixMyStreet::override_config {
+    ALLOWED_COBRANDS => [ 'zurich' ],
+    MAP_TYPE => 'Zurich,OSM',
+}, sub {
+    my $json = $mech->get_ok_json( '/report/ajax/' . $report->id );
+    is $json->{report}->{title}, "&Uuml;berpr&uuml;fung ausstehend", "correct title";
+    is $json->{report}->{state}, "submitted", "correct state";
+};
+
+subtest "Banners are displayed correctly" => sub {
+  FixMyStreet::override_config {
+    ALLOWED_COBRANDS => [ 'zurich' ],
+    MAP_TYPE => 'Zurich,OSM',
+  }, sub {
+    for my $test (
+        {
+            description => 'new report',
+            state => 'submitted',
+            banner_id => 'closed',
+            banner_text => 'Erfasst'
+        },
+        {
+            description => 'confirmed report',
+            state => 'confirmed',
+            banner_id => 'closed',
+            banner_text => 'Aufgenommen',
+        },
+        {
+            description => 'fixed report',
+            state => 'fixed - council',
+            banner_id => 'fixed',
+            banner_text => 'Beantwortet',
+        },
+        {
+            description => 'closed report',
+            state => 'external',
+            banner_id => 'closed',
+            banner_text => 'Extern',
+        },
+        {
+            description => 'in progress report',
+            state => 'in progress',
+            banner_id => 'progress',
+            banner_text => 'In Bearbeitung',
+        },
+        {
+            description => 'planned report',
+            state => 'feedback pending',
+            banner_id => 'progress',
+            banner_text => 'In Bearbeitung',
+        },
+        {
+            description => 'jurisdiction unknown',
+            state => 'jurisdiction unknown',
+            banner_id => 'fixed',
+            banner_text => 'Zust\x{e4}ndigkeit unbekannt',
+        },
+    ) {
+        subtest "banner for $test->{description}" => sub {
+            $report->state( $test->{state} );
+            $report->update;
+
+            $mech->get_ok("/report/" . $report->id);
+            is $mech->uri->path, "/report/" . $report->id, "at /report/" . $report->id;
+            my $banner = $mech->extract_problem_banner;
+            if ( $banner->{text} ) {
+                $banner->{text} =~ s/^ //g;
+                $banner->{text} =~ s/ $//g;
+            }
+
+            is $banner->{id}, $test->{banner_id}, 'banner id';
+            if ($test->{banner_text}) {
+                like_string( $banner->{text}, qr/$test->{banner_text}/i, 'banner text is ' . $test->{banner_text} );
+            } else {
+                is $banner->{text}, $test->{banner_text}, 'banner text';
+            }
+
+        };
+    }
+    $report->update({ state => 'submitted' });
+  };
+};
 
 # Check logging in to deal with this report
 FixMyStreet::override_config {
@@ -158,7 +242,7 @@ subtest "changing of categories" => sub {
         );
     }
 
-    # full Categories dropdown is hidden for unconfirmed reports
+    # full Categories dropdown is hidden for submitted reports
     $report->update({ state => 'confirmed' });
 
     # put report into known category
@@ -269,17 +353,18 @@ subtest "report_edit" => sub {
 
         $mech->get_ok( '/admin/report_edit/' . $report->id );
         $mech->submit_form_ok( { with_fields => { state => 'hidden' } } );
-        $mech->get_ok( '/admin/report_edit/' . $report->id );
+        $mech->get_ok( '/report/' . $report->id, 'still visible as response not published yet' );
 
         $report->discard_changes;
         is ( $report->get_extra_metadata('moderated_overdue'), 0, 'Still marked moderated_overdue' );
         is ( $report->get_extra_metadata('closed_overdue'),    undef, "Marking hidden doesn't set closed_overdue..." );
-        is ( $report->state, 'planned', 'Marking hidden actually sets state to planned');
+        is ( $report->state, 'feedback pending', 'Marking hidden actually sets state to feedback pending');
         is ( $report->get_extra_metadata('closure_status'), 'hidden', 'Marking hidden sets closure_status to hidden');
         is get_moderated_count(), 1, 'Check still counted moderated'
             or diag $report->get_column('extra');
 
         # publishing actually sets hidden
+        $mech->get_ok( '/admin/report_edit/' . $report->id );
         $mech->form_with_fields( 'status_update' );
         $mech->submit_form_ok( { button => 'publish_response' } );
         $mech->get_ok( '/admin/report_edit/' . $report->id );
@@ -289,6 +374,12 @@ subtest "report_edit" => sub {
         is ( $report->state, 'hidden', 'Closing as hidden sets state to hidden');
         is ( $report->get_extra_metadata('closure_status'), undef, 'Closing as hidden unsets closure_status');
 
+        $mech->submit_form_ok( { with_fields => { new_internal_note => 'Initial internal note.' } } );
+        $report->discard_changes;
+        is ( $report->state, 'hidden', 'Another internal note does not reopen');
+
+        $mech->get( '/report/' . $report->id);
+        is $mech->res->code, 410;
 
         reset_report_state($report);
         is ( $report->get_extra_metadata('moderated_overdue'), undef, 'Sanity check' );
@@ -404,6 +495,12 @@ subtest 'SDM' => sub {
         $mech->submit_form_ok( { button => 'no_more_updates' } );
         is $mech->uri->path, '/admin/summary', "redirected now finished with report.";
 
+        # Can still view the edit page but can't change anything
+        $mech->get_ok( '/admin/report_edit/' . $report->id );
+        $mech->content_contains('<input disabled');
+        $mech->submit_form_ok( { with_fields => { status_update => 'This is a disallowed update.' } } );
+        $mech->content_lacks('This is a disallowed update');
+
         $mech->get_ok( '/report/' . $report->id );
         $mech->content_contains('In Bearbeitung');
         $mech->content_contains('Test Test');
@@ -416,7 +513,7 @@ subtest 'SDM' => sub {
     $mech->clear_emails_ok;
 
     $report->discard_changes;
-    is $report->state, 'planned', 'Report now in planned state';
+    is $report->state, 'feedback pending', 'Report now in feedback pending state';
 
     subtest 'send_back' => sub {
         FixMyStreet::override_config {
@@ -441,8 +538,8 @@ subtest 'SDM' => sub {
             $mech->get_ok( '/admin/report_edit/' . $report->id );
             $mech->submit_form_ok( { button => 'not_contactable', form_number => 2 } );
             $report->discard_changes;
-            is $report->state, 'planned', 'Report sent back to Rueckmeldung ausstehend state';
-            is $report->get_extra_metadata('closure_status'), 'partial', 'Report sent back to partial (not_contactable) state';
+            is $report->state, 'feedback pending', 'Report sent back to Rueckmeldung ausstehend state';
+            is $report->get_extra_metadata('closure_status'), 'not contactable', 'Report sent back to not_contactable state';
             is $report->bodies_str, $division->id, 'Report sent back to division';
         };
     };
@@ -458,7 +555,7 @@ FixMyStreet::override_config {
 };
 
 reset_report_state($report);
-$report->update({ state => 'planned' });
+$report->update({ state => 'feedback pending' });
 
 $mech->content_contains( 'report_edit/' . $report->id );
 $mech->content_contains( DateTime->now->strftime("%d.%m.%Y") );
@@ -493,9 +590,9 @@ like $email->header('From'), qr/do-not-reply\@example.org/, 'from line looks cor
 like $email->body, qr/FINAL UPDATE/, 'body looks correct';
 $mech->clear_emails_ok;
 
-# Assign planned (via confirmed), don't confirm email
+# Assign feedback pending (via confirmed), don't confirm email
 @reports = $mech->create_problems_for_body( 1, $division->id, 'Second', {
-    state              => 'unconfirmed',
+    state              => 'submitted',
     confirmed          => undef,
     cobrand            => 'zurich',
     areas => ',423017,',
@@ -509,7 +606,7 @@ FixMyStreet::override_config {
     $mech->get_ok( '/admin/report_edit/' . $report->id );
     $mech->submit_form_ok( { with_fields => { state => 'confirmed' } } );
     $mech->get_ok( '/admin/report_edit/' . $report->id );
-    $mech->submit_form_ok( { with_fields => { state => 'planned' } } );
+    $mech->submit_form_ok( { with_fields => { state => 'feedback pending' } } );
     $mech->get_ok( '/report/' . $report->id );
 };
 $mech->content_contains('In Bearbeitung');
@@ -536,7 +633,7 @@ $mech->email_count_is(0);
 # Report assigned to third party
 
 @reports = $mech->create_problems_for_body( 1, $division->id, 'Third', {
-    state              => 'unconfirmed',
+    state              => 'submitted',
     confirmed          => undef,
     cobrand            => 'zurich',
     areas => ',423017,',
@@ -551,8 +648,8 @@ subtest "external report triggers email" => sub {
     }, sub {
 
         # required to see body_external field
-        $report->state('planned');
-        $report->set_extra_metadata('closure_status' => 'closed');
+        $report->state('feedback pending');
+        $report->set_extra_metadata('closure_status' => 'external');
         # Set the public_response manually here because the default one will have line breaks that get escaped as HTML, causing the comparison to fail.
         $report->set_extra_metadata('public_response' => 'Freundliche Gruesse Ihre Stadt Zuerich');
         $report->update;
@@ -568,7 +665,7 @@ subtest "external report triggers email" => sub {
         $report->discard_changes;
         $mech->get_ok( '/report/' . $report->id );
     };
-    is ($report->state, 'closed', 'Report was closed correctly');
+    is ($report->state, 'external', 'Report was closed correctly');
     $mech->content_contains('Extern')
         or die $mech->content;
     $mech->content_contains('Third Test');
@@ -589,8 +686,8 @@ subtest "external report triggers email" => sub {
         }, sub {
             $mech->get_ok( '/admin' );
             # required to see body_external field
-            $report->state('planned');
-            $report->set_extra_metadata('closure_status' => 'closed');
+            $report->state('feedback pending');
+            $report->set_extra_metadata('closure_status' => 'external');
             $report->set_extra_metadata('public_response' => 'Freundliche Gruesse Ihre Stadt Zuerich');
             $report->update;
 
@@ -625,10 +722,10 @@ subtest "external report triggers email" => sub {
         }, sub {
             # set as wish
             $report->discard_changes;
-            $report->state('planned');
-            $report->set_extra_metadata('closure_status' => 'investigating');
+            $report->state('feedback pending');
+            $report->set_extra_metadata('closure_status' => 'wish');
             $report->update;
-            is ($report->state, 'planned', 'Sanity check') or die;
+            is ($report->state, 'feedback pending', 'Sanity check') or die;
 
             $mech->get_ok( '/admin/report_edit/' . $report->id );
 
@@ -639,6 +736,9 @@ subtest "external report triggers email" => sub {
                     body_external => $external_body->id,
                     external_message => $EXTERNAL_MESSAGE,
                 } });
+            # Wishes publicly viewable
+            $mech->get_ok( '/report/' . $report->id );
+            $mech->content_contains('Freundliche Gruesse Ihre Stadt Zuerich');
         };
         send_reports_for_zurich();
         $email = $mech->get_email;
@@ -658,12 +758,12 @@ subtest "external report triggers email" => sub {
         }, sub {
             # set as extern
             reset_report_state($report);
-            $report->state('planned');
-            $report->set_extra_metadata('closure_status' => 'closed');
+            $report->state('feedback pending');
+            $report->set_extra_metadata('closure_status' => 'external');
             $report->set_extra_metadata('email_confirmed' => 1);
             $report->unset_extra_metadata('public_response');
             $report->update;
-            is ($report->state, 'planned', 'Sanity check') or die;
+            is ($report->state, 'feedback pending', 'Sanity check') or die;
 
             $mech->get_ok( '/admin/report_edit/' . $report->id );
 
@@ -865,7 +965,7 @@ subtest "test admin_log" => sub {
     # XXX: following is dependent on all of test up till now, rewrite to explicitly
     # test which things need to be logged!
     is scalar @entries, 4, 'State changes logged';
-    is $entries[-1]->action, 'state change to closed', 'State change logged as expected';
+    is $entries[-1]->action, 'state change to external', 'State change logged as expected';
 };
 
 subtest 'email images to external partners' => sub {
@@ -885,7 +985,7 @@ subtest 'email images to external partners' => sub {
         # The below email comparison must not have an external message.
         $report->unset_extra_metadata('external_message');
         $report->update({
-            state => 'closed',
+            state => 'external',
             photo => $fileid,
             external_body => $external_body->id,
         });
@@ -937,9 +1037,9 @@ subtest 'Status update shown as appropriate' => sub {
     }, sub {
         # ALL closed states must hide the public_response edit, and public ones
         # must show the answer in blue.
-        for (['planned', 1, 0, 0],
+        for (['feedback pending', 1, 0, 0],
              ['fixed - council', 0, 1, 0],
-             ['closed', 0, 1, 0],
+             ['external', 0, 1, 0],
              ['hidden', 0, 0, 1])
          {
             my ($state, $update, $public, $user_response) = @$_;

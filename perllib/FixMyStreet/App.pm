@@ -232,8 +232,6 @@ sub setup_request {
 
     $c->model('DB::Problem')->set_restriction( $cobrand->site_key() );
 
-    Memcached::set_namespace( FixMyStreet->config('FMS_DB_NAME') . ":" );
-
     FixMyStreet::Map::set_map_class( $cobrand->map_type || $c->get_param('map_override') );
     # All pages need this, either loading it or prefetching it
     $c->stash->{map_js} = FixMyStreet::Map::map_javascript();
@@ -344,6 +342,24 @@ sub send_email {
     my $extra_stash_values = shift || {};
 
     my $sender = $c->config->{DO_NOT_REPLY_EMAIL};
+    my $email = $c->construct_email($template, $extra_stash_values) or return;
+
+    my $result = 0;
+    try {
+        FixMyStreet::Email::Sender->send($email, { from => $sender });
+        $result = $email;
+    } catch {
+        my $error = $_ || 'unknown error';
+        $c->log->error("$error");
+    };
+    return $result;
+}
+
+sub construct_email {
+    my ($c, $template, $extra_stash_values) = @_;
+    $extra_stash_values //= {};
+
+    my $sender = $c->config->{DO_NOT_REPLY_EMAIL};
     my $sender_name = $c->cobrand->contact_name;
 
     # create the vars to pass to the email template
@@ -354,6 +370,8 @@ sub send_email {
         %$extra_stash_values,
         additional_template_paths => \@include_path,
     };
+    $vars->{site_name} = Utils::trim_text($c->view('Email')->render($c, 'site-name.txt', $vars));
+    $vars->{signature} = $c->view('Email')->render($c, 'signature.txt', $vars);
 
     return if FixMyStreet::Email::is_abuser($c->model('DB')->schema, $vars->{to});
 
@@ -378,17 +396,7 @@ sub send_email {
     $data->{_html_} = $html_compiled if $html_compiled;
     $data->{_html_images_} = \@inline_images if @inline_images;
 
-    my $email = mySociety::Locale::in_gb_locale { FixMyStreet::Email::construct_email($data) };
-
-    my $result = 0;
-    try {
-        FixMyStreet::Email::Sender->send($email, { from => $sender });
-        $result = $email;
-    } catch {
-        my $error = $_ || 'unknown error';
-        $c->log->error("$error");
-    };
-    return $result;
+    return mySociety::Locale::in_gb_locale { FixMyStreet::Email::construct_email($data) };
 }
 
 =head2 uri_with

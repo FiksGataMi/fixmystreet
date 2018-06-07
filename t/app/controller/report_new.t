@@ -1,3 +1,4 @@
+use Test::MockModule;
 use FixMyStreet::TestMech;
 use FixMyStreet::App;
 use Web::Scraper;
@@ -85,6 +86,16 @@ my $contact8 = $mech->create_contact_ok(
     body_id => $body_ids{2504},
     category => 'Street lighting',
     email => 'highways@example.com'
+);
+my $contact9 = $mech->create_contact_ok(
+    body_id => $body_ids{2226}, # Gloucestershire
+    category => 'Street lighting',
+    email => 'streetlights-2226@example.com',
+);
+my $contact10 = $mech->create_contact_ok(
+    body_id => $body_ids{2326}, # Cheltenham
+    category => 'Street lighting',
+    email => 'streetlights-2326@example.com',
 );
 
 # test that the various bit of form get filled in and errors correctly
@@ -932,6 +943,125 @@ foreach my $test (
 
 }
 
+# XXX add test for category with multiple bodies
+foreach my $test (
+    {
+        desc => "test report creation for multiple bodies",
+        category => 'Street lighting',
+        councils => [ 2226, 2326 ],
+        extra_fields => {},
+        email_count => 2,
+    },
+    {
+        desc => "test single_body_only means only one report body",
+        category => 'Street lighting',
+        councils => [ 2326 ],
+        extra_fields => { single_body_only => 'Cheltenham Borough Council' },
+        email_count => 1,
+    },
+    {
+        desc => "test invalid single_body_only means multiple report bodies",
+        category => 'Street lighting',
+        councils => [ 2226, 2326 ],
+        extra_fields => { single_body_only => 'Invalid council' },
+        email_count => 1,
+    },
+) {
+    subtest $test->{desc} => sub {
+
+        # check that the user does not exist
+        my $test_email = 'test-2@example.com';
+
+        $mech->clear_emails_ok;
+        my $user = $mech->log_in_ok($test_email);
+
+        # setup the user.
+        ok $user->update(
+            {
+                name  => 'Test User',
+                phone => '01234 567 890',
+            }
+          ),
+          "set users details";
+
+        # submit initial pc form
+        $mech->get_ok('/around');
+        FixMyStreet::override_config {
+            ALLOWED_COBRANDS => [ { fixmystreet => '.' } ],
+            MAPIT_URL => 'http://mapit.uk/',
+        }, sub {
+            $mech->submit_form_ok( { with_fields => { pc => 'GL50 2PR', } },
+                "submit location" );
+
+            # click through to the report page
+            $mech->follow_link_ok( { text_regex => qr/skip this step/i, },
+                "follow 'skip this step' link" );
+
+            # check that the fields are correctly prefilled
+            is_deeply(
+                $mech->visible_form_values,
+                {
+                    title         => '',
+                    detail        => '',
+                    may_show_name => '1',
+                    name          => 'Test User',
+                    phone         => '01234 567 890',
+                    photo1        => '',
+                    photo2        => '',
+                    photo3        => '',
+                    category      => '-- Pick a category --',
+                },
+                "user's details prefilled"
+            );
+
+            $mech->submit_form_ok(
+                {
+                    with_fields => {
+                        title         => "Test Report at café",
+                        detail        => 'Test report details.',
+                        photo1        => '',
+                        name          => 'Joe Bloggs',
+                        may_show_name => '1',
+                        phone         => '07903 123 456',
+                        category      => $test->{category},
+                        %{$test->{extra_fields}}
+                    }
+                },
+                "submit good details"
+            );
+        };
+
+        # find the report
+        my $report = $user->problems->first;
+        ok $report, "Found the report";
+
+        # Check the report has been assigned appropriately
+        is $report->bodies_str, join(',', @body_ids{@{$test->{councils}}});
+
+        $mech->content_contains('Thank you for reporting this issue');
+
+        # check that no emails have been sent
+        $mech->email_count_is(0);
+
+        # check report is confirmed and available
+        is $report->state, 'confirmed', "report is now confirmed";
+        $mech->get_ok( '/report/' . $report->id );
+
+        # Test that AJAX pages return the right data
+        $mech->get_ok(
+            '/around?ajax=1&bbox=' . ($report->longitude - 0.01) . ',' .  ($report->latitude - 0.01)
+            . ',' . ($report->longitude + 0.01) . ',' .  ($report->latitude + 0.01)
+        );
+        $mech->content_contains( "Test Report at caf\xc3\xa9" );
+        $saved_lat = $report->latitude;
+        $saved_lon = $report->longitude;
+
+        # cleanup
+        $mech->delete_user($user);
+    };
+
+}
+
 subtest "Test inactive categories" => sub {
     FixMyStreet::override_config {
         ALLOWED_COBRANDS => [ { fixmystreet => '.' } ],
@@ -955,6 +1085,21 @@ subtest "Test inactive categories" => sub {
         $mech->content_contains('Trees');
         # Change back
         $contact2->update( { state => 'confirmed' } );
+    };
+};
+
+subtest "category groups" => sub {
+    my $cobrand = Test::MockModule->new('FixMyStreet::Cobrand::FixMyStreet');
+    $cobrand->mock('enable_category_groups', sub { 1 });
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => 'fixmystreet',
+        MAPIT_URL => 'http://mapit.uk/',
+    }, sub {
+        $contact2->update( { extra => { group => 'Roads' } } );
+        $contact9->update( { extra => { group => 'Roads' } } );
+        $contact10->update( { extra => { group => 'Roads' } } );
+        $mech->get_ok("/report/new?lat=$saved_lat&lon=$saved_lon");
+        $mech->content_like(qr{<optgroup label="Roads">\s*<option value='Potholes'>Potholes</option>\s*<option value='Street lighting'>Street lighting</option></optgroup>});
     };
 };
 
@@ -1040,6 +1185,7 @@ FixMyStreet::override_config {
     $extra_details = $mech->get_ok_json( '/report/new/ajax?latitude=' . $saved_lat . '&longitude=' . $saved_lon );
 };
 $mech->content_contains( "Pothol\xc3\xa9s" );
+like $extra_details->{councils_text}, qr/<strong>Cheltenham/;
 ok !$extra_details->{titles_list}, 'Non Bromley does not send back list of titles';
 
 FixMyStreet::override_config {
@@ -1733,7 +1879,11 @@ subtest "extra google analytics code displayed on email confirmation problem cre
     };
 };
 
-subtest "inspectors get redirected directly to the report page" => sub {
+foreach my $test (
+  { non_public => 0 },
+  { non_public => 1 },
+) {
+  subtest "inspectors get redirected directly to the report page, non_public=$test->{non_public}" => sub {
     FixMyStreet::override_config {
         ALLOWED_COBRANDS => [ { fixmystreet => '.' } ],
         BASE_URL => 'https://www.fixmystreet.com',
@@ -1746,10 +1896,14 @@ subtest "inspectors get redirected directly to the report page" => sub {
             body => $bodies[0],
             permission_type => 'planned_reports',
         });
+        $user->user_body_permissions->find_or_create({
+            body => $bodies[0],
+            permission_type => 'report_inspect',
+        });
 
         $mech->log_in_ok('inspector@example.org');
         $mech->get_ok('/');
-        $mech->submit_form_ok( { with_fields => { pc => 'GL50 2PR' } },
+        $mech->submit_form_ok( { with_fields => { pc => 'EH1 1BB' } },
             "submit location" );
         $mech->follow_link_ok(
             { text_regex => qr/skip this step/i, },
@@ -1766,6 +1920,7 @@ subtest "inspectors get redirected directly to the report page" => sub {
                     may_show_name => '1',
                     phone         => '07903 123 456',
                     category      => 'Trees',
+                    non_public => $test->{non_public},
                 }
             },
             "submit good details"
@@ -1773,6 +1928,7 @@ subtest "inspectors get redirected directly to the report page" => sub {
 
         like $mech->uri->path, qr/\/report\/[0-9]+/, 'Redirects directly to report';
     }
-};
+  };
+}
 
 done_testing();

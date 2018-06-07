@@ -1,3 +1,15 @@
+if (!Object.keys) {
+  Object.keys = function(obj) {
+    var result = [];
+    for (var prop in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, prop)) {
+        result.push(prop);
+      }
+    }
+    return result;
+  };
+}
+
 var fixmystreet = fixmystreet || {};
 
 fixmystreet.utils = fixmystreet.utils || {};
@@ -8,7 +20,7 @@ $.extend(fixmystreet.utils, {
         if (!location.search) {
             return qs;
         }
-        location.search.substring(1).split(/[;&]/).forEach(function(i) {
+        $.each(location.search.substring(1).split(/[;&]/), function(n, i) {
             var s = i.split('='),
                 k = s[0],
                 v = s[1] && decodeURIComponent(s[1].replace(/\+/g, ' '));
@@ -40,19 +52,27 @@ $.extend(fixmystreet.utils, {
     };
 
     $.extend(fixmystreet.maps, {
-      // This function might be passed either an OpenLayers.LonLat (so has
-      // lon and lat), or an OpenLayers.Geometry.Point (so has x and y).
       update_pin: function(lonlat) {
+        // This function might be passed either an OpenLayers.LonLat (so has
+        // lon and lat), or an OpenLayers.Geometry.Point (so has x and y).
+        if (lonlat.x !== undefined && lonlat.y !== undefined) {
+            // It's a Point, convert to a LatLon
+            lonlat = new OpenLayers.LonLat(lonlat.x, lonlat.y);
+        }
+
         var transformedLonlat = lonlat.clone().transform(
             fixmystreet.map.getProjectionObject(),
             new OpenLayers.Projection("EPSG:4326")
         );
 
-        var lat = transformedLonlat.lat || transformedLonlat.y;
-        var lon = transformedLonlat.lon || transformedLonlat.x;
+        var lat = transformedLonlat.lat;
+        var lon = transformedLonlat.lon;
 
         document.getElementById('fixmystreet.latitude').value = lat;
         document.getElementById('fixmystreet.longitude').value = lon;
+
+        $(fixmystreet).trigger('maps:update_pin', [ lonlat ]);
+
         return {
             'url': { 'lon': lon, 'lat': lat },
             'state': { 'lon': lonlat.lon, 'lat': lonlat.lat }
@@ -88,6 +108,7 @@ $.extend(fixmystreet.utils, {
             fixmystreet.markers.features[0].move(lonlat);
         } else {
             var markers = fixmystreet.maps.markers_list( [ [ lonlat.lat, lonlat.lon, fixmystreet.pin_new_report_colour ] ], false );
+            fixmystreet.bbox_strategy.layer.protocol.abort(fixmystreet.bbox_strategy.response);
             fixmystreet.bbox_strategy.deactivate();
             fixmystreet.markers.removeAllFeatures();
             fixmystreet.markers.addFeatures( markers );
@@ -117,7 +138,7 @@ $.extend(fixmystreet.utils, {
                     fixmystreet.map.getProjectionObject()
                 );
             }
-            var id = +pin[3];
+            var id = pin[3] === undefined ? pin[3] : +pin[3];
             var marker_size = (id === window.selected_problem_id) ? selected_size : size;
             var marker = new OpenLayers.Feature.Vector(loc, {
                 colour: pin[2],
@@ -238,18 +259,18 @@ $.extend(fixmystreet.utils, {
        * the spinner in the DOM.
        */
       loading_spinner: {
-          count: 0,
+          count: {},
           show: function() {
-              fixmystreet.maps.loading_spinner.count++;
-              if (fixmystreet.maps.loading_spinner.count > 0) {
+              fixmystreet.maps.loading_spinner.count[this.id] = 1;
+              if (Object.keys(fixmystreet.maps.loading_spinner.count).length) {
                   // Show the loading indicator over the map
                   $('#loading-indicator').removeClass('hidden');
                   $('#loading-indicator').attr('aria-hidden', false);
               }
           },
           hide: function() {
-              fixmystreet.maps.loading_spinner.count--;
-              if (fixmystreet.maps.loading_spinner.count <= 0) {
+              delete fixmystreet.maps.loading_spinner.count[this.id];
+              if (!Object.keys(fixmystreet.maps.loading_spinner.count).length) {
                   // Remove loading indicator
                   $('#loading-indicator').addClass('hidden');
                   $('#loading-indicator').attr('aria-hidden', true);
@@ -290,6 +311,9 @@ $.extend(fixmystreet.utils, {
             return;
         }
 
+        // clickFeature operates on touchstart, we do not want the map click taking place on touchend!
+        fixmystreet.maps.click_control.deactivate();
+
         // All of this, just so that ctrl/cmd-click on a pin works?!
         var event;
         if (typeof window.MouseEvent === 'function') {
@@ -319,20 +343,6 @@ $.extend(fixmystreet.utils, {
     function categories_or_status_changed() {
         // If the category or status has changed we need to re-fetch map markers
         fixmystreet.markers.refresh({force: true});
-    }
-
-    function parse_query_string() {
-        var qs = {};
-        if (!location.search) {
-            return qs;
-        }
-        location.search.substring(1).split(/[&;]/).forEach(function(i) {
-            var s = i.split('='),
-                k = s[0],
-                v = s[1] && decodeURIComponent(s[1].replace(/\+/g, ' '));
-            qs[k] = v;
-        });
-        return qs;
     }
 
     function replace_query_parameter(qs, id, key) {
@@ -570,6 +580,9 @@ $.extend(fixmystreet.utils, {
         });
         fixmystreet.markers.events.register( 'loadstart', null, fixmystreet.maps.loading_spinner.show);
         fixmystreet.markers.events.register( 'loadend', null, fixmystreet.maps.loading_spinner.hide);
+        OpenLayers.Request.XMLHttpRequest.onabort = function() {
+            fixmystreet.markers.events.triggerEvent("loadend", {response: null});
+        };
 
         var markers = fixmystreet.maps.markers_list( fixmystreet.pins, true );
         fixmystreet.markers.addFeatures( markers );
@@ -710,7 +723,7 @@ $.extend(fixmystreet.utils, {
         }
 
         if (document.getElementById('mapForm')) {
-            var click = new OpenLayers.Control.Click();
+            var click = fixmystreet.maps.click_control = new OpenLayers.Control.Click();
             fixmystreet.map.addControl(click);
             click.activate();
         }

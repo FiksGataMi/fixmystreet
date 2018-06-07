@@ -36,8 +36,8 @@ my $report_id = $report->id;
 my $report2_id = $report2->id;
 my $report3_id = $report3->id;
 
-
-my $user = $mech->log_in_ok('test@example.com');
+$mech->create_user_ok('body@example.com', name => 'Body User');
+my $user = $mech->log_in_ok('body@example.com');
 $user->set_extra_metadata('categories', [ $contact->id ]);
 $user->update( { from_body => $oxon } );
 
@@ -50,18 +50,36 @@ FixMyStreet::override_config {
         $mech->content_lacks('Save changes');
         $mech->content_lacks('Priority');
         $mech->content_lacks('Traffic management');
+        $mech->content_lacks('/admin/report_edit/'.$report_id.'">admin</a>)');
 
         $user->user_body_permissions->create({ body => $oxon, permission_type => 'report_edit_priority' });
         $mech->get_ok("/report/$report_id");
         $mech->content_contains('Save changes');
         $mech->content_contains('Priority');
         $mech->content_lacks('Traffic management');
+        $mech->content_lacks('/admin/report_edit/'.$report_id.'">admin</a>)');
 
         $user->user_body_permissions->create({ body => $oxon, permission_type => 'report_inspect' });
         $mech->get_ok("/report/$report_id");
         $mech->content_contains('Save changes');
         $mech->content_contains('Priority');
         $mech->content_contains('Traffic management');
+        $mech->content_lacks('/admin/report_edit/'.$report_id.'">admin</a>)');
+    };
+
+    subtest "council staff can't see admin report edit link on FMS.com" => sub {
+        my $report_edit_permission = $user->user_body_permissions->create({
+            body => $oxon, permission_type => 'report_edit' });
+        $mech->get_ok("/report/$report_id");
+        $mech->content_lacks('/admin/report_edit/'.$report_id.'">admin</a>)');
+        $report_edit_permission->delete;
+    };
+
+    subtest "superusers can see admin report edit link on FMS.com" => sub {
+        $user->update({is_superuser => 1});
+        $mech->get_ok("/report/$report_id");
+        $mech->content_contains('/admin/report_edit/'.$report_id.'">admin</a>)');
+        $user->update({is_superuser => 0});
     };
 
     subtest "test basic inspect submission" => sub {
@@ -539,6 +557,13 @@ FixMyStreet::override_config {
         is $report->get_extra_metadata('traffic_information'), 'Signs and Cones', 'report data changed';
     };
 
+    subtest "admin link present on inspect page on cobrand" => sub {
+        my $report_edit_permission = $user->user_body_permissions->create({
+            body => $oxon, permission_type => 'report_edit' });
+        $mech->get_ok("/report/$report_id");
+        $mech->content_contains('/admin/report_edit/'.$report_id.'">admin</a>)');
+        $report_edit_permission->delete;
+    };
 };
 
 FixMyStreet::override_config {
@@ -559,6 +584,7 @@ FixMyStreet::override_config {
         my $expected_fields = {
           state => 'action scheduled',
           category => 'Cows',
+          non_public => undef,
           public_update => '',
           priority => $rp->id,
           include_update => '1',
@@ -593,6 +619,35 @@ FixMyStreet::override_config {
         is $report->category, "Badgers", "Report in correct category";
         is $report->comments->count, 1, "Only leaves one update";
         like $report->comments->first->text, qr/Category changed.*Badgers/, 'update text included category change';
+    };
+
+    subtest "test non-public changing" => sub {
+        $report->comments->delete;
+        is $report->non_public, 0, 'Not set to non-public';
+        $mech->get_ok("/report/$report_id");
+        $mech->submit_form(button => 'save', with_fields => { include_update => 0, non_public => 1 });
+        is $report->comments->count, 0, "No updates left";
+        $report->discard_changes;
+        is $report->non_public, 1, 'Now set to non-public';
+        $mech->submit_form(button => 'save', with_fields => { include_update => 0, non_public => 0 });
+        is $report->comments->count, 0, "No updates left";
+        $report->discard_changes;
+        is $report->non_public, 0, 'Not set to non-public';
+    };
+
+    subtest "test saved-at setting" => sub {
+        $report->comments->delete;
+        $mech->get_ok("/report/$report_id");
+        # set the timezone on this so the date comparison below doesn't fail due to mismatched
+        # timezones
+        my $now = DateTime->now(
+            time_zone =>  FixMyStreet->time_zone || FixMyStreet->local_time_zone
+        )->subtract(days => 1);
+        $mech->submit_form(button => 'save', form_id => 'report_inspect_form',
+            fields => { include_update => 1, public_update => 'An update', saved_at => $now->epoch });
+        $report->discard_changes;
+        is $report->comments->count, 1, "One update";
+        is $report->comments->first->confirmed, $now;
     };
 };
 

@@ -28,6 +28,7 @@ sub send {
             send_notpinpointed      => 0,
             use_service_as_deviceid => 0,
             extended_description    => 1,
+            multi_photos            => 0,
         );
 
         my $cobrand = $body->get_cobrand_handler || $row->get_cobrand_logged;
@@ -47,13 +48,15 @@ sub send {
             if ($_->{code} eq $id_field) {
                 push @$extra, { name => $id_field, value => $row->id };
             } elsif ($_->{code} eq 'closest_address' && $h->{closest_address}) {
-                push @$extra, { name => $_->{code}, value => $h->{$_->{code}} };
+                push @$extra, { name => $_->{code}, value => "$h->{closest_address}" };
             } elsif ($_->{code} =~ /^(easting|northing)$/) {
                 # NB If there's ever a cobrand with always_send_latlong=0 and
                 # send_notpinpointed=0 then this line will need changing to
                 # consider the send_notpinpointed check, as per the
                 # '#NOTPINPOINTED#' code in perllib/Open311.pm.
-                if ( $row->used_map || $open311_params{always_send_latlong} ) {
+                if ( $row->used_map || $open311_params{always_send_latlong} || (
+                    !$row->used_map && !$row->postcode && $open311_params{send_notpinpointed}
+                ) ) {
                     push @$extra, { name => $_->{code}, value => $h->{$_->{code}} };
                 }
             }

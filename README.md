@@ -14,12 +14,12 @@ RSS alerts of problems in their area.
 
 It was created in 2007 by [mySociety](https://www.mysociety.org/) for reporting
 problems to UK councils and has been copied around the world. The FixMyStreet
-Platform is now at version 2.3.1; see CHANGELOG.md for a version history.
+Platform is now at version 2.3.3; see CHANGELOG.md for a version history.
 
 ## Installation
 
 We've been working hard to make the FixMyStreet Platform easy to install and
-re-use in other countries - please see our site at <http://fixmystreet.org/>
+re-use in other countries - please see our site at <https://fixmystreet.org/>
 for help and documentation in installing the FixMyStreet Platform.
 
 For development, if you have Vagrant installed, you can clone the repo and run

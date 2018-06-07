@@ -44,6 +44,14 @@ __PACKAGE__->add_columns(
   { data_type => "boolean", default_value => \"false", is_nullable => 0 },
   "external_url",
   { data_type => "text", is_nullable => 1 },
+  "fetch_problems",
+  { data_type => "boolean", default_value => \"false", is_nullable => 0 },
+  "blank_updates_permitted",
+  { data_type => "boolean", default_value => \"false", is_nullable => 1 },
+  "convert_latlong",
+  { data_type => "boolean", default_value => \"false", is_nullable => 0 },
+  "extra",
+  { data_type => "text", is_nullable => 1 },
 );
 __PACKAGE__->set_primary_key("id");
 __PACKAGE__->has_many(
@@ -118,13 +126,17 @@ __PACKAGE__->has_many(
 );
 
 
-# Created by DBIx::Class::Schema::Loader v0.07035 @ 2017-02-13 15:11:11
-# DO NOT MODIFY THIS OR ANYTHING ABOVE! md5sum:BOJANVwg3kR/1VjDq0LykA
+# Created by DBIx::Class::Schema::Loader v0.07035 @ 2018-04-05 14:29:33
+# DO NOT MODIFY THIS OR ANYTHING ABOVE! md5sum:HV8IM2C1ErrpvXoRTZ1B1Q
+
+__PACKAGE__->load_components("+FixMyStreet::DB::RABXColumn");
+__PACKAGE__->rabx_column('extra');
 
 use Moo;
 use namespace::clean;
 
-with 'FixMyStreet::Roles::Translatable';
+with 'FixMyStreet::Roles::Translatable',
+     'FixMyStreet::Roles::Extra';
 
 sub url {
     my ( $self, $c, $args ) = @_;

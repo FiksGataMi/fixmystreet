@@ -4,6 +4,7 @@
     <ul class="item-list item-list--updates">
 [% END %]
         <li class="item-list__item item-list__item--updates">
+            <a name="update_[% update.id %]" class="internal-link-fixed-header"></a>
           [% IF permissions.moderate; original_update = update.moderation_original_data %]
             <form method="post" action="/moderate/report/[% problem.id %]/update/[% update.id %]">
                 <input type="hidden" name="token" value="[% csrf_token %]">
@@ -25,7 +26,6 @@
                     <p class="meta-2">[% INCLUDE meta_line %]</p>
                 </div>
             [% ELSE %]
-                <a name="update_[% update.id %]" class="internal-link-fixed-header"></a>
                 [% INCLUDE 'report/photo.html' object=update %]
                 <div class="item-list__update-text">
                     <div class="moderate-display">
@@ -41,26 +41,7 @@
                     </div>
                     [% END %]
 
-                  [% # Small chance of duplicates in the case of fixed - user followed by fixed - council %]
-                  [% SET update_state = update.problem_state %]
-                  [% IF ( update_state AND update_state != global.last_state AND NOT (global.last_state == "" AND update.problem_state == 'confirmed') ) OR
-                     update.mark_fixed OR update.mark_open
-                  %]
-                    <p class="meta-2">[% loc('State changed to:') %] [% update.problem_state_display(c) %]</p>
-                    [%- global.last_state = update_state %]
-                    [%- IF update_state == "" AND update.mark_fixed %][% global.last_state = 'fixed - user' %][% END %]
-                    [%- IF update_state == "" AND update.mark_open %][% global.last_state = 'confirmed' %][% END %]
-                  [% END %]
-
-                    <p class="meta-2">
-                        [% INCLUDE meta_line %]
-                        [% IF c.user_exists AND c.user.id == update.user_id AND !update.anonymous %]
-                            <small>(<a href="/my/anonymize?update=[% update.id | uri %]" class="js-hide-name">[% loc('Hide your name?') %]</a>)</small>
-                        [% END %]
-                        [% mlog = update.latest_moderation_log_entry(); IF mlog %]
-                            <br />[% tprintf(loc('Moderated by %s at %s'), mlog.admin_user, prettify_dt(mlog.whenedited)) %]
-                        [% END %]
-                    </p>
+                    [% INCLUDE 'report/_update_state.html' %]
                 </div>
             [% END %]
             </div>

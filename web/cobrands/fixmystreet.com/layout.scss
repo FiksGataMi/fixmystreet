@@ -53,6 +53,8 @@
   font-style: normal;
 }
 
+$body-font: MuseoSans, Helmet, Freesans, sans-serif;
+
 /* Opera has a bug (from around 10.5 upwards to current 11.6) with showing the
  * table caption *at all* if the header is set to a font-face :( */
 noindex:-o-prefocus, #site-header {
@@ -122,17 +124,17 @@ body.fullwidthpage {
         h1 {
             font-size: 3em;
             font-weight: bold;
-            font-family: MuseoSans,Helmet,Freesans,sans-serif;
+            font-family: $body-font;
         }
         h2 {
-            font-family: MuseoSans,Helmet,Freesans,sans-serif;
+            font-family: $body-font;
         }
         #postcodeForm {
             div {
                 font-size: 1.3em;
                 width: 24em;
                 label {
-                    font-family: MuseoSans,Helmet,Freesans,sans-serif;
+                    font-family: $body-font;
                 }
                 input#pc {
                     color: #777;
@@ -147,13 +149,13 @@ body.fullwidthpage {
                     font-size: 1.1em;
                     height: 2.4em;
                     width: 3.5em;
-                    font-family: MuseoSans,Helmet,Freesans,sans-serif;
+                    font-family: $body-font;
                     font-weight: bold;
                 }
             }
         }
         a#geolocate_link {
-            font-family: MuseoSans,Helmet,Freesans,sans-serif;
+            font-family: $body-font;
             background: url(images/locate-me.png) $left 0 no-repeat;
             height: 34px;
             padding-#{$left}: 24px;
@@ -207,7 +209,7 @@ body.frontpage {
 }
 
 .next-steps__step {
-  font-family: MuseoSans,Helmet,Freesans,sans-serif;
+  font-family: $body-font;
   float: $left;
   width: 33%;
   padding: 1.8em;
@@ -307,31 +309,124 @@ footer {
 }
 
 .fms-pro-promo {
-  margin: 1em 0 3em 0;
-  padding: 2em;
-  background: $primary url(images/tile-y.jpg) 0 0 repeat;
+    @include clearfix();
+    @include flex-container();
 
-  @media ($high-dpi-screen) {
-    background-image: url(images/tile-y@2x.jpg);
-    background-size: 500px;
-  }
+    margin: 1em 0 3em 0;
 
-  p {
-    font-size: 1.2em;
-    max-width: 26em;
-  }
+    h2 {
+        font-family: inherit;
+        font-weight: bold;
+    }
 
-  h2 {
-    font-family: inherit;
-    font-weight: bold;
-    font-size: 2em;
-  }
+    @media (min-width: 60em) {
+        p {
+            font-size: 1.2em;
+        }
 
-  @media (min-width: 60em) {
-    padding: 3em;
-  }
+        h2 {
+            font-size: 2em;
+        }
+    }
+}
+
+.fms-pro-promo__pro,
+.fms-pro-promo__stats {
+    @include box-sizing(border-box);
+    float: left;
+    padding: 2em;
+
+    @media (min-width: 60em) {
+        padding: 3em;
+    }
+}
+
+.fms-pro-promo__pro {
+    width: 40%;
+    background: $primary url(images/tile-y.jpg) 0 0 repeat;
+
+    @media ($high-dpi-screen) {
+        background-image: url(images/tile-y@2x.jpg);
+        background-size: 500px;
+    }
+}
+
+.fms-pro-promo__stats {
+    width: 56%;
+    margin-left: 4%;
+    border-bottom: none;
+    background: #fff;
+    position: relative;
+
+    &:before {
+        content: "NEW";
+        display: block;
+        position: absolute;
+        top: -0.5em;
+        right: 0.5em;
+        background: $primary;
+        font-weight: bold;
+        width: 4em;
+        line-height: 4em;
+        text-align: center;
+        border-radius: 100%;
+        transform: rotate(5deg);
+    }
 }
 
 .footer-marketing {
   color: #ccc;
+}
+
+.healthcheck-unit {
+    padding-left: 94px;
+    background-size: 64px;
+
+    & + & {
+        margin-top: 2em;
+    }
+}
+
+.healthcheck-cta-trio {
+    @include clearfix();
+    margin: 0 -2em;
+    text-align: center;
+
+    .dashboard-item {
+        padding-top: 1em;
+        padding-bottom: 1em;
+    }
+}
+
+.dashboard-fms-case-studies {
+    & > div {
+        @include flex-container();
+        @include flex-wrap(wrap);
+        @include justify-content(space-between);
+
+        a {
+            @include box-sizing(border-box);
+            display: block;
+            width: 48%;
+            margin-bottom: 0;
+        }
+    }
+}
+
+.council-dashboard-login {
+    margin: -1em;
+    padding: 2em;
+
+    form {
+        margin-top: 4em;
+        margin-bottom: 4em;
+    }
+}
+
+.area-reports-dashboard-cta {
+    // To overpower `body.mappage .full-width` in core.
+    body.mappage & {
+        margin-top: 1em;
+        margin-bottom: 1em;
+    }
 }

@@ -228,19 +228,18 @@ sub check_and_stash_category : Private {
     my @bodies = $c->model('DB::Body')->active->for_areas(keys %$all_areas)->all;
     my %bodies = map { $_->id => $_ } @bodies;
 
-    my @contacts = $c->model('DB::Contact')->not_deleted->search(
+    my @categories = $c->model('DB::Contact')->not_deleted->search(
         {
             body_id => [ keys %bodies ],
         },
         {
-            columns => [ 'category' ],
+            columns => [ 'category', 'extra' ],
             order_by => [ 'category' ],
             distinct => 1
         }
     )->all;
-    my @categories = map { { name => $_->category, value => $_->category_display } } @contacts;
     $c->stash->{filter_categories} = \@categories;
-    my %categories_mapped = map { $_->{name} => 1 } @categories;
+    my %categories_mapped = map { $_->category => 1 } @categories;
 
     my $categories = [ $c->get_param_list('filter_category', 1) ];
     my %valid_categories = map { $_ => 1 } grep { $_ && $categories_mapped{$_} } @$categories;
@@ -257,12 +256,16 @@ sub map_features : Private {
 
     return if $c->get_param('js'); # JS will request the same (or more) data client side
 
+    # Allow the cobrand to add in any additional query parameters
+    my $extra_params = $c->cobrand->call_hook('display_location_extra_params');
+
     my ( $on_map, $nearby, $distance ) =
       FixMyStreet::Map::map_features(
         $c, %$extra,
         categories => [ keys %{$c->stash->{filter_category}} ],
         states => $c->stash->{filter_problem_states},
         order => $c->stash->{sort_order},
+        extra => $extra_params,
       );
 
     my @pins;
@@ -303,6 +306,27 @@ sub ajax : Path('/ajax') {
 
     $c->forward('map_features', [ { bbox => $c->stash->{bbox} } ]);
     $c->forward('/reports/ajax', [ 'around/on_map_list_items.html' ]);
+}
+
+sub location_closest_address : Path('/ajax/closest') {
+    my ( $self, $c ) = @_;
+    $c->res->content_type('application/json; charset=utf-8');
+
+    my $lat = $c->get_param('lat');
+    my $lon = $c->get_param('lon');
+    unless ($lat && $lon) {
+        $c->res->status(404);
+        $c->res->body('');
+        return;
+    }
+
+    my $closest = $c->cobrand->find_closest({ latitude => $lat, longitude => $lon });
+    my $data = {
+        road => $closest->{address}{addressLine},
+        full_address => $closest->{name},
+    };
+
+    $c->res->body(encode_json($data));
 }
 
 sub location_autocomplete : Path('/ajax/geocode') {

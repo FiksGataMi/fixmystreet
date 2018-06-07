@@ -151,15 +151,17 @@ function isR2L() {
   });
 })(jQuery);
 
-fixmystreet.hooks = fixmystreet.hooks || {};
-
 fixmystreet.mobile_reporting = {
   apply_ui: function() {
     // Creates the "app-like" mobile reporting UI with full screen map
     // and special "OK/Cancel" buttons etc.
     $('html').addClass('map-fullscreen only-map map-reporting');
     $('.mobile-map-banner span').text(translation_strings.place_pin_on_map);
-    $('html, body').scrollTop(0);
+    // Do this on a timeout, so it takes precedence over the browser’s
+    // remembered position, which we do not want, we want a fixed map.
+    setTimeout(function() {
+        $('html, body').scrollTop(0);
+    }, 0);
   },
 
   remove_ui: function() {
@@ -192,15 +194,6 @@ fixmystreet.resize_to = {
                 $(this).toggleClass('btn--forward btn--cancel');
             });
     }
-
-    // On the front page, make it so that the "report a problem" menu item
-    // scrolls to the top of the page, and has a hover effect, rather than
-    // just being an innert span.
-    $('span.report-a-problem-btn').on('click.reportBtn', function() {
-        $('html, body').animate({scrollTop:0}, 500);
-    }).css({ cursor:'pointer' }).on('hover.reportBtn', function() {
-        $(this).toggleClass('hover');
-    });
   },
 
   desktop_page: function() {
@@ -211,10 +204,6 @@ fixmystreet.resize_to = {
     // been put into place by previous mobile UI.
     $('#report-a-problem-sidebar').show();
     $('.rap-notes-trigger').remove();
-
-    // On a desktop, so reset the "Report a problem" nav item to act
-    // like an innert span again.
-    $('span.report-a-problem-btn').css({ cursor:'' }).off('.reportBtn');
   }
 };
 
@@ -411,21 +400,20 @@ $.extend(fixmystreet.set_up, {
             if ( data.category_extra ) {
                 if ( $category_meta.length ) {
                     $category_meta.replaceWith( data.category_extra );
+                    // Preserve any existing values
+                    $category_meta.find("[name]").each(function() {
+                        $('#category_meta').find("[name="+this.name+"]").val(this.value);
+                    });
                 } else {
                     $('#form_category_row').after( data.category_extra );
                 }
             } else {
                 $category_meta.empty();
             }
+            $(fixmystreet).trigger('report_new:category_change:extras_received');
         });
 
-        if (fixmystreet.hooks.update_problem_fields) {
-            args.prefill_reports = $(this).data('prefill');
-            args.role = $(this).data('role');
-            args.body = $(this).data('body');
-
-            fixmystreet.hooks.update_problem_fields(args);
-        }
+        $(fixmystreet).trigger('report_new:category_change', [ $(this) ]);
     });
   },
 
@@ -456,6 +444,9 @@ $.extend(fixmystreet.set_up, {
 
     var add_option = function(el) {
         $group_select.append($(el).clone());
+        if (el.selected) {
+            $group_select.val(el.value);
+        }
     };
 
     var add_optgroup = function(el) {
@@ -475,11 +466,11 @@ $.extend(fixmystreet.set_up, {
             $sub_select.attr("id", subcategory_id);
             $sub_select.append($empty_option.clone());
             $options.each(function() {
-                var $newopt = $(this).clone();
-                $sub_select.append($newopt);
+                $sub_select.append($(this).clone());
                 // Make sure any preselected value is preserved in the new UI:
-                if ($newopt.attr('selected')) {
+                if (this.selected) {
                     $group_select.val(label);
+                    $sub_select.val(this.value);
                 }
             });
             $sub_select.hide().insertAfter($subcategory_label).change(subcategory_change);
@@ -523,7 +514,7 @@ $.extend(fixmystreet.set_up, {
   on_resize: function() {
     var last_type;
     $(window).on('resize', function() {
-        var type = Modernizr.mq('(min-width: 48em)') || $('html.iel8').length ? 'desktop' : 'mobile';
+        var type = Modernizr.mq('(min-width: 48em)') || $('html.ie8').length ? 'desktop' : 'mobile';
         if (last_type == type) { return; }
         if (type == 'mobile') {
             fixmystreet.resize_to.mobile_page();
@@ -669,12 +660,20 @@ $.extend(fixmystreet.set_up, {
     });
   },
 
+  clicking_banner_begins_report: function() {
+    $('.big-green-banner').on('click', function(){
+      if (fixmystreet.map.getCenter) {
+        fixmystreet.display.begin_report( fixmystreet.map.getCenter() );
+      }
+    });
+  },
+
   map_controls: function() {
     //add permalink on desktop, force hide on mobile
     //add links container (if its not there)
     if (fixmystreet.cobrand != 'zurich') {
         if ($('#sub_map_links').length === 0) {
-            $('<p id="sub_map_links" />').insertAfter($('#map'));
+            $('<p class="sub-map-links" id="sub_map_links" />').insertAfter($('#map'));
         }
         if ($('#map_permalink').length === 0) {
             $('#sub_map_links').append('<a href="#" id="map_permalink">' + translation_strings.permalink + '</a>');
@@ -682,11 +681,11 @@ $.extend(fixmystreet.set_up, {
     }
 
     if ($('.mobile').length) {
-        $('#map_permalink').hide();
+        $('#map_permalink').addClass('hidden');
         // Make sure we end up with one Get updates link
-        if ($('#key-tools a.feed').length) {
-            $('#sub_map_links a.feed').remove();
-            $('#key-tools a.feed').appendTo('#sub_map_links');
+        if ($('#key-tools a.js-feed').length) {
+            $('#sub_map_links a.js-feed').remove();
+            $('#key-tools a.js-feed').appendTo('#sub_map_links');
         }
         $('#key-tools li:empty').remove();
         $('#report-updates-data').insertAfter($('#map_box'));
@@ -696,7 +695,7 @@ $.extend(fixmystreet.set_up, {
     }
 
     // Show/hide depending on whether it has any children to show
-    if ($('#sub_map_links a:visible').length) {
+    if ($('#sub_map_links a').not('.hidden').length) {
         $('#sub_map_links').show();
     } else {
         $('#sub_map_links').hide();
@@ -748,6 +747,14 @@ $.extend(fixmystreet.set_up, {
     }
     $('#key-tool-report-updates').small_drawer('report-updates-data');
     $('#key-tool-report-share').small_drawer('report-share');
+  },
+
+  ward_select_multiple: function() {
+    $(".js-ward-select-multiple").click(function(e) {
+        e.preventDefault();
+        $(".js-ward-single").addClass("hidden");
+        $(".js-ward-multi").removeClass("hidden");
+    });
   },
 
   email_login_form: function() {
@@ -1006,6 +1013,7 @@ fixmystreet.display = {
         document.getElementById('side-form').style.display = 'block';
     }
     $('#side').hide();
+    $('#map_box .big-green-banner').hide();
 
     if (fixmystreet.map.updateSize) {
         fixmystreet.map.updateSize(); // required after changing the size of the map element
@@ -1023,7 +1031,7 @@ fixmystreet.display = {
             width = $map_box.width(),
             height = $map_box.height();
         $map_box.append(
-            '<p id="mob_sub_map_links">' +
+            '<p class="sub-map-links" id="mob_sub_map_links">' +
             '<a href="#" id="try_again">' +
                 translation_strings.try_again +
             '</a>' +
@@ -1073,9 +1081,16 @@ fixmystreet.display = {
 
         if ($sideReport.length) {
             $('#side').hide(); // Hide the list of reports
+            $('#map_box .big-green-banner').hide();
             // Remove any existing report page content from sidebar
             $('#side-report').remove();
             $('.two_column_sidebar').remove();
+
+            fixmystreet.mobile_reporting.remove_ui();
+            if (fixmystreet.map.updateSize && ($twoColReport.length || $('html').hasClass('mobile'))) {
+                fixmystreet.map.updateSize();
+            }
+
             // Insert this report's content
             if ($twoColReport.length) {
                 $twoColReport.appendTo('#map_sidebar');
@@ -1091,11 +1106,6 @@ fixmystreet.display = {
             var found = html.match(/<title>([\s\S]*?)<\/title>/);
             var page_title = found[1];
             fixmystreet.page = 'report';
-
-            fixmystreet.mobile_reporting.remove_ui();
-            if (fixmystreet.map.updateSize && ($twoColReport.length || $('html').hasClass('mobile'))) {
-                fixmystreet.map.updateSize();
-            }
 
             $('.big-hide-pins-link').hide();
 
@@ -1140,6 +1150,9 @@ fixmystreet.display = {
                 fixmystreet.maps.markers_resize(); // force a redraw so the selected marker gets bigger
             }
 
+            // We disabled this upon first touch to prevent it taking effect, re-enable now
+            fixmystreet.maps.click_control.activate();
+
             if (typeof callback === 'function') {
                 callback();
             }
@@ -1165,6 +1178,7 @@ fixmystreet.display = {
             return;
         }
         side.style.display = '';
+        $('#map_box .big-green-banner').show();
         $('#side-form').hide();
         // Report page may have been one or two columns, remove either
         $('#side-report').remove();
@@ -1221,6 +1235,7 @@ $(function() {
 
     $(window).on('load', function () {
         setTimeout(function () {
+            if (!window.addEventListener) { return; }
             window.addEventListener('popstate', function(e) {
                 // The user has pressed the Back button, and there is a
                 // stored History state for them to return to.

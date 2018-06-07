@@ -1,6 +1,5 @@
 <!doctype html>
-<!--[if IE 7]>   <html class="no-js ie7 iel8" lang="[% lang_code %]"><![endif]-->
-<!--[if IE 8]>   <html class="no-js ie8 iel8" lang="[% lang_code %]"><![endif]-->
+<!--[if IE 8]>   <html class="no-js ie8" lang="[% lang_code %]"><![endif]-->
 <!--[if IE 9]>   <html class="no-js ie9" lang="[% lang_code %]"><![endif]-->
 <!--[if gt IE 9]><!--><html class="no-js" lang="[% lang_code %]"
 [% IF appcache ~%]
@@ -53,6 +52,16 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
                     <a href="#main-nav" id="nav-link">Main Navigation</a>
                 </div>
             </header>
+
+[% IF c.req.uri.path == '/' %]
+<p class="oxfordshire-preamble">
+The weather over the winter period this year has caused widespread damage to
+Oxfordshire’s roads. This has significantly increased the number of issues being
+reported, and we are of course dealing with the most dangerous issues first.
+Please do carry on alerting us to new ones so that we can continue to prioritise
+this work efficiently and repair the roads.
+</p>
+[% END %]
 
             [% pre_container_extra %]
 

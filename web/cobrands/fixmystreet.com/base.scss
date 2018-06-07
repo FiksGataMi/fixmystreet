@@ -283,19 +283,152 @@ html.lazyload .js-lazyload {
 }
 
 .fms-pro-promo {
-  margin: 2em -1em;
-  padding: 1em;
-  background: $primary;
+    margin: 0 -1em;
 
-  .lead {
-    font-weight: bold;
-  }
+    h2 {
+        margin-top: 0;
+    }
 
-  & > :first-child {
-    margin-top: 0;
-  }
+    .lead {
+        font-weight: bold;
+    }
 
-  & > :last-child {
-    margin-bottom: 0;
-  }
+    p:last-child {
+        margin-bottom: 0;
+    }
+}
+
+.fms-pro-promo__pro,
+.fms-pro-promo__stats {
+    padding: 1.5em 1em;
+}
+
+.fms-pro-promo__pro {
+    background: $primary;
+}
+
+.fms-pro-promo__stats {
+    border-bottom: 0.25em solid $primary;
+}
+
+.healthcheck-unit {
+    padding-left: 50px;
+    @include svg-background-image('/cobrands/fixmystreet.com/images/healthcheck-good');
+    background-size: 32px;
+    background-repeat: no-repeat;
+    background-position: $left 0;
+
+    & > :first-child {
+        margin-top: 0;
+    }
+
+    & > :last-child {
+        margin-bottom: 0;
+    }
+
+    & + & {
+        margin-top: 1em;
+    }
+}
+
+.healthcheck-unit--bad {
+    @include svg-background-image('/cobrands/fixmystreet.com/images/healthcheck-bad');
+}
+
+.healthcheck-cta-trio {
+    margin: -1em;
+
+    h3 {
+        font-size: 1em;
+        font-weight: bold;
+    }
+}
+
+.dashboard-row--yellow {
+    border-top: $primary solid 0.75em;
+    background-color: mix(#fff, $primary, 60%);
+}
+
+.dashboard-fms-case-studies {
+    & > div {
+        a {
+            display: block;
+            box-shadow: 0 0 0 1px rgba(0,0,0,0.1);
+            padding: 1.5em;
+            background-color: #fff;
+            margin-bottom: 1em;
+            border-radius: 3px;
+
+            & > :first-child {
+                margin-top: 0;
+            }
+
+            & > :last-child {
+                margin-bottom: 0;
+            }
+        }
+
+        small {
+            display: inline-block; // prevent inheritance of underline from parent
+            text-transform: uppercase;
+            color: #767676;
+            font-weight: bold;
+            font-style: normal;
+        }
+
+        h3 {
+            margin-top: 0.8em;
+        }
+    }
+}
+
+.council-dashboard-login {
+    margin: 0 -1em;
+    padding: 1em;
+    background: #b2b2b2 url(/cobrands/fixmystreet.com/images/dashboard-teaser-blurred.jpg) 0 0 no-repeat;
+    background-size: 100%;
+
+    strong {
+        color: #c00;
+    }
+
+    form {
+        max-width: 24em;
+        padding: 2em;
+        margin: 2em auto;
+        background: #fff;
+        box-shadow: 0 5px 10px rgba(0,0,0,0.2);
+    }
+
+    .form-group {
+        position: relative;
+    }
+
+    .submit-group {
+        margin-top: 1.5em;
+    }
+
+    .required {
+        position: absolute;
+        top: 0.5em;
+        right: 0;
+    }
+
+    .required,
+    .form-note {
+        color: #777;
+        font-size: 0.8em;
+        line-height: 1em;
+    }
+}
+
+.area-reports-dashboard-cta {
+    background-color: mix(#fff, $primary, 60%);
+    padding: 1em;
+    margin-top: 1em;
+    margin-bottom: 1em;
+
+    & > :last-child {
+        margin-bottom: 0;
+    }
 }

@@ -2,6 +2,88 @@
 
 * Unreleased
 
+* v2.3.3 (6th June 2018)
+    - Front end improvements:
+        - Extra help text on contact form #2149
+    - Admin improvements:
+        - Improve inspect form position and configurability.
+    - Bugfixes:
+        - Prevent contact form leaking information about updates #2149
+        - Fix pointer event issue selecting pin on map. #2130
+        - Fix admin navigation links in multi-language installs.
+        - Fix map display issue clicking back from report page as inspector.
+
+* v2.3.2 (31st May 2018)
+    - Front end improvements:
+        - Improve questionnaire process. #1939 #1998
+        - Increase size of "sub map links" (hide pins, permalink, etc) #2003 #2056
+        - Edge-to-edge email layout on narrow screens #2010
+        - Add default placeholder to report extra fields. #2027
+        - Clicking the "Click map" instruction banner now begins a new report #2033
+        - Homepage postcode input is now marked up as a required input #2037
+        - Improved cursor/display of the new report pin. #2038
+        - Asset layers can be attached to more than one category each. #2049
+        - Cobrands hook to remove phone number field. #2049
+        - Check recent reports for any hidden since cached. #2053
+        - Asset layer attribution automatically shown. #2061
+        - The .internal-link-fixed-header positioning is now much simpler. #2117
+        - Added UI to view multiple wards at once on /reports. #2120
+    - Bugfixes:
+        - Stop asset layers obscuring marker layer. #1999
+        - Don't delete hidden field values when inspecting reports. #1999
+        - Fix text layout issues in /reports/…/summary dashboard charts.
+        - Fix post-edit issues on admin report edit page.
+        - Truncate dates in Open311 output to the second. #2023
+        - Fix check for visible sub map links after 'Try again'.
+        - Stop race condition when making a new report quickly.
+        - Set a session timezone in case database server is set differently.
+        - Fix SQL error on update edit admin page in cobrands. #2049
+        - Improve chart display in old IE versions. #2005
+        - Improve handling of Open311 state changes. #2069
+        - Don't strip whitespace from user passwords. #2111
+        - Make OpenGraph description translatable.
+        - Stop double-escaping title in alert-update email.
+        - Use inspection states in response template admin.
+        - Fixed CSS padding/overflow bug during sidebar "drawer" animations. #2132
+        - Response template containing double quote now works.
+        - A few small display issues with RTL text display.
+        - Improve handling of loading spinner display. #2059
+        - Ignore non-interactive layers for asset message.
+    - Admin improvements:
+        - Inspectors can set non_public status of reports. #1992
+        - Default start date is shown on the dashboard.
+        - Users with 'user_edit' permission can search for users/reports. #2027
+        - Don't send sent-report emails to as-body/as-anonymous reports.
+        - Show Open311 service code as tooltip on admin category checkboxes. #2049
+        - Bulk user import admin page. #2057
+        - Add link to admin edit page for reports. #2071
+        - Deleted body categories now hidden by default #1962
+        - Display contents of report's extra field #1809
+        - Store user creation and last active times.
+        - Add scripts to anonymize inactive users and reports,
+          email inactive users, or to close reports to new updates.
+        - Admin ability to close reports to new updates. #43
+    - Open311 improvements:
+        - Fetch problems over Open311 #1986 #2067
+        - Option to send multiple photos over Open311 #1986
+        - Allow Open311 service definitions to include automated attributes #1986
+        - Optionally supress blank Open311 update errors #1986
+        - Fetch/store external status code with Open311 updates. #2048
+        - Response templates can be triggered by external status code. #2048
+        - Enable conversion from EPSG:27700 when fetching over Open311 #2028
+        - Add CORS header to Open311 output. #2022
+        - Nicer Open311 errors. #2078
+    - Development improvements:
+        - Cobrand hook for adding extra areas to MAPIT_WHITELIST/_TYPES. #2049
+        - send-comments warns about errors when called with --verbose #2091
+        - Add HTML email previewer.
+        - Add some Cypress browser-based testing.
+        - Upgrade Vagrantfile to use Ubuntu Xenial. #2093
+        - Add validation to cobrand-specific custom reporting fields.
+        - Drop support for IE7, improve IE8 support. #2114
+        - Add ability to have category extra help text.
+        - Cobrand hook for showing all states in filter.
+
 * v2.3.1 (12th February 2018)
     - Front end improvements:
         - Zoom out as much as necessary on body map page, even on mobile. #1958

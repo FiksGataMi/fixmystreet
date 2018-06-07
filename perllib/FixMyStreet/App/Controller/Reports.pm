@@ -93,6 +93,7 @@ sub index : Path : Args(0) {
         }
     } else {
         my @bodies = $c->model('DB::Body')->active->translated->with_area_count->all_sorted;
+        @bodies = @{$c->cobrand->call_hook('reports_hook_restrict_bodies_list', \@bodies) || \@bodies };
         $c->stash->{bodies} = \@bodies;
     }
 
@@ -125,6 +126,17 @@ sub ward : Path : Args(2) {
     my @wards = split /\|/, $ward || "";
     $c->forward( 'body_check', [ $body ] );
 
+    # If viewing multiple wards, rewrite the url from
+    # /reports/Borsetshire?ward=North&ward=East
+    # to
+    # /reports/Borsetshire/North|East
+    my @ward_params = $c->get_param_list('ward');
+    if ( @ward_params ) {
+        $c->stash->{wards} = [ map { { name => $_ } } (@wards, @ward_params) ];
+        delete $c->req->params->{ward};
+        $c->detach("redirect_body");
+    }
+
     my $body_short = $c->cobrand->short_name( $c->stash->{body} );
     $c->stash->{body_url} = '/reports/' . $body_short;
 
@@ -155,11 +167,10 @@ sub ward : Path : Args(2) {
     $c->stash->{stats} = $c->cobrand->get_report_stats();
 
     my @categories = $c->stash->{body}->contacts->not_deleted->search( undef, {
-        columns => [ 'category' ],
+        columns => [ 'category', 'extra' ],
         distinct => 1,
         order_by => [ 'category' ],
     } )->all;
-    @categories = map { { name => $_->category, value => $_->category_display } } @categories;
     $c->stash->{filter_categories} = \@categories;
     $c->stash->{filter_category} = { map { $_ => 1 } $c->get_param_list('filter_category', 1) };
 
@@ -413,6 +424,8 @@ sub summary : Private {
     my ($self, $c) = @_;
     my $dashboard = $c->forward('load_dashboard_data');
 
+    $c->log->info($c->user->email . ' viewed ' . $c->req->uri->path_query) if $c->user_exists;
+
     eval {
         my $data = path(FixMyStreet->path_to('../data/all-reports-dashboard.json'))->slurp_utf8;
         $data = decode_json($data);
@@ -487,8 +500,8 @@ sub export_summary_csv : Private {
             'id',
             'title',
             'category',
-            'created_pp',
-            'confirmed_pp',
+            'created',
+            'confirmed',
             'state',
             'latitude', 'longitude',
             'postcode',
@@ -544,20 +557,27 @@ sub load_and_group_problems : Private {
 
     my $states = $c->stash->{filter_problem_states};
     my $where = {
-        non_public => 0,
         state      => [ keys %$states ]
     };
+
+    my $body = $c->stash->{body}; # Might be undef
+
+    if ($c->user_exists && ($c->user->is_superuser || ($body && $c->user->has_permission_to('report_inspect', $body->id)))) {
+        # See all reports, no restriction
+    } else {
+        $where->{non_public} = 0;
+    }
+
     my $filter = {
         order_by => $c->stash->{sort_order},
         rows => $c->cobrand->reports_per_page,
     };
-    if ($c->user_exists && $c->stash->{body}) {
-        my $bid = $c->stash->{body}->id;
+    if ($c->user_exists && $body) {
         my $prefetch = [];
-        if ($c->user->has_permission_to('planned_reports', $bid)) {
+        if ($c->user->has_permission_to('planned_reports', $body->id)) {
             push @$prefetch, 'user_planned_reports';
         }
-        if ($c->user->has_permission_to('report_edit_priority', $bid) || $c->user->has_permission_to('report_inspect', $bid)) {
+        if ($c->user->has_permission_to('report_edit_priority', $body->id) || $c->user->has_permission_to('report_inspect', $body->id)) {
             push @$prefetch, 'response_priority';
         }
         $prefetch = $prefetch->[0] if @$prefetch == 1;
@@ -589,9 +609,9 @@ sub load_and_group_problems : Private {
         $where->{areas} = [
             map { { 'like', '%,' . $_->{id} . ',%' } } @{$c->stash->{wards}}
         ];
-        $problems = $problems->to_body($c->stash->{body});
-    } elsif ($c->stash->{body}) {
-        $problems = $problems->to_body($c->stash->{body});
+        $problems = $problems->to_body($body);
+    } elsif ($body) {
+        $problems = $problems->to_body($body);
     }
 
     if (my $bbox = $c->get_param('bbox')) {
@@ -609,7 +629,7 @@ sub load_and_group_problems : Private {
 
     my ( %problems, @pins );
     while ( my $problem = $problems->next ) {
-        if ( !$c->stash->{body} ) {
+        if ( !$body ) {
             add_row( $c, $problem, 0, \%problems, \@pins );
             next;
         }
@@ -623,7 +643,7 @@ sub load_and_group_problems : Private {
             # Add to bodies it was sent to
             my $bodies = $problem->bodies_str_ids;
             foreach ( @$bodies ) {
-                next if $_ != $c->stash->{body}->id;
+                next if $_ != $body->id;
                 add_row( $c, $problem, $_, \%problems, \@pins );
             }
         }
@@ -697,9 +717,9 @@ sub stash_report_filter_status : Private {
         $filter_status{unshortlisted} = 1;
     }
 
-    if ($c->user and ($c->user->is_superuser or (
-          $c->stash->{body} and $c->user->belongs_to_body($c->stash->{body}->id)
-    ))) {
+    my $body_user = $c->user_exists && $c->stash->{body} && $c->user->belongs_to_body($c->stash->{body}->id);
+    my $staff_user = $c->user_exists && ($c->user->is_superuser || $body_user);
+    if ($staff_user || $c->cobrand->call_hook('filter_show_all_states')) {
         $c->stash->{filter_states} = $c->cobrand->state_groups_inspect;
         foreach my $state (FixMyStreet::DB::Result::Problem->visible_states()) {
             if ($status{$state}) {
@@ -727,6 +747,7 @@ sub stash_report_sort : Private {
         created => 'confirmed',
         comments => 'comment_count',
     );
+    $types{created} = 'created' if $c->cobrand->moniker eq 'zurich';
 
     my $sort = $c->get_param('sort') || $default;
     $sort = $default unless $sort =~ /^((updated|created)-(desc|asc)|comments-desc|shortlist)$/;

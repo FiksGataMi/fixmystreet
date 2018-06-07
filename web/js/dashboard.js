@@ -1,7 +1,10 @@
 $(function(){
+    if ($('html').is('.ie9')) {
+        return;
+    }
 
     Chart.defaults.global.defaultFontSize = 16;
-    Chart.defaults.global.defaultFontFamily = $('body').css('font-family');
+    // Chart.defaults.global.defaultFontFamily = $('body').css('font-family');
 
     var colours = [
         '#FF4343', // red
@@ -24,7 +27,6 @@ $(function(){
 
     var setUpLabelsForChart = function(chart){
         var $parent = $(chart.chart.canvas).parent();
-        var xGutterInPixels = 30;
 
         var lasty = 0;
         $.each(chart.config.data.datasets, function(datasetIndex, dataset){
@@ -35,8 +37,7 @@ $(function(){
                 y = lasty;
             }
             $label.css({
-                top: y,
-                left: latestPoint._model.x + xGutterInPixels
+                top: y
             });
             lasty = y + $label.height() + 8;
         });
@@ -51,6 +52,26 @@ $(function(){
         }
         pointRadius.push(radius);
         return pointRadius;
+    };
+
+    // Wraps a row label onto two equal equal lines,
+    // if it is longer than 4 words.
+    var linewrapLabel = function(text) {
+        if ( text.split(' ').length < 5 ) {
+            return text;
+        }
+
+        var middle = Math.floor(text.length / 2);
+        var before = text.lastIndexOf(' ', middle);
+        var after = text.indexOf(' ', middle + 1);
+
+        if (before < after) {
+            middle = after;
+        } else {
+            middle = before;
+        }
+
+        return [ text.substr(0, middle), text.substr(middle + 1) ];
     };
 
     var makeSparkline = function makeSparkline($el, valuesStr, color, title){
@@ -180,7 +201,7 @@ $(function(){
         var rowValues = [];
 
         $trs.each(function(){
-            rowLabels.push( $(this).find('th').text() );
+            rowLabels.push( linewrapLabel($(this).find('th').text()) );
             rowValues.push( parseInt($(this).find('td').text(), 10) );
         });
 
@@ -206,7 +227,6 @@ $(function(){
                             ctx = chartInstance.ctx;
 
                         ctx.font = Chart.helpers.fontString( Chart.defaults.global.defaultFontSize * 0.8, 'bold', Chart.defaults.global.defaultFontFamily);
-                        ctx.textAlign = 'right';
                         ctx.textBaseline = 'middle';
 
                         this.data.datasets.forEach(function (dataset, i) {
@@ -218,10 +238,12 @@ $(function(){
                                 var gutter = (bar._model.height - (Chart.defaults.global.defaultFontSize * 0.8)) / 2;
                                 var textX;
                                 if (width_text + 2 * gutter > width_bar) {
-                                    textX = bar._model.x + 2 * gutter;
+                                    textX = bar._model.x + gutter;
+                                    ctx.textAlign = 'left';
                                     ctx.fillStyle = bar._model.backgroundColor;
                                 } else {
                                     textX = bar._model.x - gutter;
+                                    ctx.textAlign = 'right';
                                     ctx.fillStyle = '#fff';
                                 }
                                 ctx.fillText( dataValue, textX, bar._model.y );

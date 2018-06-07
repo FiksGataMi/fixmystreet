@@ -14,7 +14,6 @@ $.extend(fixmystreet.set_up, {
           $.getJSON(nearby_url, args, function(data) {
               var duplicate_of = $("#report_inspect_form [name=duplicate_of]").val();
               var $reports = $(data.reports_list)
-                              .filter("li")
                               .not("[data-report-id="+report_id+"]")
                               .slice(0, 5);
               $reports.filter("[data-report-id="+duplicate_of+"]").addClass("item-list--reports__item--selected");
@@ -186,7 +185,14 @@ $.extend(fixmystreet.set_up, {
             $addAlertCheckbox.prop('checked', true).prop('disabled', false);
         } else if (val === 'another_user') {
             $emailInput.val('').prop('disabled', false);
-            $emailOptionalLabel.removeClass('hidden');
+            if (!$phoneInput.length) {
+                // Cobrand may have disabled collection of phone numbers.
+                $emailOptionalLabel.addClass('hidden');
+                $emailInput.addClass('required');
+            } else {
+                $emailOptionalLabel.removeClass('hidden');
+                $emailInput.removeClass('required');
+            }
             $nameInput.val('').prop('disabled', false);
             $phoneInput.val('').prop('disabled', false);
             $showNameCheckbox.prop('checked', false).prop('disabled', true);
@@ -219,13 +225,18 @@ $.extend(fixmystreet.set_up, {
     }
 
     // Focus on form
-    $('html,body').scrollTop($inspect_form.offset().top);
+    if (!fixmystreet.inspect_form_no_scroll_on_load) {
+        document.getElementById('side-inspect').scrollIntoView();
+    }
 
     function updateTemplates(opts) {
         opts.category = opts.category || $inspect_form.find('[name=category]').val();
         opts.state = opts.state || $inspect_form.find('[name=state]').val();
         var selector = "[data-category='" + opts.category + "']";
         var data = $inspect_form.find(selector).data('templates') || [];
+        if (data.constructor !== Array) {
+          return;
+        }
         data = $.grep(data, function(d, i) {
             if (!d.state || d.state == opts.state) {
                 return true;
@@ -237,6 +248,9 @@ $.extend(fixmystreet.set_up, {
 
     function populateSelect($select, data, label_formatter) {
       $select.find('option:gt(0)').remove();
+      if (data.constructor !== Array) {
+        return;
+      }
       $.each(data, function(k,v) {
         var label = window.fixmystreet.utils[label_formatter](v);
         var $opt = $('<option></option>').attr('value', v.id).text(label);
@@ -429,31 +443,33 @@ $.extend(fixmystreet.set_up, {
 
 });
 
-$.extend(fixmystreet.hooks, {
-    update_problem_fields: function(args) {
-        if (args.prefill_reports && args.role == 'inspector') {
-            var title = args.category + ' problem has been scheduled for fixing';
-            var description = args.category + ' problem found - scheduled for fixing by ' + args.body;
+$(fixmystreet).on('report_new:category_change', function(evt, $this) {
+    var category = $this.val();
+    var prefill_reports = $this.data('prefill');
+    var role = $this.data('role');
+    var body = $this.data('body');
 
-            var $title_field = $('#form_title');
-            var $description_field = $('#form_detail');
+    if (prefill_reports && role == 'inspector') {
+        var title = 'A ' + category + ' problem has been found';
+        var description = 'A ' + category + ' problem has been found by ' + body;
 
-            if ($title_field.val().length === 0 || $title_field.data('autopopulated') === true) {
-                $title_field.val(title);
-                $title_field.data('autopopulated', true);
-            }
+        var $title_field = $('#form_title');
+        var $description_field = $('#form_detail');
 
-            if ($description_field.val().length === 0 || $description_field.data('autopopulated') === true) {
-                $description_field.val(description);
-                $description_field.data('autopopulated', true);
-            }
-
-            $('#form_title, #form_detail').on('keyup', function() {
-              $(this).data('autopopulated', false);
-            });
+        if ($title_field.val().length === 0 || $title_field.data('autopopulated') === true) {
+            $title_field.val(title);
+            $title_field.data('autopopulated', true);
         }
-    }
 
+        if ($description_field.val().length === 0 || $description_field.data('autopopulated') === true) {
+            $description_field.val(description);
+            $description_field.data('autopopulated', true);
+        }
+
+        $('#form_title, #form_detail').on('keyup', function() {
+            $(this).data('autopopulated', false);
+        });
+    }
 });
 
 fixmystreet.maps = fixmystreet.maps || {};

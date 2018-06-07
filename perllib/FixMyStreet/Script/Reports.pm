@@ -29,7 +29,7 @@ sub send(;$) {
     my $site = $site_override || CronFns::site($base_url);
 
     my $states = [ FixMyStreet::DB::Result::Problem::open_states() ];
-    $states = [ 'unconfirmed', 'confirmed', 'in progress', 'planned', 'closed', 'investigating' ] if $site eq 'zurich';
+    $states = [ 'submitted', 'confirmed', 'in progress', 'feedback pending', 'external', 'wish' ] if $site eq 'zurich';
     my $unsent = $rs->search( {
         state => $states,
         whensent => undef,
@@ -78,6 +78,7 @@ sub send(;$) {
         my $email_base_url = $cobrand->base_url_for_report($row);
         my %h = map { $_ => $row->$_ } qw/id title detail name category latitude longitude used_map/;
         $h{report} = $row;
+        $h{cobrand} = $cobrand;
         map { $h{$_} = $row->user->$_ || '' } qw/email phone/;
         $h{confirmed} = DateTime::Format::Pg->format_datetime( $row->confirmed->truncate (to => 'second' ) )
             if $row->confirmed;
@@ -88,6 +89,8 @@ sub send(;$) {
         if ($row->photo) {
             $h{has_photo} = _("This web page also contains a photo of the problem, provided by the user.") . "\n\n";
             $h{image_url} = $email_base_url . $row->photos->[0]->{url_full};
+            my @all_images = map { $email_base_url . $_->{url_full} } @{ $row->photos };
+            $h{all_image_urls} = \@all_images;
         } else {
             $h{has_photo} = '';
             $h{image_url} = '';
@@ -178,16 +181,8 @@ sub send(;$) {
 
         if ($h{category} eq _('Other')) {
             $h{category_footer} = _('this type of local problem');
-            $h{category_line} = '';
         } else {
             $h{category_footer} = "'" . $h{category} . "'";
-            $h{category_line} = sprintf(_("Category: %s"), $h{category}) . "\n\n";
-        }
-
-        if ( $row->subcategory ) {
-            $h{subcategory_line} = sprintf(_("Subcategory: %s"), $row->subcategory) . "\n\n";
-        } else {
-            $h{subcategory_line} = "\n\n";
         }
 
         $h{bodies_name} = join(_(' and '), @dear);
@@ -300,6 +295,9 @@ sub _send_report_sent_email {
     # Don't send 'report sent' text
     return unless $row->user->email_verified;
 
+    my $contributed_as = $row->get_extra_metadata('contributed_as') || '';
+    return if $contributed_as eq 'body' || $contributed_as eq 'anonymous_user';
+
     FixMyStreet::Email::send_cron(
         $row->result_source->schema,
         'confirm_report_sent.txt',
@@ -308,7 +306,7 @@ sub _send_report_sent_email {
             To => $row->user->email,
             From => [ $cobrand->contact_email, $cobrand->contact_name ],
         },
-        $cobrand->contact_email,
+        undef,
         $nomail,
         $cobrand,
         $row->lang,

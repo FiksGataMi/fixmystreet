@@ -76,7 +76,7 @@ sub _display : Private {
     $c->forward( 'load_updates' );
     $c->forward( 'format_problem_for_display' );
 
-    my $permissions = $c->stash->{_permissions} = $c->forward( 'check_has_permission_to',
+    my $permissions = $c->stash->{_permissions} ||= $c->forward( 'check_has_permission_to',
         [ qw/report_inspect report_edit_category report_edit_priority/ ] );
     if (any { $_ } values %$permissions) {
         $c->stash->{template} = 'report/inspect.html';
@@ -121,14 +121,17 @@ sub load_problem_or_display_error : Private {
         $c->detach( '/page_error_404_not_found', [ _('Unknown problem ID') ] )
             unless $c->cobrand->show_unconfirmed_reports ;
     }
-    elsif ( $problem->hidden_states->{ $problem->state } or
-            (($problem->get_extra_metadata('closure_status')||'') eq 'hidden')) {
+    elsif ( $problem->hidden_states->{ $problem->state } ) {
         $c->detach(
             '/page_error_410_gone',
             [ _('That report has been removed from FixMyStreet.') ]    #
         );
     } elsif ( $problem->non_public ) {
-        if ( !$c->user || $c->user->id != $problem->user->id ) {
+        # Creator, and inspection users can see non_public reports
+        $c->stash->{problem} = $problem;
+        my $permissions = $c->stash->{_permissions} = $c->forward( 'check_has_permission_to',
+            [ qw/report_inspect report_edit_category report_edit_priority/ ] );
+        if ( !$c->user || ($c->user->id != $problem->user->id && !$permissions->{report_inspect}) ) {
             $c->detach(
                 '/page_error_403_access_denied',
                 [ sprintf(_('That report cannot be viewed on %s.'), $c->stash->{site_name}) ]
@@ -163,17 +166,28 @@ sub load_updates : Private {
         {
             problem_id => $c->stash->{problem}->id,
             whenanswered => { '!=', undef },
-            old_state => 'confirmed', new_state => 'confirmed',
+            old_state => [ -and =>
+                { -in => [ FixMyStreet::DB::Result::Problem::closed_states, FixMyStreet::DB::Result::Problem::open_states ] },
+                \'= new_state',
+            ]
         },
         { order_by => 'whenanswered' }
     );
 
     my @combined;
+    my %questionnaires_with_updates;
     while (my $update = $updates->next) {
         push @combined, [ $update->confirmed, $update ];
+        if (my $qid = $update->get_extra_metadata('questionnaire_id')) {
+            $questionnaires_with_updates{$qid} = $update;
+        }
     }
-    while (my $update = $questionnaires->next) {
-        push @combined, [ $update->whenanswered, $update ];
+    while (my $q = $questionnaires->next) {
+        if (my $update = $questionnaires_with_updates{$q->id}) {
+            $update->set_extra_metadata('open_from_questionnaire', 1);
+            next;
+        }
+        push @combined, [ $q->whenanswered, $q ];
     }
     @combined = map { $_->[1] } sort { $a->[0] <=> $b->[0] } @combined;
     $c->stash->{updates} = \@combined;
@@ -207,9 +221,15 @@ sub format_problem_for_display : Private {
 
     if ( $c->stash->{ajax} ) {
         $c->res->content_type('application/json; charset=utf-8');
+
+        # encode_json doesn't like DateTime objects, so strip them out
+        my $report_hashref = $c->cobrand->problem_as_hashref( $problem, $c );
+        delete $report_hashref->{created};
+        delete $report_hashref->{confirmed};
+
         my $content = encode_json(
             {
-                report => $c->cobrand->problem_as_hashref( $problem, $c ),
+                report => $report_hashref,
                 updates => $c->cobrand->updates_as_hashref( $problem, $c ),
             }
         );
@@ -337,6 +357,8 @@ sub inspect : Private {
         my %update_params = ();
 
         if ($permissions->{report_inspect}) {
+            $problem->non_public($c->get_param('non_public') ? 1 : 0);
+
             $problem->set_extra_metadata( traffic_information => $c->get_param('traffic_information') );
 
             if ( my $info = $c->get_param('detailed_information') ) {
@@ -380,7 +402,7 @@ sub inspect : Private {
             if ( $problem->state eq 'duplicate') {
                 if (my $duplicate_of = $c->get_param('duplicate_of')) {
                     $problem->set_duplicate_of($duplicate_of);
-                } elsif (not $c->get_param('public_update')) {
+                } elsif (not $c->get_param('include_update')) {
                     $valid = 0;
                     push @{ $c->stash->{errors} }, _('Please provide a duplicate ID or public update for this report.');
                 }
@@ -404,7 +426,7 @@ sub inspect : Private {
                     cobrand_data => $problem->cobrand_data,
                     lang         => $problem->lang,
                 };
-                $problem->user->create_alert($problem->id, $options);
+                $c->user->create_alert($problem->id, $options);
             }
 
             # If the state has been changed to action scheduled and they've said
@@ -450,22 +472,30 @@ sub inspect : Private {
             }
             $problem->lastupdate( \'current_timestamp' );
             $problem->update;
-            my $timestamp = \'current_timestamp';
-            if (my $saved_at = $c->get_param('saved_at')) {
-                $timestamp = DateTime->from_epoch( epoch => $saved_at );
+            if ($update_text || %update_params) {
+                my $timestamp = \'current_timestamp';
+                if (my $saved_at = $c->get_param('saved_at')) {
+                    # this comes in as a UTC epoch but the database expects everything
+                    # to have the FMS timezone so we need to add the timezone otherwise
+                    # dates come back out the database at time +/- timezone offset.
+                    $timestamp = DateTime->from_epoch(
+                        time_zone =>  FixMyStreet->time_zone || FixMyStreet->local_time_zone,
+                        epoch => $saved_at
+                    );
+                }
+                my $name = $c->user->from_body ? $c->user->from_body->name : $c->user->name;
+                $problem->add_to_comments( {
+                    text => $update_text,
+                    created => $timestamp,
+                    confirmed => $timestamp,
+                    user_id => $c->user->id,
+                    name => $name,
+                    state => 'confirmed',
+                    mark_fixed => 0,
+                    anonymous => 0,
+                    %update_params,
+                } );
             }
-            my $name = $c->user->from_body ? $c->user->from_body->name : $c->user->name;
-            $problem->add_to_comments( {
-                text => $update_text,
-                created => $timestamp,
-                confirmed => $timestamp,
-                user_id => $c->user->id,
-                name => $name,
-                state => 'confirmed',
-                mark_fixed => 0,
-                anonymous => 0,
-                %update_params,
-            } );
 
             my $redirect_uri;
             $problem->discard_changes;
@@ -523,8 +553,10 @@ sub nearby_json : Private {
     # This is for the list template, this is a list on that page.
     $c->stash->{page} = 'report';
 
+    my $extra_params = $c->cobrand->call_hook('display_location_extra_params');
+
     my $nearby = $c->model('DB::Nearby')->nearby(
-        $c, $dist, [ $p->id ], 5, $p->latitude, $p->longitude, [ $p->category ], undef
+        $c, $dist, [ $p->id ], 5, $p->latitude, $p->longitude, [ $p->category ], undef, $extra_params
     );
     # Want to treat these as if they were on map
     $nearby = [ map { $_->problem } @$nearby ];
@@ -536,8 +568,8 @@ sub nearby_json : Private {
     } @$nearby;
 
     my $list_html = $c->render_fragment(
-        'around/on_map_list_items.html',
-        { around_map => [], on_map => $nearby }
+        'report/nearby.html',
+        { reports => $nearby }
     );
 
     my $json = { pins => \@pins };

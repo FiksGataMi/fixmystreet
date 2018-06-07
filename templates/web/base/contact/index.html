@@ -103,17 +103,25 @@
         [% END %]
         <textarea class="form-control required" name="message" id="form_message" rows="7" cols="50">[% message | html %]</textarea>
 
+        [% IF NOT problem AND NOT update %]
+        <p>[% loc('If you are contacting us about a specific report or update please include a link to the report in the message.') %]</p>
+        [% END %]
+
 
         <input class="final-submit green-btn" type="submit" value="[% loc('Send') %]">
 
     </fieldset>
 </form>
 
-<h4>[% loc("Don't like forms?") %]</h4>
+[% TRY %]
+    [% INCLUDE 'contact/_footer.html' %]
+[% CATCH file %]
+    <h4>[% loc("Don't like forms?") %]</h4>
 
-<p>
-[% tprintf( loc("You can contact technical support on <a href='mailto:%s'>%s</a>"), contact_email, contact_email) %]
-</p>
+    <p>
+    [% tprintf( loc("You can contact technical support on <a href='mailto:%s'>%s</a>"), contact_email, contact_email) %]
+    </p>
+[% END %]
 
 [% TRY %][% INCLUDE 'contact/address.html' %][% CATCH file %][% END %]
 

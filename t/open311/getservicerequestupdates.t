@@ -1,6 +1,7 @@
 #!/usr/bin/env perl
 
 use FixMyStreet::Test;
+use Test::Output;
 use CGI::Simple;
 use LWP::Protocol::PSGI;
 use t::Mock::Static;
@@ -149,7 +150,7 @@ for my $test (
         comment_status => 'OPEN',
         mark_fixed=> 0,
         mark_open => 0,
-        problem_state => undef,
+        problem_state => 'confirmed',
         end_state => 'confirmed',
     },
     {
@@ -357,6 +358,19 @@ for my $test (
         end_state => 'investigating',
     },
     {
+        desc => 'unchanging state does not trigger auto-response template',
+        description => '',
+        xml_description => '',
+        external_id => 638344,
+        start_state => 'investigating',
+        comment_status => 'INVESTIGATING',
+        mark_fixed => 0,
+        mark_open => 0,
+        problem_state => 'investigating',
+        end_state => 'investigating',
+        comment_state => 'hidden',
+    },
+    {
         desc => 'open status does not re-open hidden report',
         description => 'This is a note',
         external_id => 638344,
@@ -388,6 +402,7 @@ for my $test (
         is $c->mark_fixed, $test->{mark_fixed}, 'mark_closed correct';
         is $c->problem_state, $test->{problem_state}, 'problem_state correct';
         is $c->mark_open, $test->{mark_open}, 'mark_open correct';
+        is $c->state, $test->{comment_state} || 'confirmed', 'comment state correct';
         is $problem->state, $test->{end_state}, 'correct problem state';
         $problem->comments->delete;
     };
@@ -649,6 +664,95 @@ subtest 'check that existing comments are not duplicated' => sub {
     is $problem->comments->count, 2, 'if comments are deleted then they are added';
 };
 
+subtest 'check that external_status_code is stored correctly' => sub {
+    my $requests_xml = qq{<?xml version="1.0" encoding="utf-8"?>
+    <service_requests_updates>
+    <request_update>
+    <update_id>638344</update_id>
+    <service_request_id>@{[ $problem->external_id ]}</service_request_id>
+    <status>open</status>
+    <description>This is a note</description>
+    <updated_datetime>UPDATED_DATETIME</updated_datetime>
+    <external_status_code>060</external_status_code>
+    </request_update>
+    <request_update>
+    <update_id>638354</update_id>
+    <service_request_id>@{[ $problem->external_id ]}</service_request_id>
+    <status>open</status>
+    <description>This is a different note</description>
+    <updated_datetime>UPDATED_DATETIME2</updated_datetime>
+    <external_status_code>101</external_status_code>
+    </request_update>
+    </service_requests_updates>
+    };
+
+    $problem->comments->delete;
+
+    my $dt2 = $dt->clone->subtract( hours => 1 );
+    $requests_xml =~ s/UPDATED_DATETIME2/$dt/;
+    $requests_xml =~ s/UPDATED_DATETIME/$dt2/;
+
+    my $o = Open311->new( jurisdiction => 'mysociety', endpoint => 'http://example.com', test_mode => 1, test_get_returns => { 'servicerequestupdates.xml' => $requests_xml } );
+
+    my $update = Open311::GetServiceRequestUpdates->new(
+        system_user => $user,
+    );
+
+    $update->update_comments( $o, $bodies{2482} );
+
+    $problem->discard_changes;
+    is $problem->comments->count, 2, 'two comments after fetching updates';
+
+    my @comments = $problem->comments->search(undef, { order_by => [ 'created' ] } )->all;
+
+    is $comments[0]->get_extra_metadata('external_status_code'), "060", "correct external status code on first comment";
+    is $comments[1]->get_extra_metadata('external_status_code'), "101", "correct external status code on second comment";
+
+    is $problem->get_extra_metadata('external_status_code'), "101", "correct external status code";
+
+};
+
+subtest 'check that external_status_code triggers auto-responses' => sub {
+    my $requests_xml = qq{<?xml version="1.0" encoding="utf-8"?>
+    <service_requests_updates>
+    <request_update>
+    <update_id>638344</update_id>
+    <service_request_id>@{[ $problem->external_id ]}</service_request_id>
+    <status>open</status>
+    <description></description>
+    <updated_datetime>UPDATED_DATETIME</updated_datetime>
+    <external_status_code>060</external_status_code>
+    </request_update>
+    </service_requests_updates>
+    };
+
+    my $response_template = $bodies{2482}->response_templates->create({
+        title => "Acknowledgement",
+        text => "Thank you for your report. We will provide an update within 24 hours.",
+        auto_response => 1,
+        external_status_code => "060"
+    });
+
+    $problem->comments->delete;
+
+    $requests_xml =~ s/UPDATED_DATETIME/$dt/;
+
+    my $o = Open311->new( jurisdiction => 'mysociety', endpoint => 'http://example.com', test_mode => 1, test_get_returns => { 'servicerequestupdates.xml' => $requests_xml } );
+
+    my $update = Open311::GetServiceRequestUpdates->new(
+        system_user => $user,
+    );
+
+    $update->update_comments( $o, $bodies{2482} );
+
+    $problem->discard_changes;
+    is $problem->comments->count, 1, 'one comment after fetching updates';
+
+    my $comment = $problem->comments->first;
+
+    is $problem->comments->first->text, "Thank you for your report. We will provide an update within 24 hours.", "correct external status code on first comment";
+};
+
 foreach my $test ( {
         desc => 'check that closed and then open comment results in correct state',
         dt1  => $dt->clone->subtract( hours => 1 ),
@@ -778,6 +882,53 @@ foreach my $test ( {
         for my $alert (@alerts) {
             $alert->delete;
         }
+        $problem->comments->delete;
+    }
+}
+
+foreach my $test ( {
+        desc => 'normally blank text produces a warning',
+        num_alerts => 1,
+        blank_updates_permitted => 0,
+    },
+    {
+        desc => 'no warning if blank updates permitted',
+        num_alerts => 1,
+        blank_updates_permitted => 1,
+    },
+) {
+    subtest $test->{desc}  => sub {
+        my $requests_xml = qq{<?xml version="1.0" encoding="utf-8"?>
+        <service_requests_updates>
+        <request_update>
+        <update_id>638344</update_id>
+        <service_request_id>@{[ $problem->external_id ]}</service_request_id>
+        <status>closed</status>
+        <description></description>
+        <updated_datetime>UPDATED_DATETIME</updated_datetime>
+        </request_update>
+        </service_requests_updates>
+        };
+
+        $problem->state( 'confirmed' );
+        $problem->lastupdate( $dt->clone->subtract( hours => 3 ) );
+        $problem->update;
+
+        $requests_xml =~ s/UPDATED_DATETIME/$dt/;
+
+        my $o = Open311->new( jurisdiction => 'mysociety', endpoint => 'http://example.com', test_mode => 1, test_get_returns => { 'servicerequestupdates.xml' => $requests_xml } );
+
+        my $update = Open311::GetServiceRequestUpdates->new(
+            system_user => $user,
+            blank_updates_permitted => $test->{blank_updates_permitted},
+        );
+
+        if ( $test->{blank_updates_permitted} ) {
+            stderr_is { $update->update_comments( $o, $bodies{2482} ) } '', 'No error message'
+        } else {
+            stderr_like { $update->update_comments( $o, $bodies{2482} ) } qr/Couldn't determine update text for/, 'Error message displayed'
+        }
+        $problem->discard_changes;
         $problem->comments->delete;
     }
 }

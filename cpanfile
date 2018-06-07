@@ -42,7 +42,7 @@ requires 'DateTime::Format::HTTP';
 requires 'DateTime::Format::ISO8601';
 requires 'DateTime::Format::Pg';
 requires 'DateTime::Format::W3CDTF';
-requires 'DateTime::TimeZone';
+requires 'DateTime::TimeZone', '2.18';
 requires 'DBD::Pg', '2.9.2';
 requires 'DBI';
 requires 'DBIx::Class::EncodedColumn', '0.00013';
@@ -112,6 +112,12 @@ feature 'zurich', 'Zueri wie neu specific requirements' => sub {
     requires 'SOAP::Lite', '1.20';
 };
 
+feature 'kiitc', 'KiitC specific requirements' => sub {
+    requires 'Spreadsheet::Read';
+    requires 'Spreadsheet::ParseExcel';
+    requires 'Spreadsheet::ParseXLSX';
+};
+
 # Moderation by from_body user
 requires 'Algorithm::Diff';
 
@@ -130,7 +136,7 @@ recommends 'Linux::Inotify2' if $^O eq 'linux';
 recommends 'Mac::FSEvents' if $^O eq 'darwin';
 
 # Modules used by the test suite
-requires 'Test::PostgreSQL';
+requires 'Test::PostgreSQL', '1.25';
 requires 'CGI::Simple';
 requires 'HTTP::Headers';
 requires 'HTTP::Response';
@@ -141,6 +147,7 @@ requires 'Test::Exception';
 requires 'Test::LongString';
 requires 'Test::MockTime';
 requires 'Test::More', '0.88';
+requires 'Test::Output';
 requires 'Test::Warn';
 requires 'Test::WWW::Mechanize::Catalyst';
 requires 'Web::Scraper';

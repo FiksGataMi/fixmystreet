@@ -81,8 +81,8 @@ subtest 'Exor file looks okay' => sub {
         $mech->log_in_ok( $superuser->email );
         $mech->get_ok('/admin/exordefects');
         $mech->submit_form_ok( { with_fields => {
-            start_date => '05/05/2017',
-            end_date => '05/05/2017',
+            start_date => '2017-05-05',
+            end_date => '2017-05-05',
             user_id => $inspector->id,
         } }, 'submit download');
         $mech->content_contains("No inspections by that inspector in the selected date range");
@@ -120,8 +120,8 @@ subtest 'Exor file looks okay' => sub {
             $i++;
         }
         $mech->submit_form_ok( { with_fields => {
-            start_date => '05/05/2017',
-            end_date => '05/05/2017',
+            start_date => '2017-05-05',
+            end_date => '2017-05-05',
             user_id => $inspector->id,
         } }, 'submit download');
         (my $rdi = $mech->content) =~ s/\r\n/\n/g;
@@ -159,6 +159,7 @@ EOF
 subtest 'Reports are marked as inspected correctly' => sub {
     FixMyStreet::override_config {
         ALLOWED_COBRANDS => [ 'oxfordshire' ],
+        MAPIT_URL => 'http://mapit.uk/',
     }, sub {
         my $date = DateTime->new(year => 2017, month => 5, day => 5, hour => 12);
 
@@ -182,57 +183,6 @@ subtest 'Reports are marked as inspected correctly' => sub {
             $problem->discard_changes;
             is $problem->get_extra_metadata('rdi_processed'), $now->strftime( '%Y-%m-%d %H:%M' ), "Problem was logged as sent in RDI";
         }
-    };
-};
-
-subtest 'response times messages displayed' => sub {
-    my $oxfordshire = $mech->create_body_ok(
-        2237, 'Oxfordshire County Council'
-    );
-    my $contact = $mech->create_contact_ok(
-        body_id => $oxfordshire->id,
-        category => 'Pothole',
-        email => 'pothole@example.com',
-    );
-
-    FixMyStreet::override_config {
-        ALLOWED_COBRANDS => [ 'oxfordshire' ],
-        MAPIT_URL => 'http://mapit.uk/',
-    }, sub {
-        $mech->log_out_ok;
-        $mech->clear_emails_ok;
-
-        $mech->get_ok('/around');
-        $mech->submit_form_ok( {
-                with_fields => { pc => 'OX20 1SZ' }
-            },
-            "submit_location"
-        );
-
-        $mech->follow_link_ok( { text_regex => qr/skip this step/i, },
-            "follow 'skip this step' link" );
-
-        $mech->submit_form_ok(
-            {
-                with_fields => {
-                    title         => 'Test Report',
-                    detail        => 'Test report details.',
-                    photo1        => '',
-                    username      => 'test-2@example.com',
-                    name          => 'Test User',
-                    category      => 'Pothole',
-                }
-            },
-            "submit details"
-        );
-
-        $mech->text_contains('Problems in the Pothole category are generally responded');
-        my $email = $mech->get_email;
-        ok $email, 'got and email';
-        like $mech->get_text_body_from_email, qr/Problems in the Pothole category/, 'emails contains response time message';
-        my $url = $mech->get_link_from_email($email);
-        $mech->get_ok($url);
-        $mech->text_contains('Problems in the Pothole category are generally responded')
     };
 };
 

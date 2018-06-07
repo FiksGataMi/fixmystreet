@@ -23,6 +23,7 @@ sub output {
 }
 
 my @PLACES = (
+    [ '?', 53.387402, -2.943997, 2527, 'Liverpool City Council', 'MTD' ],
     [ 'EH1 1BB', 55.952055, -3.189579, 2651, 'Edinburgh City Council', 'UTA', 20728, 'City Centre', 'UTE' ],
     [ 'BS10 5EE', 51.494885, -2.602237, 2561, 'Bristol City Council', 'UTA', 148646, 'Bedminster', 'UTW' ],
     [ 'SW1A 1AA', 51.501009, -0.141588, 2504, 'Westminster City Council', 'LBO' ],
@@ -30,6 +31,7 @@ my @PLACES = (
     [ '?', 51.754926, -1.256179, 2237, 'Oxfordshire County Council', 'CTY', 2421, 'Oxford City Council', 'DIS' ],
     [ 'OX20 1SZ', 51.754926, -1.256179, 2237, 'Oxfordshire County Council', 'CTY', 2421, 'Oxford City Council', 'DIS' ],
     [ 'BR1 3UH', 51.4021, 0.01578, 2482, 'Bromley Council', 'LBO' ],
+    [ 'BR1 3UH', 51.402096, 0.015784, 2482, 'Bromley Council', 'LBO' ],
     [ '?', 50.78301, -0.646929 ],
     [ 'GU51 4AE', 51.279456, -0.846216, 2333, 'Hart District Council', 'DIS', 2227, 'Hampshire County Council', 'CTY' ],
     [ 'WS1 4NH', 52.563074, -1.991032, 2535, 'Sandwell Borough Council', 'MTD' ],
