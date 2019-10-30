@@ -4,6 +4,9 @@ use parent 'FixMyStreet::Cobrand::Whitelabel';
 use strict;
 use warnings;
 
+use Moo;
+with 'FixMyStreet::Roles::ConfirmValidation';
+
 use LWP::Simple;
 use URI;
 use Try::Tiny;
@@ -19,10 +22,7 @@ sub contact_email {
     return join( '@', 'councilconnect_rejections', 'bathnes.gov.uk' );
 }
 
-sub update_email {
-    my $self = shift;
-    return join( '@', 'highways', 'bathnes.gov.uk' );
-}
+sub suggest_duplicates { 1 }
 
 sub admin_user_domain { 'bathnes.gov.uk' }
 
@@ -33,6 +33,8 @@ sub base_url {
 }
 
 sub map_type { 'BathNES' }
+
+sub on_map_default_status { 'open' }
 
 sub example_places {
     return ( 'BA1 1JQ', "Lansdown Grove" );
@@ -91,13 +93,12 @@ sub send_questionnaires { 0 }
 
 sub enable_category_groups { 1 }
 
-sub default_show_name { 0 }
-
 sub default_map_zoom { 3 }
 
 sub map_js_extra {
-    my ($self, $c) = @_;
+    my $self = shift;
 
+    my $c = $self->{c};
     return unless $c->user_exists;
 
     my $banes_user = $c->user->from_body && $c->user->from_body->areas->{$self->council_area_id};
@@ -152,7 +153,7 @@ sub available_permissions {
     return $permissions;
 }
 
-sub report_sent_confirmation_email { 1 }
+sub report_sent_confirmation_email { 'id' }
 
 sub lookup_usrn {
     my $self = shift;
@@ -207,10 +208,60 @@ sub categories_restriction {
         'me.send_method' => undef, # Open311 categories
         'me.send_method' => '', # Open311 categories that have been edited in the admin
         'me.send_method' => 'Email::BathNES', # Street Light Fault
+        'me.send_method' => 'Blackhole', # Parks categories
     ] } );
 }
 
-sub dashboard_export_add_columns {
+# Do a manual prefetch, as easier than sorting out quoting 'user'
+sub _dashboard_user_lookup {
+    my $self = shift;
+    my $c = $self->{c};
+
+    # Fetch all the relevant user IDs, and look them up
+    my @user_ids = $c->stash->{objects_rs}->search({}, { columns => [ 'user_id' ] })->all;
+    @user_ids = map { $_->user_id } @user_ids;
+    @user_ids = $c->model('DB::User')->search(
+        { id => { -in => \@user_ids } },
+        { columns => [ 'id', 'email', 'phone' ] })->all;
+
+    # Plus all staff users for contributed_by lookup
+    push @user_ids, $c->model('DB::User')->search(
+        { from_body => { '!=' => undef } },
+        { columns => [ 'id', 'email', 'phone' ] })->all;
+
+    my %user_lookup = map { $_->id => { email => $_->email, phone => $_->phone } } @user_ids;
+    return \%user_lookup;
+}
+
+sub dashboard_export_updates_add_columns {
+    my $self = shift;
+    my $c = $self->{c};
+
+    return unless $c->user->has_body_permission_to('export_extra_columns');
+
+    push @{$c->stash->{csv}->{headers}}, "Staff User";
+    push @{$c->stash->{csv}->{headers}}, "User Email";
+    push @{$c->stash->{csv}->{columns}}, "staff_user";
+    push @{$c->stash->{csv}->{columns}}, "user_email";
+
+    my $user_lookup = $self->_dashboard_user_lookup;
+
+    $c->stash->{csv}->{extra_data} = sub {
+        my $report = shift;
+
+        my $staff_user = '';
+        if ( my $contributed_by = $report->get_extra_metadata('contributed_by') ) {
+            $staff_user = $user_lookup->{$contributed_by}{email};
+        }
+
+        return {
+            user_email => $user_lookup->{$report->user_id}{email} || '',
+            staff_user => $staff_user,
+        };
+    };
+}
+
+sub dashboard_export_problems_add_columns {
     my $self = shift;
     my $c = $self->{c};
 
@@ -220,39 +271,33 @@ sub dashboard_export_add_columns {
         @{ $c->stash->{csv}->{headers} },
         "User Email",
         "User Phone",
-        "Reported As",
         "Staff User",
         "Attribute Data",
-        "Site Used",
     ];
 
     $c->stash->{csv}->{columns} = [
         @{ $c->stash->{csv}->{columns} },
         "user_email",
         "user_phone",
-        "reported_as",
         "staff_user",
         "attribute_data",
-        "site_used",
     ];
+
+    my $user_lookup = $self->_dashboard_user_lookup;
 
     $c->stash->{csv}->{extra_data} = sub {
         my $report = shift;
 
-        my $reported_as = $report->get_extra_metadata('contributed_as') || '';
         my $staff_user = '';
         if ( my $contributed_by = $report->get_extra_metadata('contributed_by') ) {
-            $staff_user = $c->model('DB::User')->find({ id => $contributed_by })->email;
+            $staff_user = $user_lookup->{$contributed_by}{email};
         }
-        my $site_used = $report->service || $report->cobrand || '';
         my $attribute_data = join "; ", map { $_->{name} . " = " . $_->{value} } @{ $report->get_extra_fields };
         return {
-            user_email => $report->user->email || '',
-            user_phone => $report->user->phone || '',
-            reported_as => $reported_as,
+            user_email => $user_lookup->{$report->user_id}{email} || '',
+            user_phone => $user_lookup->{$report->user_id}{phone} || '',
             staff_user => $staff_user,
             attribute_data => $attribute_data,
-            site_used => $site_used,
         };
     };
 }

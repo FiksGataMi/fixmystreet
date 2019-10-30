@@ -10,10 +10,12 @@ use Memcached;
 use FixMyStreet::Map;
 use FixMyStreet::Email;
 use FixMyStreet::Email::Sender;
+use FixMyStreet::PhotoStorage;
 use Utils;
 
 use Path::Tiny 'path';
 use Try::Tiny;
+use Text::CSV;
 use URI;
 use URI::QueryParam;
 
@@ -33,6 +35,11 @@ extends 'Catalyst';
 our $VERSION = '0.01';
 
 __PACKAGE__->config(
+
+    # Use REQUEST_URI, not PATH_INFO, to infer path. This fixes an issue
+    # with slashes in category names in admin (as PATH_INFO can't tell
+    # the difference between / and %2F)
+    use_request_uri_for_path => 1,
 
     # get the config from the core object
     %{ FixMyStreet->config() },
@@ -127,11 +134,9 @@ after 'prepare_headers' => sub {
 __PACKAGE__->log->disable('debug')    #
   unless __PACKAGE__->debug;
 
-# Check upload_dir
-my $cache_dir = path(FixMyStreet->config('UPLOAD_DIR'))->absolute(FixMyStreet->path_to());
-$cache_dir->mkpath;
-unless ( -d $cache_dir && -w $cache_dir ) {
-    warn "\x1b[31mCan't find/write to photo cache directory '$cache_dir'\x1b[0m\n";
+# Set up photo storage
+unless ( FixMyStreet::PhotoStorage::backend->init() ) {
+    warn "\x1b[31mCan't set up photo storage backend\x1b[0m\n";
 }
 
 =head1 NAME
@@ -237,9 +242,9 @@ sub setup_request {
     $c->stash->{map_js} = FixMyStreet::Map::map_javascript();
 
     unless ( FixMyStreet->config('MAPIT_URL') ) {
-        my $port = $c->req->uri->port;
-        $host = "$host:$port" unless $port == 80;
-        mySociety::MaPit::configure( "http://$host/fakemapit/" );
+        my $host_port = $c->req->uri->host_port;
+        my $scheme = $c->req->uri->scheme;
+        mySociety::MaPit::configure( "$scheme://$host_port/fakemapit/" );
     }
 
     $c->stash->{has_fixed_state} = FixMyStreet::DB::Result::Problem::fixed_states->{fixed};
@@ -420,27 +425,6 @@ sub uri_with {
     return $uri;
 }
 
-=head2 uri_for
-
-    $uri = $c->uri_for( ... );
-
-Like C<uri_for> except that it passes the uri to the cobrand to be altered if
-needed.
-
-=cut
-
-sub uri_for {
-    my $c    = shift;
-    my @args = @_;
-
-    my $uri = $c->next::method(@args);
-
-    my $cobranded_uri = $c->cobrand->uri($uri);
-
-    # note that the returned uri may be a string not an object (eg cities)
-    return $cobranded_uri;
-}
-
 =head2 uri_for_email
 
     $uri = $c->uri_for_email( ... );
@@ -517,7 +501,11 @@ sub get_param_list {
     my $value = $c->req->params->{$param};
     return () unless defined $value;
     my @value = ref $value ? @$value : ($value);
-    return map { split /,/, $_ } @value if $allow_commas;
+    if ($allow_commas) {
+        my $csv = Text::CSV->new;
+        $csv->parse(join ',', @value);
+        @value = $csv->fields;
+    }
     return @value;
 }
 

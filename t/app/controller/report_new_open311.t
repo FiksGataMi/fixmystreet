@@ -73,12 +73,10 @@ my $empty_form = {
     name          => '',
     may_show_name => '1',
     username      => '',
-    email         => '',
     phone         => '',
     category      => '',
     password_sign_in => '',
     password_register => '',
-    remember_me => undef,
 };
 foreach my $test (
     {
@@ -249,13 +247,18 @@ subtest "Category extras omits description label when all fields are hidden" => 
         ALLOWED_COBRANDS => [ { fixmystreet => '.' } ],
         MAPIT_URL => 'http://mapit.uk/',
     }, sub {
-        my $json = $mech->get_ok_json('/report/new/category_extras?category=Pothole&latitude=55.952055&longitude=-3.189579');
-        my $category_extra = $json->{category_extra};
-        contains_string($category_extra, "usrn");
-        contains_string($category_extra, "central_asset_id");
-        lacks_string($category_extra, "USRN", "Lacks 'USRN' label");
-        lacks_string($category_extra, "Asset ID", "Lacks 'Asset ID' label");
-        lacks_string($category_extra, "resolve your problem quicker, by providing some extra detail", "Lacks description text");
+        for (
+          { url => '/report/new/ajax?' },
+          { url => '/report/new/category_extras?category=Pothole' },
+        ) {
+            my $json = $mech->get_ok_json($_->{url} . '&latitude=55.952055&longitude=-3.189579');
+            my $category_extra = $json->{by_category} ? $json->{by_category}{Pothole}{category_extra} : $json->{category_extra};
+            contains_string($category_extra, "usrn");
+            contains_string($category_extra, "central_asset_id");
+            lacks_string($category_extra, "USRN", "Lacks 'USRN' label");
+            lacks_string($category_extra, "Asset ID", "Lacks 'Asset ID' label");
+            lacks_string($category_extra, "resolve your problem quicker, by providing some extra detail", "Lacks description text");
+        }
     };
 };
 
@@ -264,17 +267,22 @@ subtest "Category extras includes description label for user" => sub {
         ALLOWED_COBRANDS => [ { fixmystreet => '.' } ],
         MAPIT_URL => 'http://mapit.uk/',
     }, sub {
-        $contact4->push_extra_fields({ description => 'Size?', code => 'size', required => 'true', automated => '', variable => 'true', order => '3' });
+        $contact4->push_extra_fields({ description => 'Size?', code => 'size', required => 'true', automated => '', variable => 'true', order => '3', values => undef });
         $contact4->update;
-
-        my $json = $mech->get_ok_json('/report/new/category_extras?category=Pothole&latitude=55.952055&longitude=-3.189579');
-        my $category_extra = $json->{category_extra};
-        contains_string($category_extra, "usrn");
-        contains_string($category_extra, "central_asset_id");
-        lacks_string($category_extra, "USRN", "Lacks 'USRN' label");
-        lacks_string($category_extra, "Asset ID", "Lacks 'Asset ID' label");
-        contains_string($category_extra, "Size?");
-        contains_string($category_extra, "resolve your problem quicker, by providing some extra detail", "Contains description text");
+        for (
+          { url => '/report/new/ajax?' },
+          { url => '/report/new/category_extras?category=Pothole' },
+        ) {
+            my $json = $mech->get_ok_json($_->{url} . '&latitude=55.952055&longitude=-3.189579');
+            my $category_extra = $json->{by_category} ? $json->{by_category}{Pothole}{category_extra} : $json->{category_extra};
+            contains_string($category_extra, "usrn");
+            contains_string($category_extra, "central_asset_id");
+            lacks_string($category_extra, "USRN", "Lacks 'USRN' label");
+            lacks_string($category_extra, "Asset ID", "Lacks 'Asset ID' label");
+            contains_string($category_extra, "Size?");
+            lacks_string($category_extra, '<option value=""');
+            contains_string($category_extra, "resolve your problem quicker, by providing some extra detail", "Contains description text");
+        }
     };
 };
 

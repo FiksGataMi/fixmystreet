@@ -216,14 +216,6 @@ fixmystreet.update_list_item_buttons = function($list) {
   $list.children(':last-child').find('[name="shortlist-down"]').prop('disabled', true);
 };
 
-// A tiny helper to call a function only if it exists (so we can
-// call this with staff-only functions and they won't error).
-fixmystreet.run = function(fn) {
-    if (fn) {
-        fn.call(this);
-    }
-};
-
 fixmystreet.set_up = fixmystreet.set_up || {};
 $.extend(fixmystreet.set_up, {
   basics: function() {
@@ -282,7 +274,7 @@ $.extend(fixmystreet.set_up, {
     var submitted = false;
 
     $("form.validate").each(function(){
-      $(this).validate({
+      fixmystreet.validator = $(this).validate({
         rules: validation_rules,
         messages: translation_strings,
         onkeyup: false,
@@ -312,22 +304,17 @@ $.extend(fixmystreet.set_up, {
       });
     });
 
-    /* set correct required status depending on what we submit
-    * NB: need to add things to form_category as the JS updating
-    * of this we do after a map click removes them */
+    /* set correct required status depending on what we submit */
     $('.js-submit_sign_in').click( function(e) {
-        $('#form_category').addClass('required validCategory').removeClass('valid');
         $('.js-form-name').removeClass('required');
     } );
 
     $('.js-submit_register').click( function(e) {
-        $('#form_category').addClass('required validCategory').removeClass('valid');
         $('.js-form-name').addClass('required');
     } );
 
     $('#facebook_sign_in, #twitter_sign_in').click(function(e){
-        $('#form_username').removeClass();
-        $('#username').removeClass();
+        $('#username, #form_username_register, #form_username_sign_in').removeClass('required');
     });
 
     $('#planned_form').submit(function(e) {
@@ -387,42 +374,97 @@ $.extend(fixmystreet.set_up, {
     // On the new report form, does this by asking for details from the server.
     // Delegation is necessary because #form_category may be replaced during the lifetime of the page
     $("#problem_form").on("change.category", "select#form_category", function(){
-        var args = {
-            category: $(this).val(),
-            latitude: $('input[name="latitude"]').val(),
-            longitude: $('input[name="longitude"]').val()
-        };
-
-        $.getJSON('/report/new/category_extras', args, function(data) {
-            var $category_meta = $('#category_meta');
-            $('#js-councils_text').html(data.councils_text);
-            $('#js-councils_text_private').html(data.councils_text_private);
-            if ( data.category_extra ) {
-                if ( $category_meta.length ) {
-                    $category_meta.replaceWith( data.category_extra );
-                    // Preserve any existing values
-                    $category_meta.find("[name]").each(function() {
-                        $('#category_meta').find("[name="+this.name+"]").val(this.value);
-                    });
-                } else {
-                    $('#form_category_row').after( data.category_extra );
-                }
-            } else {
-                $category_meta.empty();
+	// If we haven't got any reporting data (e.g. came straight to
+	// /report/new), fetch it first. That will then automatically call this
+	// function again, due to it calling change() on the category if set.
+        if (!fixmystreet.reporting_data) {
+            if (fixmystreet.page === 'new') {
+                fixmystreet.fetch_reporting_data();
             }
-            $(fixmystreet).trigger('report_new:category_change:extras_received');
+            return;
+        }
+
+        var category = $(this).val(),
+            data = fixmystreet.reporting_data.by_category[category],
+            $category_meta = $('#category_meta');
+
+        if (data) {
+            fixmystreet.bodies = data.bodies || [];
+        } else {
+            fixmystreet.bodies = fixmystreet.reporting_data.bodies || [];
+        }
+        if (fixmystreet.body_overrides) {
+            fixmystreet.body_overrides.clear();
+        }
+
+        if (data && data.councils_text) {
+            fixmystreet.update_councils_text(data);
+        } else {
+            // Use the original returned texts
+            fixmystreet.update_councils_text(fixmystreet.reporting_data);
+        }
+        if (data && data.category_extra) {
+            if ( $category_meta.length ) {
+                $category_meta.replaceWith( data.category_extra );
+                // Preserve any existing values
+                $category_meta.find("[name]").each(function() {
+                    $category_meta.find("[name="+this.name+"]").val(this.value);
+                });
+            } else {
+                $('#js-post-category-messages').prepend( data.category_extra );
+            }
+        } else {
+            $category_meta.empty();
+        }
+
+        // remove existing validation rules
+        validation_rules = fixmystreet.validator.settings.rules;
+        $.each(validation_rules, function(rule) {
+             var $el = $('#form_' + rule);
+             if ($el.length) {
+                 $el.rules('remove');
+             }
+        });
+        // apply new validation rules
+        fixmystreet.set_up.reapply_validation(core_validation_rules);
+        $.each(fixmystreet.bodies, function(index, body) {
+            if ( typeof body_validation_rules !== 'undefined' && body_validation_rules[body] ) {
+                var rules = body_validation_rules[body];
+                fixmystreet.set_up.reapply_validation(rules);
+            }
         });
 
         $(fixmystreet).trigger('report_new:category_change', [ $(this) ]);
     });
   },
 
-  category_groups: function() {
-    var $category_select = $("select#form_category.js-grouped-select");
-    if ($category_select.length === 0) {
+  reapply_validation: function(rules) {
+        if (rules === undefined) {
+            return;
+        }
+        $.each(rules, function(name, rule) {
+            var $el = $('#form_' + name);
+            if ($el.length) {
+                $el.rules('add', rule);
+                if (rule.maxlength) {
+                  $el.attr('maxlength', rule.maxlength);
+                } else {
+                  $el.removeAttr('maxlength');
+                }
+            }
+        });
+  },
+
+  category_groups: function(old_group) {
+    var $category_select = $("select#form_category");
+    if (!$category_select.hasClass('js-grouped-select')) {
+        if ($category_select.val() !== '-- Pick a category --') {
+            $category_select.change();
+        }
         return;
     }
-    var $group_select = $("<select></select>").addClass("form-control");
+
+    var $group_select = $("<select></select>").addClass("form-control validCategory").attr('id', 'category_group');
     var $subcategory_label = $("#form_subcategory_label");
     var $empty_option = $category_select.find("option").first();
 
@@ -462,7 +504,7 @@ $.extend(fixmystreet.set_up, {
             $opt.data("subcategory_id", subcategory_id);
             $group_select.append($opt);
 
-            var $sub_select = $("<select></select>").addClass("form-control js-subcategory");
+            var $sub_select = $("<select></select>").addClass("form-control js-subcategory validCategory");
             $sub_select.attr("id", subcategory_id);
             $sub_select.append($empty_option.clone());
             $options.each(function() {
@@ -486,6 +528,21 @@ $.extend(fixmystreet.set_up, {
             add_option(this);
         }
     });
+    // Sort elements in place, but leave the first 'pick a category' option alone
+    $group_select.find("option").slice(1).sort(function(a, b) {
+        // 'Other' should always be at the end.
+        if (a.label === 'Other') {
+            return 1;
+        }
+        if (b.label === 'Other') {
+            return -1;
+        }
+        return a.label > b.label ? 1 : -1;
+    }).appendTo($group_select);
+
+    if (old_group !== '-- Pick a category --' && $category_select.val() == '-- Pick a category --') {
+        $group_select.val(old_group);
+    }
     $group_select.change();
   },
 
@@ -538,10 +595,16 @@ $.extend(fixmystreet.set_up, {
 
     if ('Dropzone' in window) {
       Dropzone.autoDiscover = false;
+    } else {
+      return;
     }
-    if ('Dropzone' in window && $('#form_photo', $context).length) {
-      var $originalLabel = $('[for="form_photo"]', $context);
-      var $originalInput = $('#form_photos', $context);
+
+    var forms = $('[for="form_photo"], .js-photo-label', $context).closest('form');
+    forms.each(function() {
+      // Internal $context is the individual form with the photo upload inside
+      var $context = $(this);
+      var $originalLabel = $('[for="form_photo"], .js-photo-label', $context);
+      var $originalInput = $('#form_photos, .js-photo-fields', $context);
       var $dropzone = $('<div>').addClass('dropzone');
 
       $originalLabel.removeAttr('for');
@@ -624,7 +687,7 @@ $.extend(fixmystreet.set_up, {
         photodrop.emit("complete", mockFile);
         photodrop.options.maxFiles -= 1;
       });
-    }
+    });
   },
 
   report_list_filters: function() {
@@ -664,6 +727,27 @@ $.extend(fixmystreet.set_up, {
     $('.big-green-banner').on('click', function(){
       if (fixmystreet.map.getCenter) {
         fixmystreet.display.begin_report( fixmystreet.map.getCenter() );
+      }
+    });
+  },
+
+  report_a_problem_btn: function() {
+    $(fixmystreet).on('maps:update_view', fixmystreet.update_report_a_problem_btn);
+
+    // Hide button on new report page.
+    if ( fixmystreet.page === 'new' ) {
+      $('.report-a-problem-btn').hide();
+    }
+
+    $('.report-a-problem-btn').on('click', function(e){
+      var url = this.href;
+      if ( url.indexOf('report/new') > -1 ) {
+        try {
+          e.preventDefault();
+          fixmystreet.display.begin_report( fixmystreet.map.getCenter() );
+        } catch (error) {
+          window.location = url;
+        }
       }
     });
   },
@@ -758,23 +842,118 @@ $.extend(fixmystreet.set_up, {
   },
 
   email_login_form: function() {
-    // Log in with email button
-    var email_form = $('#js-social-email-hide'),
-        button = $('<button class="btn btn--social btn--social-email">'+translation_strings.login_with_email+'</button>'),
-        form_box = $('<div class="form-box"></div>');
-    button.click(function(e) {
-        e.preventDefault();
-        email_form.fadeIn(500);
-        form_box.hide();
+    // Password form split up
+    $('.js-sign-in-password-btn').click(function(e) {
+        if ($('.js-sign-in-password').is(':visible')) {
+        } else {
+            e.preventDefault();
+            $('.js-sign-in-password-hide').hide();
+            $('.js-sign-in-password').show().css('visibility', 'visible');
+            $('#password_sign_in').focus();
+        }
     });
-    form_box.append(button).insertBefore(email_form);
-    if ($('.form-error').length) {
-        button.click();
+    // This is if the password box is filled programmatically (by
+    // e.g. 1Password), show it so that it will auto-submit.
+    $('#password_sign_in').change(function() {
+        $('.js-sign-in-password').show().css('visibility', 'visible');
+    });
+
+    var show = function(selector) {
+        var deferred = $.Deferred();
+        $(selector).hide().removeClass('hidden-js').slideDown(400, function(){
+            $(this).css('display', '');
+            deferred.resolveWith(this);
+        });
+        return deferred.promise();
+    };
+
+    var hide = function(selector) {
+        var deferred = $.Deferred();
+        $(selector).slideUp(400, function(){
+            $(this).addClass('hidden-js').css('display', '');
+            deferred.resolveWith(this);
+        });
+        return deferred.promise();
+    };
+
+    var focusFirstVisibleInput = function() {
+        // Ignore logged-in form here, because it should all be pre-filled already!
+        $('#form_sign_in_yes input, #form_sign_in_no input').filter(':visible').eq(0).focus();
+    };
+
+    // Display tweak
+    $('.js-new-report-sign-in-hidden.form-box, .js-new-report-sign-in-shown.form-box').removeClass('form-box');
+
+    $('.js-new-report-user-hide').click(function(e) {
+        e.preventDefault();
+        $('.js-new-report-user-shown')[0].scrollIntoView({behavior: "smooth"});
+        hide('.js-new-report-user-shown');
+        show('.js-new-report-user-hidden');
+    });
+    $('.js-new-report-user-show').click(function(e) {
+        e.preventDefault();
+        if (!$(this).closest('form').validate().form()) {
+            return;
+        }
+        $('.js-new-report-user-hidden')[0].scrollIntoView({behavior: "smooth"});
+        hide('.js-new-report-user-hidden');
+        show('.js-new-report-user-shown').then(function(){
+            focusFirstVisibleInput();
+        });
+    });
+
+    $('.js-new-report-show-sign-in').click(function(e) {
+        $('.js-new-report-sign-in-shown').removeClass('hidden-js');
+        $('.js-new-report-sign-in-hidden').addClass('hidden-js');
+        focusFirstVisibleInput();
+    });
+
+    $('.js-new-report-hide-sign-in').click(function(e) {
+        e.preventDefault();
+        $('.js-new-report-sign-in-shown').addClass('hidden-js');
+        $('.js-new-report-sign-in-hidden').removeClass('hidden-js');
+        focusFirstVisibleInput();
+    });
+
+    $('.js-new-report-sign-in-forgotten').click(function() {
+        $('.js-new-report-sign-in-shown').addClass('hidden-js');
+        $('.js-new-report-sign-in-hidden').removeClass('hidden-js');
+        $('.js-new-report-forgotten-shown').removeClass('hidden-js');
+        $('.js-new-report-forgotten-hidden').addClass('hidden-js');
+        focusFirstVisibleInput();
+    });
+
+    var err = $('.form-error');
+    if (err.length) {
+        $('.js-sign-in-password-btn').click();
+        if (err.closest(".js-new-report-sign-in-shown").length) {
+            $('.js-new-report-user-shown').removeClass('hidden-js');
+            $('.js-new-report-user-hidden').addClass('hidden-js');
+            $('.js-new-report-sign-in-shown').removeClass('hidden-js');
+            $('.js-new-report-sign-in-hidden').addClass('hidden-js');
+        } else if (err.closest('.js-new-report-sign-in-hidden, .js-new-report-user-shown').length) {
+            $('.js-new-report-user-shown').removeClass('hidden-js');
+            $('.js-new-report-user-hidden').addClass('hidden-js');
+        }
     }
   },
 
+  form_section_previews: function() {
+    $('.js-form-section-preview').each(function(){
+        var $el = $(this);
+        var $source = $( $el.attr('data-source') );
+        $source.on('change', function(){
+            var val = $source.val();
+            if ( val.length > 80 ) {
+                val = val.substring(0, 80) + '…';
+            }
+            $el.text( val );
+        });
+    });
+  },
+
   reporting_hide_phone_email: function() {
-    $('#form_username').on('keyup change', function() {
+    $('#form_username_register').on('keyup change', function() {
         var username = $(this).val();
         if (/^[^a-z]+$/i.test(username)) {
             $('#js-hide-if-username-phone').hide();
@@ -795,22 +974,6 @@ $.extend(fixmystreet.set_up, {
     }
   },
 
-  form_focus_triggers: function() {
-    // If all of the form-focus-triggers are empty, hide form-focus-hidden.
-    // (If the triggers aren't empty, then chances are we're being re-shown
-    // the form after a validation error, so don't hide form-focus-hidden.)
-    // Unhide form-focus-hidden when any of the triggers are focussed.
-    var form_focus_data = $('.form-focus-trigger').map(function() {
-        return $(this).val();
-    }).get().join('');
-    if (!form_focus_data) {
-        $('.form-focus-hidden').hide();
-        $('.form-focus-trigger').on('focus', function() {
-            $('.form-focus-hidden').fadeIn(500);
-        });
-    }
-  },
-
   alert_page_buttons: function() {
     // Go directly to RSS feed if RSS button clicked on alert page
     // (due to not wanting around form to submit, though good thing anyway)
@@ -823,7 +986,7 @@ $.extend(fixmystreet.set_up, {
         e.preventDefault();
         var form = $('<form/>').attr({ method:'post', action:"/alert/subscribe" });
         form.append($('<input name="alert" value="Subscribe me to an email alert" type="hidden" />'));
-        $('#alerts input[type=text], #alerts input[type=hidden], #alerts input[type=radio]:checked').each(function() {
+        $(this).closest('.js-alert-list').find('input[type=email], input[type=text], input[type=hidden], input[type=radio]:checked').each(function() {
             var $v = $(this);
             $('<input/>').attr({ name:$v.attr('name'), value:$v.val(), type:'hidden' }).appendTo(form);
         });
@@ -833,6 +996,8 @@ $.extend(fixmystreet.set_up, {
   },
 
   ajax_history: function() {
+    var around_map_state = null;
+
     $('#map_sidebar').on('click', '.item-list--reports a', function(e) {
         if (e.metaKey || e.ctrlKey) {
             return;
@@ -851,10 +1016,31 @@ $.extend(fixmystreet.set_up, {
                 fixmystreet.map.setCenter(
                     marker.geometry.getBounds().getCenterLonLat(),
                     fixmystreet.map.getNumZoomLevels() - 1 );
+                // replaceState rather than pushState so the back button returns
+                // to the zoomed-out map with all pins.
+                history.replaceState({
+                    reportId: reportId,
+                    reportPageUrl: reportPageUrl,
+                    mapState: fixmystreet.maps.get_map_state()
+                }, null);
             }
             return;
         }
 
+        if (fixmystreet.page.match(/reports|around|my/)) {
+            around_map_state = fixmystreet.maps.get_map_state();
+            // Preserve the current map state in the current state so we can
+            // restore it if the user navigates back. This needs doing here,
+            // rather than the 'fake history' replaceState call that sets the
+            // initial state, because the map hasn't been loaded at that point.
+            // Also, filters might be changed before a report click.
+            if ('state' in history && history.state && !history.state.mapState) {
+                history.state.mapState = around_map_state;
+                // NB can't actually modify current state directly, needs a
+                // call to replaceState()
+                history.replaceState(history.state, null);
+            }
+        }
         fixmystreet.display.report(reportPageUrl, reportId, function() {
             // Since this navigation was the result of a user action,
             // we want to record the navigation as a state, so the user
@@ -862,31 +1048,110 @@ $.extend(fixmystreet.set_up, {
             if ('pushState' in history) {
                 history.pushState({
                     reportId: reportId,
-                    reportPageUrl: reportPageUrl
+                    reportPageUrl: reportPageUrl,
+                    mapState: fixmystreet.maps.get_map_state()
                 }, null, reportPageUrl);
             }
         });
     });
 
     $('#map_sidebar').on('click', '.js-back-to-report-list', function(e) {
-        if (e.metaKey || e.ctrlKey) {
-            return;
-        }
-
-        e.preventDefault();
-        var reportListUrl = $(this).attr('href');
-        fixmystreet.display.reports_list(reportListUrl, function() {
-            // Since this navigation was the result of a user action,
-            // we want to record the navigation as a state, so the user
-            // can return to it later using their Back button.
-            if ('pushState' in history) {
-                history.pushState({ initial: true }, null, reportListUrl);
-            }
-        });
+        var report_list_url = $(this).attr('href');
+        var map_state = around_map_state;
+        var set_map_state = true;
+        fixmystreet.back_to_reports_list(e, report_list_url, map_state, set_map_state);
     });
+  },
+
+  expandable_list_items: function(){
+      $(document).on('click', '.js-toggle-expansion', function(e) {
+          e.preventDefault(); // eg: prevent button from submitting parent form
+          var $toggle = $(this);
+          var $parent = $toggle.closest('.js-expandable');
+          $parent.toggleClass('expanded');
+          $toggle.text($parent.hasClass('expanded') ? $toggle.data('less') : $toggle.data('more'));
+      });
+
+      $(document).on('click', '.js-expandable', function(e) {
+          var $parent = $(this);
+          // Ignore parents that are already expanded.
+          if ( ! $parent.hasClass('expanded') ) {
+              // Ignore clicks on action buttons (clicks on the
+              // .js-toggle-expansion button will be handled by
+              // the more specific handler above).
+              if ( ! $(e.target).is('.item-list__item--expandable__actions *') ) {
+                  e.preventDefault();
+                  $parent.addClass('expanded');
+                  var $toggle = $parent.find('.js-toggle-expansion');
+                  $toggle.text($toggle.data('less'));
+              }
+          }
+      });
   }
 
 });
+
+fixmystreet.back_to_reports_list = function(e, report_list_url, map_state, set_map_state) {
+    if (e.metaKey || e.ctrlKey) {
+        return;
+    }
+    e.preventDefault();
+    fixmystreet.display.reports_list(report_list_url, function() {
+        // Since this navigation was the result of a user action,
+        // we want to record the navigation as a state, so the user
+        // can return to it later using their Back button.
+        if ('pushState' in history) {
+            history.pushState({
+                initial: true,
+                mapState: map_state
+            }, null, report_list_url);
+        }
+        if (set_map_state && map_state) {
+            fixmystreet.maps.set_map_state(map_state);
+        }
+    });
+};
+
+fixmystreet.update_report_a_problem_btn = function() {
+    var zoom = fixmystreet.map.getZoom();
+    var center = fixmystreet.map.getCenterWGS84();
+    var new_report_url = '/report/new?longitude=' + center.lon.toFixed(6) + '&latitude=' + center.lat.toFixed(6);
+
+    var href = '/';
+    var visible = true;
+    var text = translation_strings.report_a_problem_btn.default;
+
+    if (fixmystreet.page === 'new') {
+        visible = false;
+
+    } else if (fixmystreet.page === 'report') {
+        text = translation_strings.report_a_problem_btn.another;
+        href = new_report_url;
+
+    } else if (fixmystreet.page === 'around' && zoom > 1) {
+        text = translation_strings.report_a_problem_btn.here;
+        href = new_report_url;
+
+    } else if (fixmystreet.page === 'reports' && zoom > 12) {
+        text = translation_strings.report_a_problem_btn.here;
+        href = new_report_url;
+    }
+
+    $('.report-a-problem-btn').attr('href', href).text(text).toggle(visible);
+};
+
+fixmystreet.update_public_councils_text = function(text, bodies) {
+    bodies = bodies.join('</strong> ' + translation_strings.or + ' <strong>');
+    text = text.replace(/<strong>.*<\/strong>/, '<strong>' + bodies + '</strong>');
+    $('#js-councils_text').html(text);
+};
+
+fixmystreet.update_councils_text = function(data) {
+    fixmystreet.update_public_councils_text(
+        data.councils_text, fixmystreet.bodies);
+    $('#js-councils_text_private').html(data.councils_text_private);
+    $(fixmystreet).trigger('body_overrides:change');
+};
 
 // The new location will be saved to a history state unless
 // savePushState is set to false.
@@ -902,6 +1167,15 @@ fixmystreet.update_pin = function(lonlat, savePushState) {
         }
     }
 
+    fixmystreet.fetch_reporting_data();
+
+    if (!$('#side-form-error').is(':visible')) {
+        $('#side-form').show();
+        $('#map_sidebar').scrollTop(0);
+    }
+};
+
+fixmystreet.fetch_reporting_data = function() {
     $.getJSON('/report/new/ajax', {
         latitude: $('#fixmystreet\\.latitude').val(),
         longitude: $('#fixmystreet\\.longitude').val()
@@ -915,15 +1189,28 @@ fixmystreet.update_pin = function(lonlat, savePushState) {
             $('body').removeClass('with-notes');
             return;
         }
-        $('#side-form, #site-logo').show();
-        var old_category = $("select#form_category").val();
-        $('#js-councils_text').html(data.councils_text);
-        $('#js-councils_text_private').html(data.councils_text_private);
+        $('#side-form').show();
+        var old_category_group = $('#category_group').val(),
+            old_category = $("#form_category").val(),
+            filter_category = $("#filter_categories").val();
+
+        fixmystreet.reporting_data = data;
+
+        fixmystreet.update_councils_text(data);
         $('#js-top-message').html(data.top_message || '');
+
         $('#form_category_row').html(data.category);
-        if ($("select#form_category option[value=\""+old_category+"\"]").length) {
-            $("select#form_category").val(old_category);
+        if ($("#form_category option[value=\"" + old_category + "\"]").length) {
+            $("#form_category").val(old_category);
+        } else if (filter_category !== undefined && $("#form_category option[value='" + filter_category + "']").length) {
+            // If the category filter appears on the map and the user has selected
+            // something from it, then pre-fill the category field in the report,
+            // if it's a value already present in the drop-down.
+            $("#form_category").val(filter_category);
         }
+
+        fixmystreet.set_up.category_groups(old_category_group);
+
         if ( data.extra_name_info && !$('#form_fms_extra_title').length ) {
             // there might be a first name field on some cobrands
             var lb = $('#form_first_name').prev();
@@ -931,19 +1218,10 @@ fixmystreet.update_pin = function(lonlat, savePushState) {
             lb.before(data.extra_name_info);
         }
 
-        // If the category filter appears on the map and the user has selected
-        // something from it, then pre-fill the category field in the report,
-        // if it's a value already present in the drop-down.
-        var category = $("#filter_categories").val();
-        if (category !== undefined && $("#form_category option[value='"+category+"']").length) {
-            $("#form_category").val(category);
+        fixmystreet.bodies = data.bodies || [];
+        if (fixmystreet.body_overrides) {
+            fixmystreet.body_overrides.clear();
         }
-
-        var category_select = $("select#form_category");
-        if (category_select.val() != '-- Pick a category --') {
-            category_select.change();
-        }
-        fixmystreet.run(fixmystreet.set_up.category_groups);
 
         if (data.contribute_as) {
             var $select = $('.js-contribute-as');
@@ -966,12 +1244,6 @@ fixmystreet.update_pin = function(lonlat, savePushState) {
             $('#js-contribute-as-wrapper').hide();
         }
     });
-
-    if (!$('#side-form-error').is(':visible')) {
-        $('#side-form, #site-logo').show();
-        $('#map_sidebar').scrollTop(0);
-    }
-
 };
 
 fixmystreet.display = {
@@ -1071,6 +1343,8 @@ fixmystreet.display = {
     }
 
     fixmystreet.page = 'new';
+
+    fixmystreet.update_report_a_problem_btn();
   },
 
   report: function(reportPageUrl, reportId, callback) {
@@ -1095,16 +1369,28 @@ fixmystreet.display = {
             if ($twoColReport.length) {
                 $twoColReport.appendTo('#map_sidebar');
                 $('body').addClass('with-actions');
-                fixmystreet.run(fixmystreet.set_up.report_page_inspect);
-                fixmystreet.run(fixmystreet.set_up.manage_duplicates);
-                fixmystreet.run(fixmystreet.set_up.action_scheduled_raise_defect);
             } else {
                 $sideReport.appendTo('#map_sidebar');
             }
             $('#map_sidebar').scrollTop(0);
+            if ($("html").hasClass("mobile")) {
+                $(document).scrollTop(0);
+            }
 
             var found = html.match(/<title>([\s\S]*?)<\/title>/);
-            var page_title = found[1];
+            // Unencode HTML entities so it's suitable for document.title. We
+            // only care about the ones encoded by the template's html_filter.
+            var map = {
+                '&amp;': '&',
+                '&gt;': '>',
+                '&lt;': '<',
+                '&quot;': '"',
+                '&#39;': "'"
+            };
+            var page_title = found[1].replace(/&(amp|lt|gt|quot|#39);/g, function(m) {
+                return map[m];
+            });
+
             fixmystreet.page = 'report';
 
             $('.big-hide-pins-link').hide();
@@ -1125,19 +1411,24 @@ fixmystreet.display = {
             // wrong (but what is shown is correct).
             $('.js-back-to-report-list').attr('href', fixmystreet.original.href);
 
-            // Problems nearby should act the same as 'Back to all reports' on around,
-            // but on /my and /reports should go to that around page.
-            if (fixmystreet.original.page == 'around') {
-                $sideReport.find('#key-tool-problems-nearby').addClass('js-back-to-report-list');
+            // Problems nearby on /my should go to the around page,
+            // otherwise show reports within the current map view.
+            if (fixmystreet.original.page === 'around' || fixmystreet.original.page === 'reports') {
+                $sideReport.find('#key-tool-problems-nearby').click(function(e) {
+                    var report_list_url = fixmystreet.original.href;
+                    var map_state = fixmystreet.maps.get_map_state();
+                    fixmystreet.back_to_reports_list(e, report_list_url, map_state);
+                });
             }
             fixmystreet.set_up.map_sidebar_key_tools();
             fixmystreet.set_up.form_validation();
             fixmystreet.set_up.email_login_form();
+            fixmystreet.set_up.form_section_previews();
             fixmystreet.set_up.fancybox_images();
             fixmystreet.set_up.dropzone($sideReport);
-            fixmystreet.set_up.form_focus_triggers();
-            fixmystreet.run(fixmystreet.set_up.moderation);
-            fixmystreet.run(fixmystreet.set_up.response_templates);
+            $(fixmystreet).trigger('display:report');
+
+            fixmystreet.update_report_a_problem_btn();
 
             window.selected_problem_id = reportId;
             var marker = fixmystreet.maps.get_marker_by_id(reportId);
@@ -1153,6 +1444,10 @@ fixmystreet.display = {
             // We disabled this upon first touch to prevent it taking effect, re-enable now
             if (fixmystreet.maps.click_control) {
                 fixmystreet.maps.click_control.activate();
+            }
+
+            if (fixmystreet.maps.setup_inspector) {
+                fixmystreet.maps.setup_inspector();
             }
 
             if (typeof callback === 'function') {
@@ -1200,6 +1495,8 @@ fixmystreet.display = {
         }
         $('.big-hide-pins-link').show();
         fixmystreet.set_up.map_controls();
+
+        fixmystreet.update_report_a_problem_btn();
 
         window.selected_problem_id = undefined;
 
@@ -1271,7 +1568,8 @@ $(function() {
                     if (fixmystreet.utils && fixmystreet.utils.parse_query_string) {
                         var qs = fixmystreet.utils.parse_query_string();
                         var page = qs.p || 1;
-                        $('.pagination').data('page', page)
+                        $('#show_old_reports').prop('checked', qs.show_old_reports || '');
+                        $('.pagination:first').data('page', page)
                             .trigger('change.filters');
                     }
                     fixmystreet.display.reports_list(location.href);
@@ -1280,12 +1578,18 @@ $(function() {
                 } else if ('newReportAtLonlat' in e.state) {
                     fixmystreet.display.begin_report(e.state.newReportAtLonlat, false);
                 } else if ('page_change' in e.state) {
-                    $('.pagination').data('page', e.state.page_change.page)
+                    fixmystreet.markers.protocol.use_page = true;
+                    $('#show_old_reports').prop('checked', e.state.page_change.show_old_reports);
+                    $('.pagination:first').data('page', e.state.page_change.page) //;
                         .trigger('change.filters');
+                    if ( fixmystreet.page != 'reports' ) {
+                        fixmystreet.display.reports_list(location.href);
+                    }
                 } else if ('filter_change' in e.state) {
                     $('#filter_categories').val(e.state.filter_change.filter_categories);
                     $('#statuses').val(e.state.filter_change.statuses);
                     $('#sort').val(e.state.filter_change.sort);
+                    $('#show_old_reports').prop('checked', e.state.filter_change.show_old_reports);
                     $('#filter_categories').add('#statuses')
                         .trigger('change.filters').trigger('change.multiselect');
                     fixmystreet.display.reports_list(location.href);
@@ -1293,6 +1597,10 @@ $(function() {
                     // This popstate was just here because the hash changed.
                     // (eg: mobile nav click.) We want to ignore it.
                 }
+                if ('mapState' in e.state) {
+                    fixmystreet.maps.set_map_state(e.state.mapState);
+                }
+
             });
         }, 0);
     });

@@ -7,6 +7,7 @@ use namespace::autoclean;
 use JSON::MaybeXS;
 use XML::Simple;
 use DateTime::Format::W3CDTF;
+use FixMyStreet::MapIt;
 
 BEGIN { extends 'Catalyst::Controller'; }
 
@@ -164,9 +165,7 @@ sub get_services : Private {
 
     if ($lat || $lon) {
         my $area_types = $c->cobrand->area_types;
-        my $all_areas = mySociety::MaPit::call('point',
-                                                  "4326/$lon,$lat",
-                                                  type => $area_types);
+        my $all_areas = FixMyStreet::MapIt::call('point', "4326/$lon,$lat", type => $area_types);
         $categories = $categories->search( {
             'body_areas.area_id' => [ keys %$all_areas ],
         }, { join => { 'body' => 'body_areas' } } );
@@ -310,7 +309,8 @@ sub get_requests : Private {
     delete $states->{unconfirmed};
     delete $states->{submitted};
     my $criteria = {
-        state => [ keys %$states ]
+        state => [ keys %$states ],
+        non_public => 0,
     };
 
     my %rules = (
@@ -415,6 +415,7 @@ sub get_request : Private {
     my $criteria = {
         state => [ keys %$states ],
         id => $id,
+        non_public => 0,
     };
     $c->forward( 'output_requests', [ $criteria ] );
 }

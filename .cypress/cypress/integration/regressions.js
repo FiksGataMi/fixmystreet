@@ -8,21 +8,38 @@ Cypress.Commands.add('cleanUpXHR', function() {
 describe('Regression tests', function() {
     it('Shows the sub-map links after clicking Try again', function() {
         cy.viewport(480, 800);
-        cy.visit('/around?pc=BS10+5EE&js=1');
+        cy.visit('/around?pc=' + Cypress.env('postcode') + '&js=1');
         cy.get('#map_box').click(200, 200);
         cy.get('#try_again').click();
         cy.get('#sub_map_links').should('be.visible');
         cy.cleanUpXHR();
     });
     it('Does not fade on new pin hover', function() {
-        cy.visit('/around?pc=BS10+5EE&js=1');
+        cy.visit('/around?pc=' + Cypress.env('postcode') + '&js=1');
         cy.get('#map_box').click(200, 200);
         cy.get('#map_box image').last().trigger('mousemove').should('have.css', 'opacity', '1');
     });
     it('Does not hide the new report pin even if you click really quick', function() {
-        cy.visit('/around?pc=BS10+5EE&js=1');
+        cy.visit('/around?pc=' + Cypress.env('postcode') + '&js=1');
         cy.get('#map_box').click(200, 200);
         cy.get('#loading-indicator').should('be.hidden');
         cy.get('#map_box image').should('be.visible');
+    });
+    it('Does not escape HTML entities in the title', function() {
+        cy.server();
+        cy.route('/around\?ajax*').as('update-results');
+        cy.request({
+          method: 'POST',
+          url: '/auth?r=/',
+          form: true,
+          body: { username: 'cs@example.org', password_sign_in: 'password' }
+        });
+        cy.visit('/report/1/moderate');
+        cy.get('[name=problem_title]').clear().type('M&S "brill" says <glob>').parents('form').submit();
+        cy.title().should('contain', 'M&S "brill" says <glob>');
+        cy.contains('Problems nearby').click();
+        cy.wait('@update-results');
+        cy.get('#map_sidebar').contains('M&S').click();
+        cy.title().should('contain', 'M&S "brill" says <glob>');
     });
 });

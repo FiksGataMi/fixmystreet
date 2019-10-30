@@ -1,8 +1,19 @@
+package FixMyStreet::Cobrand::AbuseOnly;
+
+use base 'FixMyStreet::Cobrand::Default';
+
+sub abuse_reports_only { 1; }
+
+1;
+
+package main;
+
 use FixMyStreet::TestMech;
 
 my $mech = FixMyStreet::TestMech->new;
 
 $mech->get_ok('/contact');
+my ($csrf) = $mech->content =~ /meta content="([^"]*)" name="csrf-token"/;
 $mech->title_like(qr/Contact Us/);
 $mech->content_contains("It's often quickest to ");
 
@@ -269,25 +280,16 @@ for my $test (
     };
 }
 
-for my $test (
-    {
-        fields => {
-            em      => 'test@example.com',
-            name    => 'A name',
-            subject => 'A subject',
-            message => 'A message',
-        },
-    },
-    {
-        fields => {
-            em      => 'test@example.com',
-            name    => 'A name',
-            subject => 'A subject',
-            message => 'A message',
-            id      => $problem_main->id,
-        },
-    },
+my %common = (
+    em => 'test@example.com',
+    name => 'A name',
+    subject => 'A subject',
+    message => 'A message',
+);
 
+for my $test (
+    { fields => \%common },
+    { fields => { %common, id => $problem_main->id } },
   )
 {
     subtest 'check email sent correctly' => sub {
@@ -305,11 +307,11 @@ for my $test (
 
         my $email = $mech->get_email;
 
-        is $email->header('Subject'), 'FMS message: ' .  $test->{fields}->{subject}, 'subject';
+        is $email->header('Subject'), 'FixMyStreet message: ' .  $test->{fields}->{subject}, 'subject';
         is $email->header('From'), "\"$test->{fields}->{name}\" <$test->{fields}->{em}>", 'from';
         my $body = $mech->get_text_body_from_email($email);
         like $body, qr/$test->{fields}->{message}/, 'body';
-        like $body, qr/Sent by contact.cgi on \S+. IP address (?:\d{1,3}\.){3,}\d{1,3}/, 'body footer';
+        like $body, qr/Sent by contact form on \S+.\s+IP address (?:\d{1,3}\.){3,}\d{1,3}, user agent ./, 'body footer';
         my $problem_id = $test->{fields}{id};
         like $body, qr/Complaint about report $problem_id/, 'reporting a report'
             if $test->{fields}{id};
@@ -326,39 +328,22 @@ for my $test (
 
 for my $test (
     {
-        fields => {
-            em      => 'test@example.com',
-            name    => 'A name',
-            subject => 'A subject',
-            message => 'A message',
-            dest    => undef,
-        },
+        fields => { %common, dest => undef },
         page_errors =>
           [ 'There were problems with your report. Please see below.',
             'Please enter who your message is for',
+            'You can only contact the team behind FixMyStreet using our contact form', # The JS-hidden one
         ]
     },
     {
-        fields => {
-            em      => 'test@example.com',
-            name    => 'A name',
-            subject => 'A subject',
-            message => 'A message',
-            dest    => 'council',
-        },
+        fields => { %common, dest => 'council' },
         page_errors =>
           [ 'There were problems with your report. Please see below.',
             'You can only contact the team behind FixMyStreet using our contact form',
         ]
     },
     {
-        fields => {
-            em      => 'test@example.com',
-            name    => 'A name',
-            subject => 'A subject',
-            message => 'A message',
-            dest    => 'update',
-        },
+        fields => { %common, dest => 'update' },
         page_errors =>
           [ 'There were problems with your report. Please see below.',
             'You can only contact the team behind FixMyStreet using our contact form',
@@ -381,44 +366,21 @@ for my $test (
             $test->{fields}->{'extra.phone'} = '';
             is_deeply $mech->visible_form_values, $test->{fields}, 'form values';
 
+            # Ugh, but checking div not hidden; text always shown and hidden with CSS
             if ( $test->{fields}->{dest} and $test->{fields}->{dest} eq 'update' ) {
-                $mech->content_contains( 'www.writetothem.com', 'includes link to WTT if trying to update report' );
+                $mech->content_contains('<div class="form-error__box form-error--update">');
             } elsif ( $test->{fields}->{dest} and $test->{fields}->{dest} eq 'council' ) {
-                $mech->content_lacks( 'www.writetothem.com', 'does not include link to WTT if trying to contact council' );
-                $mech->content_contains( 'should find contact details', 'mentions checking council website for contact details' );
+                # Ugh, but checking div not hidden
+                $mech->content_contains('<div class="form-error__box form-error--council">');
             }
         }
     };
 }
 
 for my $test (
-    {
-        fields => {
-            em      => 'test@example.com',
-            name    => 'A name',
-            subject => 'A subject',
-            message => 'A message',
-            dest    => 'help',
-        },
-    },
-    {
-        fields => {
-            em      => 'test@example.com',
-            name    => 'A name',
-            subject => 'A subject',
-            message => 'A message',
-            dest    => 'feedback',
-        },
-    },
-    {
-        fields => {
-            em      => 'test@example.com',
-            name    => 'A name',
-            subject => 'A subject',
-            message => 'A message',
-            dest    => 'from_council',
-        },
-    },
+    { fields => { %common, dest => 'help' } },
+    { fields => { %common, dest => 'feedback' } },
+    { fields => { %common, dest => 'from_council' } },
   )
 {
     subtest 'check email sent correctly with dest field set to us' => sub {
@@ -436,24 +398,67 @@ for my $test (
 
 for my $test (
     {
+        fields => { %common, dest => undef },
+        page_errors =>
+          [ 'There were problems with your report. Please see below.',
+            'Please enter a topic of your message',
+            'You can only use this form to report inappropriate content', # The JS-hidden one
+        ]
+    },
+    {
+        fields => { %common, dest => 'council' },
+        page_errors =>
+          [ 'There were problems with your report. Please see below.',
+            'You can only use this form to report inappropriate content',
+        ]
+    },
+    {
+        fields => { %common, dest => 'update' },
+        page_errors =>
+          [ 'There were problems with your report. Please see below.',
+            'You can only use this form to report inappropriate content',
+        ]
+    },
+  )
+{
+    subtest 'check Bucks submit page incorrect destination handling' => sub {
+        FixMyStreet::override_config {
+            ALLOWED_COBRANDS => [ 'buckinghamshire' ],
+        }, sub {
+            $mech->get_ok( '/contact?id=' . $problem_main->id, 'can visit for abuse report' );
+            $mech->submit_form_ok( { with_fields => $test->{fields} } );
+            is_deeply $mech->page_errors, $test->{page_errors}, 'page errors';
+
+            $test->{fields}->{'extra.phone'} = '';
+            is_deeply $mech->visible_form_values, $test->{fields}, 'form values';
+
+            if ( $test->{fields}->{dest} and $test->{fields}->{dest} eq 'update' ) {
+                $mech->content_contains('please leave an update');
+            } elsif ( $test->{fields}->{dest} and $test->{fields}->{dest} eq 'council' ) {
+                $mech->content_contains('should find other contact details');
+            }
+        }
+    };
+}
+
+for my $test (
+    {
         fields => {
-            em          => 'test@example.com',
-            name        => 'A name',
-            subject     => 'A subject',
-            message     => 'A message',
+            %common,
+            token => $csrf,
             dest        => 'from_council',
             success_url => '/faq',
+            s => "",
         },
         url_should_be => 'http://localhost/faq',
     },
     {
         fields => {
-            em          => 'test@example.com',
-            name        => 'A name',
-            subject     => 'A subject',
-            message     => 'A message',
+            %common,
+            token => $csrf,
             dest        => 'from_council',
             success_url => 'http://www.example.com',
+            s => "",
         },
         url_should_be => 'http://www.example.com',
     },
@@ -468,6 +473,24 @@ for my $test (
         }
     };
 }
+
+subtest 'check can limit contact to abuse reports' => sub {
+    FixMyStreet::override_config {
+        'ALLOWED_COBRANDS' => [ 'abuseonly' ],
+    }, sub {
+        $mech->get( '/contact' );
+        is $mech->res->code, 404, 'cannot visit contact page';
+        $mech->get_ok( '/contact?id=' . $problem_main->id, 'can visit for abuse report' );
+
+        my $token = FixMyStreet::App->model("DB::Token")->create({
+            scope => 'moderation',
+            data => { id => $problem_main->id }
+        });
+
+        $mech->get_ok( '/contact?m=' . $token->token, 'can visit for moderation complaint' );
+
+    }
+};
 
 $problem_main->delete;
 

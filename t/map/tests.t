@@ -2,12 +2,12 @@ use FixMyStreet::Map;
 use Test::More;
 
 my $requires = {
-    'Angus' => 'angus/js.js',
-    'BathNES' => 'bathnes/js.js',
+    'BathNES' => 'bathnes/assets.js',
     'Bing' => 'map-bing-ol.js',
-    'Bristol' => 'bristol/js.js',
-    'Bromley' => 'bromley/map.js',
-    'Buckinghamshire' => 'buckinghamshire/js.js',
+    'Bristol' => 'bristol/assets.js',
+    'Bromley' => 'bromley/assets.js',
+    'Buckinghamshire' => 'buckinghamshire/assets.js',
+    'Lincolnshire' => 'lincolnshire/assets.js',
     'FMS' => 'map-fms.js',
     'Google' => 'map-google.js',
     'GoogleOL' => 'map-google-ol.js',

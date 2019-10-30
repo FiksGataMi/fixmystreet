@@ -5,8 +5,8 @@ use namespace::autoclean;
 BEGIN {extends 'Catalyst::Controller'; }
 
 use JSON::MaybeXS;
-use File::Path;
-use File::Slurp;
+use Path::Tiny;
+use Try::Tiny;
 use FixMyStreet::App::Model::PhotoSet;
 
 =head1 NAME
@@ -46,6 +46,9 @@ sub index :LocalRegex('^(c/)?([1-9]\d*)(?:\.(\d+))?(?:\.(full|tn|fp))?\.(?:jpeg|
     my ( $self, $c ) = @_;
     my ( $is_update, $id, $photo_number, $size ) = @{ $c->req->captures };
 
+    $photo_number ||= 0;
+    $size ||= '';
+
     my $item;
     if ( $is_update ) {
         ($item) = $c->model('DB::Comment')->search( {
@@ -77,8 +80,10 @@ sub output : Private {
     my ( $self, $c, $photo ) = @_;
 
     # Save to file
-    File::Path::make_path( FixMyStreet->path_to( 'web', 'photo', 'c' )->stringify );
-    File::Slurp::write_file( FixMyStreet->path_to( 'web', $c->req->path )->stringify, \$photo->{data} );
+    path(FixMyStreet->path_to('web', 'photo', 'c'))->mkpath;
+    my $out = FixMyStreet->path_to('web', $c->req->path);
+    my $symlink_exists = $photo->{symlink} ? symlink($photo->{symlink}, $out) : undef;
+    path($out)->spew_raw($photo->{data}) unless $symlink_exists;
 
     $c->res->content_type( $photo->{content_type} );
     $c->res->body( $photo->{data} );
@@ -101,8 +106,13 @@ sub upload : Local {
         c => $c,
         data_items => \@items,
     });
-
-    my $fileid = $photoset->data;
+    my $fileid = try {
+        $photoset->data;
+    } catch {
+        $c->log->debug("Photo upload failed.");
+        $c->stash->{photo_error} = _("Photo upload failed.");
+        return undef;
+    };
     my $out;
     if ($c->stash->{photo_error} || !$fileid) {
         $c->res->status(500);

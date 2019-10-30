@@ -10,7 +10,7 @@ $(function(){
         var show_open311 = false;
         if ($form.find('[name=endpoint]').val()) {
             show_open311 = true; // always show the form if there is an endpoint value
-        } else if (send_method && !send_method.match(/^(email|noop|refused)$/i)) {
+        } else if (send_method && !send_method.match(/email|^noop$|^refused$/i)) {
             show_open311 = true;
         }
         if (show_open311) {
@@ -76,7 +76,7 @@ $(function(){
     // On user edit page, hide the area/categories fields if body changes
     $("form#user_edit select#body").change(function() {
         var show_area = $(this).val() == $(this).find("[data-originally-selected]").val();
-        $("form#user_edit select#area_id").closest("li").toggle(show_area);
+        $("form#user_edit select#area_ids").closest("li").toggle(show_area);
         $("form#user_edit .js-user-categories").toggle(show_area);
     });
 
@@ -165,7 +165,7 @@ $(function(){
 
     function renumber_metadata_fields($item) {
         var item_index = $item.data("index");
-        $item.find("input[data-field-name").each(function(i) {
+        $item.find("[data-field-name]").each(function(i) {
             var $input = $(this);
             var prefix = "metadata["+item_index+"].";
             var name = prefix + $input.data("fieldName");

@@ -29,6 +29,7 @@ sub send {
             use_service_as_deviceid => 0,
             extended_description    => 1,
             multi_photos            => 0,
+            fixmystreet_body => $body,
         );
 
         my $cobrand = $body->get_cobrand_handler || $row->get_cobrand_logged;
@@ -94,6 +95,8 @@ sub send {
             $self->error( "Failed to send over Open311\n" ) unless $self->error;
             $self->error( $self->error . "\n" . $open311->error );
         }
+
+        $cobrand->call_hook(open311_post_send => $row, $h);
     }
 
 

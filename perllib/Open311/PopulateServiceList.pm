@@ -8,7 +8,11 @@ has found_contacts => ( is => 'rw', default => sub { [] } );
 has verbose => ( is => 'ro', default => 0 );
 has schema => ( is => 'ro', lazy => 1, default => sub { FixMyStreet::DB->schema->connect } );
 
-has _current_body => ( is => 'rw' );
+has _current_body => ( is => 'rw', trigger => sub {
+    my ($self, $body) = @_;
+    $self->_current_body_cobrand($body->get_cobrand_handler);
+} );
+has _current_body_cobrand => ( is => 'rw' );
 has _current_open311 => ( is => 'rw' );
 has _current_service => ( is => 'rw' );
 
@@ -160,10 +164,7 @@ sub _handle_existing_contact {
         $contact->update;
     }
 
-    if (my $group = $self->_current_service->{group}) {
-        $contact->set_extra_metadata(group => $group);
-        $contact->update;
-    }
+    $self->_set_contact_group($contact);
 
     push @{ $self->found_contacts }, $self->_current_service->{service_code};
 }
@@ -188,12 +189,6 @@ sub _create_contact {
         );
     };
 
-    if (my $group = $self->_current_service->{group}) {
-        $contact->set_extra_metadata(group => $group);
-        $contact->update;
-    }
-
-
     if ( $@ ) {
         warn "Failed to create contact for service code " . $self->_current_service->{service_code} . " for body @{[$self->_current_body->id]}: $@\n"
             if $self->verbose >= 1;
@@ -204,6 +199,8 @@ sub _create_contact {
     if ( $contact and lc($metadata) eq 'true' ) {
         $self->_add_meta_to_contact( $contact );
     }
+
+    $self->_set_contact_group($contact);
 
     if ( $contact ) {
         push @{ $self->found_contacts }, $self->_current_service->{service_code};
@@ -236,63 +233,13 @@ sub _add_meta_to_contact {
 
     # Some Open311 endpoints, such as Bromley and Warwickshire send <metadata>
     # for attributes which we *don't* want to display to the user (e.g. as
-    # fields in "category_extras"
-    $self->_add_meta_to_contact_cobrand_overrides($contact, \@meta);
+    # fields in "category_extras"), or need additional attributes adding not
+    # returned by the server for whatever reason.
+    $self->_current_body_cobrand && $self->_current_body_cobrand->call_hook(
+        open311_contact_meta_override => $self->_current_service, $contact, \@meta);
 
     $contact->set_extra_fields(@meta);
     $contact->update;
-}
-
-sub _add_meta_to_contact_cobrand_overrides {
-    my ( $self, $contact, $meta ) = @_;
-
-    if ($self->_current_body->name eq 'Bromley Council') {
-        $contact->set_extra_metadata( id_field => 'service_request_id_ext');
-        # Lights we want to store feature ID, PROW on all categories.
-        push @$meta, {
-            code => 'prow_reference',
-            datatype => 'string',
-            description => 'Right of way reference',
-            order => 101,
-            required => 'false',
-            variable => 'true',
-            automated => 'hidden_field',
-        };
-        push @$meta, {
-            code => 'feature_id',
-            datatype => 'string',
-            description => 'Feature ID',
-            order => 100,
-            required => 'false',
-            variable => 'true',
-            automated => 'hidden_field',
-        } if $self->_current_service->{service_code} eq 'LIGHTS';
-    } elsif ($self->_current_body->name eq 'Warwickshire County Council') {
-        $contact->set_extra_metadata( id_field => 'external_id');
-    }
-
-    my %override = (
-        #2482
-        'Bromley Council' => [qw(
-            requested_datetime
-            report_url
-            title
-            last_name
-            email
-            report_title
-            public_anonymity_required
-            email_alerts_requested
-        ) ],
-        #2243,
-        'Warwickshire County Council' => [qw(
-            closest_address
-        ) ],
-    );
-
-    if (my $override = $override{ $self->_current_body->name }) {
-        my %ignore = map { $_ => 1 } @{ $override };
-        @$meta = grep { ! $ignore{ $_->{ code } } } @$meta;
-    }
 }
 
 sub _normalize_service_name {
@@ -308,6 +255,32 @@ sub _normalize_service_name {
     $service_name =~ s/\s+$//;
 
     return $service_name;
+}
+
+sub _set_contact_group {
+    my ($self, $contact) = @_;
+
+    my $groups_enabled = $self->_current_body_cobrand && $self->_current_body_cobrand->call_hook('enable_category_groups');
+    my $old_group = $contact->get_extra_metadata('group') || '';
+    my $new_group = $groups_enabled ? $self->_current_service->{group} || '' : '';
+
+    if ($old_group ne $new_group) {
+        if ($new_group) {
+            $contact->set_extra_metadata(group => $new_group);
+            $contact->update({
+                editor => $0,
+                whenedited => \'current_timestamp',
+                note => 'group updated automatically by script',
+            });
+        } else {
+            $contact->unset_extra_metadata('group');
+            $contact->update({
+                editor => $0,
+                whenedited => \'current_timestamp',
+                note => 'group removed automatically by script',
+            });
+        }
+    }
 }
 
 sub _delete_contacts_not_in_service_list {

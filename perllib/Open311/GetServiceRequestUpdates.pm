@@ -9,6 +9,7 @@ use DateTime::Format::W3CDTF;
 has system_user => ( is => 'rw' );
 has start_date => ( is => 'ro', default => sub { undef } );
 has end_date => ( is => 'ro', default => sub { undef } );
+has body => ( is => 'ro', default => sub { undef } );
 has suppress_alerts => ( is => 'rw', default => 0 );
 has verbose => ( is => 'ro', default => 0 );
 has schema => ( is =>'ro', lazy => 1, default => sub { FixMyStreet::DB->schema->connect } );
@@ -18,7 +19,7 @@ Readonly::Scalar my $AREA_ID_BROMLEY     => 2482;
 Readonly::Scalar my $AREA_ID_OXFORDSHIRE => 2237;
 
 sub fetch {
-    my $self = shift;
+    my ($self, $open311) = @_;
 
     my $bodies = $self->schema->resultset('Body')->search(
         {
@@ -29,25 +30,24 @@ sub fetch {
         }
     );
 
+    if ( $self->body ) {
+        $bodies = $bodies->search( { name => $self->body } );
+    }
+
     while ( my $body = $bodies->next ) {
 
-        my $o = Open311->new(
-            endpoint     => $body->endpoint,
-            api_key      => $body->api_key,
+        my %open311_conf = (
+            endpoint => $body->endpoint,
+            api_key => $body->api_key,
             jurisdiction => $body->jurisdiction,
+            extended_statuses => $body->send_extended_statuses,
         );
 
-        # custom endpoint URLs because these councils have non-standard paths
-        if ( $body->areas->{$AREA_ID_BROMLEY} ) {
-            my $endpoints = $o->endpoints;
-            $endpoints->{update} = 'update.xml';
-            $endpoints->{service_request_updates} = 'update.xml';
-            $o->endpoints( $endpoints );
-        } elsif ( $body->areas->{$AREA_ID_OXFORDSHIRE} ) {
-            my $endpoints = $o->endpoints;
-            $endpoints->{service_request_updates} = 'open311_service_request_update.cgi';
-            $o->endpoints( $endpoints );
-        }
+        my $cobrand = $body->get_cobrand_handler;
+        $cobrand->call_hook(open311_config_updates => \%open311_conf)
+            if $cobrand;
+
+        my $o = $open311 || Open311->new(%open311_conf);
 
         $self->suppress_alerts( $body->suppress_alerts );
         $self->blank_updates_permitted( $body->blank_updates_permitted );
@@ -69,6 +69,8 @@ sub update_comments {
     # default to asking for last 2 hours worth if not Bromley
     } elsif ( ! $body->areas->{$AREA_ID_BROMLEY} ) {
         my $end_dt = DateTime->now();
+        # Oxfordshire uses local time and not UTC for dates
+        FixMyStreet->set_time_zone($end_dt) if ( $body->areas->{$AREA_ID_OXFORDSHIRE} );
         my $start_dt = $end_dt->clone;
         $start_dt->add( hours => -2 );
 
@@ -89,19 +91,35 @@ sub update_comments {
 
         # If there's no request id then we can't work out
         # what problem it belongs to so just skip
-        next unless $request_id;
+        next unless $request_id || $request->{fixmystreet_id};
 
         my $comment_time = eval {
-            DateTime::Format::W3CDTF->parse_datetime( $request->{updated_datetime} || "" );
+            DateTime::Format::W3CDTF->parse_datetime( $request->{updated_datetime} || "" )
+                ->set_time_zone(FixMyStreet->local_time_zone);
         };
         next if $@;
         my $updated = DateTime::Format::W3CDTF->format_datetime($comment_time->clone->set_time_zone('UTC'));
         next if @args && ($updated lt $args[0] || $updated gt $args[1]);
 
         my $problem;
+        my $match_field = 'external_id';
         my $criteria = {
             external_id => $request_id,
         };
+
+        # in some cases we only have the FMS id and not the request id so use that
+        if ( $request->{fixmystreet_id} ) {
+            unless ( $request->{fixmystreet_id} =~ /^\d+$/ ) {
+                warn "skipping bad fixmystreet id in updates for " . $body->name . ": [" . $request->{fixmystreet_id} . "], external id is $request_id\n";
+                next;
+            }
+
+            $criteria = {
+                id => $request->{fixmystreet_id},
+            };
+            $match_field = 'fixmystreet id';
+        }
+
         $problem = $self->schema->resultset('Problem')->to_body($body)->search( $criteria );
 
         if (my $p = $problem->first) {
@@ -112,6 +130,7 @@ sub update_comments {
                 my $state = $open311->map_state( $request->{status} );
                 my $old_state = $p->state;
                 my $external_status_code = $request->{external_status_code} || '';
+                my $customer_reference = $request->{customer_reference} || '';
                 my $old_external_status_code = $p->get_extra_metadata('external_status_code') || '';
                 my $comment = $self->schema->resultset('Comment')->new(
                     {
@@ -140,6 +159,12 @@ sub update_comments {
                     $p->set_extra_metadata(external_status_code => $external_status_code);
                 }
 
+                # if the customer reference to display in the report metadata is
+                # not the same as the external_id
+                if ( $customer_reference ) {
+                    $p->set_extra_metadata( customer_reference => $customer_reference );
+                }
+
                 $open311->add_media($request->{media_url}, $comment)
                     if $request->{media_url};
 
@@ -166,7 +191,12 @@ sub update_comments {
                 $comment->state('hidden') unless $comment->text || $comment->photo
                     || ($comment->problem_state && $state ne $old_state);
 
-                $p->lastupdate( $comment->created );
+                # As comment->created has been looked at above, its time zone has been shifted
+                # to TIME_ZONE (if set). We therefore need to set it back to local before
+                # insertion. We also then need a clone, otherwise the setting of lastupdate
+                # will *also* reshift comment->created's time zone to TIME_ZONE.
+                my $created = $comment->created->set_time_zone(FixMyStreet->local_time_zone);
+                $p->lastupdate($created->clone);
                 $p->update;
                 $comment->insert();
 
@@ -186,6 +216,10 @@ sub update_comments {
                     }
                 }
             }
+        # we get lots of comments that are not related to FMS issues from Lewisham so ignore those otherwise
+        # way too many warnings.
+        } elsif (FixMyStreet->config('STAGING_SITE') and $body->name !~ /Lewisham/) {
+            warn "Failed to match comment to problem with $match_field $request_id for " . $body->name . "\n";
         }
     }
 
@@ -198,8 +232,10 @@ sub comment_text_for_request {
 
     return $request->{description} if $request->{description};
 
-    # Response templates are only triggered if the state/external status has changed
-    my $state_changed = $state ne $old_state;
+    # Response templates are only triggered if the state/external status has changed.
+    # And treat any fixed state as fixed.
+    my $state_changed = $state ne $old_state
+        && !( $problem->is_fixed && FixMyStreet::DB::Result::Problem->fixed_states()->{$state} );
     my $ext_code_changed = $ext_code ne $old_ext_code;
     if ($state_changed || $ext_code_changed) {
         my $state_params = {

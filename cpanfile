@@ -14,6 +14,8 @@ requires 'aliased', '0.34';
 requires 'Net::SSLeay', '1.81';
 requires 'Module::ScanDeps', '1.24';
 requires 'CGI', '4.38';
+requires 'Lingua::EN::Tagger', '0.27';
+requires 'Params::Classify', '0.014';
 
 # Catalyst itself, and modules/plugins used
 requires 'Catalyst', '5.80031';
@@ -61,7 +63,6 @@ requires 'Error';
 requires 'FCGI'; # Required by e.g. Plack::Handler::FCGI
 requires 'File::Find';
 requires 'File::Path';
-requires 'File::Slurp';
 requires 'Geography::NationalGrid';
 requires 'Getopt::Long::Descriptive';
 requires 'HTML::Entities';
@@ -79,9 +80,10 @@ requires 'Module::Pluggable';
 requires 'Moose';
 requires 'MooX::Types::MooseLike';
 requires 'namespace::autoclean';
+requires 'Net::Amazon::S3';
 requires 'Net::DNS::Resolver';
 requires 'Net::Domain::TLD', '1.75';
-requires 'Net::Facebook::Oauth2', '0.10';
+requires 'Net::Facebook::Oauth2', '0.11';
 requires 'Net::OAuth';
 requires 'Net::Twitter::Lite::WithAPIv1_1', '0.12008';
 requires 'Number::Phone', '3.4003';
@@ -103,7 +105,7 @@ requires 'XML::Simple';
 requires 'YAML';
 
 feature 'uk', 'FixMyStreet.com specific requirements' => sub {
-    # East Hampshire & Angus
+    # East Hampshire
     requires 'SOAP::Lite', '1.20';
 };
 

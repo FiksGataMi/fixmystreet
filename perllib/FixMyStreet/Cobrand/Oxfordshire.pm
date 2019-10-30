@@ -10,6 +10,28 @@ sub council_name { return 'Oxfordshire County Council'; }
 sub council_url { return 'oxfordshire'; }
 sub is_two_tier { return 1; }
 
+sub report_validation {
+    my ($self, $report, $errors) = @_;
+
+    if ( length( $report->detail ) > 1700 ) {
+        $errors->{detail} = sprintf( _('Reports are limited to %s characters in length. Please shorten your report'), 1700 );
+    }
+
+    if ( length( $report->name ) > 50 ) {
+        $errors->{name} = sprintf( 'Names are limited to %d characters in length.', 50 );
+    }
+
+    if ( length( $report->user->phone ) > 20 ) {
+        $errors->{phone} = sprintf( 'Phone numbers are limited to %s characters in length.', 20 );
+    }
+
+    if ( length( $report->user->email ) > 50 ) {
+        $errors->{username} = sprintf( 'Emails are limited to %s characters in length.', 50 );
+    }
+
+    return $errors;
+}
+
 sub is_council_with_case_management {
     # XXX Change this to return 1 when OCC FMSfC goes live.
     return FixMyStreet->config('STAGING_SITE');
@@ -51,7 +73,21 @@ sub default_map_zoom { return 3; }
 # let staff hide OCC reports
 sub users_can_hide { return 1; }
 
-sub default_show_name { 0 }
+sub lookup_by_ref_regex {
+    return qr/^\s*((?:ENQ)?\d+)\s*$/;
+}
+
+sub lookup_by_ref {
+    my ($self, $ref) = @_;
+
+    if ( $ref =~ /^ENQ/ ) {
+        my $len = length($ref);
+        my $filter = "%T18:customer_reference,T$len:$ref,%";
+        return { 'extra' => { -like => $filter } };
+    }
+
+    return 0;
+}
 
 =head2 problem_response_days
 
@@ -130,10 +166,10 @@ sub pin_hover_title {
 
 sub state_groups_inspect {
     [
-        [ _('New'), [ 'confirmed', 'investigating' ] ],
-        [ _('Scheduled'), [ 'action scheduled' ] ],
-        [ _('Fixed'), [ 'fixed - council' ] ],
-        [ _('Closed'), [ 'not responsible', 'duplicate', 'unable to fix' ] ],
+        [ 'New', [ 'confirmed', 'investigating' ] ],
+        [ 'Scheduled', [ 'action scheduled' ] ],
+        [ 'Fixed', [ 'fixed - council' ] ],
+        [ 'Closed', [ 'not responsible', 'duplicate', 'unable to fix' ] ],
     ]
 }
 
@@ -142,22 +178,28 @@ sub open311_config {
 
     my $extra = $row->get_extra_fields;
     push @$extra, { name => 'external_id', value => $row->id };
+    push @$extra, { name => 'northing', value => $h->{northing} };
+    push @$extra, { name => 'easting', value => $h->{easting} };
 
     if ($h->{closest_address}) {
         push @$extra, { name => 'closest_address', value => "$h->{closest_address}" }
-    }
-    if ( $row->used_map || ( !$row->used_map && !$row->postcode ) ) {
-        push @$extra, { name => 'northing', value => $h->{northing} };
-        push @$extra, { name => 'easting', value => $h->{easting} };
     }
     $row->set_extra_fields( @$extra );
 
     $params->{extended_description} = 'oxfordshire';
 }
 
-sub open311_pre_send {
-    my ($self, $row, $open311) = @_;
-    $open311->endpoints( { requests => 'open311_service_request.cgi' } );
+sub open311_config_updates {
+    my ($self, $params) = @_;
+    $params->{use_customer_reference} = 1;
+}
+
+sub should_skip_sending_update {
+    my ($self, $update ) = @_;
+
+    # Oxfordshire stores the external id of the problem as a customer reference
+    # in metadata
+    return 1 if !$update->problem->get_extra_metadata('customer_reference');
 }
 
 sub on_map_default_status { return 'open'; }
@@ -233,6 +275,13 @@ sub available_permissions {
 
     my $perms = $self->next::method();
     $perms->{Bodies}->{defect_type_edit} = "Add/edit defect types";
+
+    delete $perms->{Problems}->{report_edit};
+    delete $perms->{Problems}->{report_edit_category};
+    delete $perms->{Problems}->{report_edit_priority};
+    delete $perms->{Problems}->{report_inspect};
+    delete $perms->{Problems}->{report_instruct};
+    delete $perms->{Problems}->{planned_reports};
 
     return $perms;
 }

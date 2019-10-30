@@ -23,8 +23,6 @@ sub map_type {
     'Bristol';
 }
 
-sub default_link_zoom { 6 }
-
 sub disambiguate_location {
     my $self    = shift;
     my $string  = shift;
@@ -75,6 +73,15 @@ sub open311_config {
     my ($self, $row, $h, $params) = @_;
 
     $params->{always_send_email} = 1;
+}
+
+sub open311_contact_meta_override {
+    my ($self, $service, $contact, $meta) = @_;
+
+    my %server_set = (easting => 1, northing => 1);
+    foreach (@$meta) {
+        $_->{automated} = 'server_set' if $server_set{$_->{code}};
+    }
 }
 
 1;
