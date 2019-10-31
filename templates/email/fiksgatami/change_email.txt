@@ -1,0 +1,10 @@
+Subject: Oppdater din e-post på [% site_name %]
+
+Vennligs klikk på lenken under for å bekrefte at du vil oppdatere
+din e-post på [% site_name %]
+
+[% c.uri_for_action( 'auth/token', token ) %]
+
+[% signature %]
+
+Denne e-posten var sent automatisk fra [% site_name %].

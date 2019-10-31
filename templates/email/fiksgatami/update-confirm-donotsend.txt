@@ -1,0 +1,3 @@
+Legg merke til at vi ikke sender oppdateringer til
+[% update.problem.body %] - de er ment som en plass for brukere av
+[% site_name %] til å diskutere, støtte og gi råd.

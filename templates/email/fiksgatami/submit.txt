@@ -3,7 +3,7 @@ Subject: Problemrapport: [% report.title %]
 Til [% bodies_name %],
 
 [% missing %][% multiple %]En bruker av
-FiksGataMi har sendt inn følgende rapport om et lokalt
+[% site_name %] har sendt inn følgende rapport om et lokalt
 problem som vi tror trenger deres oppmerksomhet.
 
 [% fuzzy %], eller for å bidra med en oppdatering om problemet,
@@ -33,8 +33,7 @@ Lengegrad: [% report.longitude %]
 
 Svar på denne e-posten går til brukeren som sendte inn problemet.
 
-Vennlig hilsen,  
-FiksGataMi-gruppen
+[% signature %]
 
 [ Denne meldingen ble sendt inn via FiksGataMi, et prosjekt hos foreningen NUUG.
 Hvis det er en mer passende e-postadresse for meldinger om

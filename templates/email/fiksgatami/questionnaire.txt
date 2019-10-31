@@ -1,4 +1,4 @@
-Subject: Spørreskjema for din sak på FiksGataMi
+Subject: Spørreskjema for din sak på [% site_name %]
 
 Hei [% report.name %],
 
@@ -11,8 +11,7 @@ oppdatere saken:
 
 Vennligst ikke svar på denne e-posten; det er muligheter for å kommentere i skjemaet.
 
-Vennlig hilsen,  
-FiksGataMi-gruppen
+[% signature %]
 
 Saken du la til var som følger:
 

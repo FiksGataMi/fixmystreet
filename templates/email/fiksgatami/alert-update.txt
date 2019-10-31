@@ -11,8 +11,7 @@ For å se på eller svare på disse oppdateringene, besøk denne lenken:
 
 Du kan ikke kontakte noen ved å svare på denne e-posten.
 
-Vennlig hilsen,
-Fiksgata-gruppen
+[% signature %]
 
 For å slutte å motta e-post ved nye oppdateringer om dette
 problemet, følg denne lenken: [% unsubscribe_url %]

@@ -1,0 +1,22 @@
+[%
+
+email_summary = "Følg denne lenken for å oppdatere din e-post på " _ site_name;
+email_columns = 1;
+
+PROCESS '_email_settings.html';
+
+INCLUDE '_email_top.html';
+
+%]
+
+<th style="[% td_style %][% only_column_style %]">
+  <h1 style="[% h1_style %]">Endre e-post adresse din på [% site_name %] </h1>
+  <p style="[% p_style %]">Vennligst klikk på lenken under for å bekrefte at du ønsker å
+oppdatere din e-post adresse på [% site_name %].</p>
+  <p style="margin: 20px auto; text-align: center">
+    <a style="[% button_style %]" href="[% c.uri_for_action( 'auth/token', token ) %]">Oppdater min e-post adresse</a>
+  </p>
+  <p style="[% p_style %]">Hvis du ikke ønsker å endre din e-post adresse, bare overse denne e-posten.</p>
+</th>
+
+[% INCLUDE '_email_bottom.html' %]

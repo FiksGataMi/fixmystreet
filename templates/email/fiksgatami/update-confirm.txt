@@ -1,4 +1,4 @@
-Subject: Bekreft din oppdatering på FiksGataMi.no
+Subject: Bekreft din oppdatering på [% site_name %]
 
 Hei [% update.name %],
 
@@ -14,5 +14,8 @@ Din oppdatering inneholder:
 
 [% update.text %]
 
-Vennlig hilsen,  
-FiksGataMi-gruppen
+[% INCLUDE 'update-confirm-donotsend.txt' %]
+
+[% signature %]
+
+Dette er en automatisk generert e-post.

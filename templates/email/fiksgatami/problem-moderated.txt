@@ -1,0 +1,36 @@
+Subject: Rapporten din på [% site_name %] har blitt moderert
+
+Hei [% user.name %],
+
+Rapporten din på [% site_name %] har blitt moderert.
+
+[% IF types == 'hide' -%]
+Rapporten har blitt skjult fra siden.
+[% ELSE %]
+Følgende data har blitt endret:
+
+	[% types %]
+
+[% END -%]
+
+Rapporten din hadde følgende tittel:
+
+[% moderated_data.title %]
+
+Og innhold:
+
+[% moderated_data.detail %]
+
+[% UNLESS types == 'hide' %]
+Du kan se rapporten din på [% report_uri %]
+[% END %]
+
+Hvis du mener at rapporten ikke skulle vært moderert kan du kontakte oss
+via [% report_complaint_uri %]
+
+Takk for at du sender rapporter via [% site_name %].
+
+
+[% signature %]
+
+Denne e-posten var sendt automatisk

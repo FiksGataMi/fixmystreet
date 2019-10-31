@@ -1,9 +1,9 @@
-Subject: Bekreftelse på ny sak lagt til på FiksGataMi.no
+Subject: Bekreftelse på ny sak lagt til på [% site_name %]
 
 Hei [% report.name %],
 
 Vennligst klikk på linken under for å bekrefte saken du har lagt til
-på FiksGataMi:
+på [% site_name %]:
 
 [% token_url %]
 
@@ -16,5 +16,4 @@ Din sak hadde følgende tittel:
 Med følgende informasjon:
 [% report.detail %]
 
-Vennlig hilsen,  
-FiksGataMi-gruppen
+[% signature %]

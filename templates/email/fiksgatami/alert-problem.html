@@ -1,0 +1,19 @@
+[%
+
+email_summary = "Nye rapporter på " _ site_name;
+email_columns = 1;
+
+PROCESS '_email_settings.html';
+
+INCLUDE '_email_top.html';
+
+%]
+
+<th style="[% td_style %][% only_column_style %]">
+  <h1 style="[% h1_style %]">Nye rapporter på [% site_name %]</h1>
+  [%~ INCLUDE '_email_report_list.html' %]
+
+  <p style="[% p_style %]"><a href="[% unsubscribe_url %]">Avmeld fra varsler om nye rapport fra [% site_name %]</a></p>
+</th>
+
+[% INCLUDE '_email_bottom.html' %]

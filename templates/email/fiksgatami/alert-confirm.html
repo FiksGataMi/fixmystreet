@@ -1,0 +1,21 @@
+[%
+
+email_summary = "Du må bekrefte varsel innstillingene for " _ site_name _ " før vi kan sende deg varsler.";
+email_columns = 1;
+
+PROCESS '_email_settings.html';
+
+INCLUDE '_email_top.html';
+
+%]
+
+<th style="[% td_style %][% only_column_style %]">
+  <h1 style="[% h1_style %]">Vennligst bekreft e-posten din</h1>
+  <p style="[% p_style %]">Vennligst klikk på lenken under for å bekrefte at du vil motta e-post varsler for det valgte området.</p>
+  <p style="margin: 20px auto; text-align: center">
+    <a style="[% button_style %]" href="[% token_url %]">Ja, send meg varsler</a>
+  </p>
+  <p style="[% p_style %]">Hvis du ikke ønsker å abonnere på varsler kan du ignorere denne e-posten.</p>
+</th>
+
+[% INCLUDE '_email_bottom.html' %]

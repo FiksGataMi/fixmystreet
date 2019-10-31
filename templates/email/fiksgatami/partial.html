@@ -1,0 +1,22 @@
+[%
+
+email_summary = "Bekreft din rapport på " _ site_name;
+email_columns = 1;
+
+PROCESS '_email_settings.html';
+
+INCLUDE '_email_top.html';
+
+%]
+
+<th style="[% td_style %][% only_column_style %]">
+  <h1 style="[% h1_style %]">Bekreft rapporten din</h1>
+  <p style="[% p_style %]">Hei [% report.name || report.email %],</p>
+  <p style="[% p_style %]">Vennligst klikk på lenken under for å bekrefte rapporten du har laget på [% site_name %] via [% report.service %], og for sjekke eller enre noe:</p>
+  <p style="margin: 20px auto; text-align: center">
+    <a style="[% button_style %]" href="[% token_url %]">Sjekk og bekreft rapport</a>
+  </p>
+</th>
+
+[% INCLUDE '_email_bottom.html' %]
+
