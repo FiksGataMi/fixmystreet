@@ -1,0 +1,17 @@
+Subject: Oppdateringen din har blitt lagret
+
+Hello [% update.name %],
+
+Oppdateringen din har blitt lagret på [% site_name %]:
+
+[% cobrand.base_url_for_report(problem) %][% update.url %]
+
+[% TRY %][% INCLUDE '_council_reference.txt' %][% CATCH file %][% END %]
+
+Oppdateringen din inneholder:
+
+[% update.text %]
+
+[% signature %]
+
+Denne e-posten er automatisk generert

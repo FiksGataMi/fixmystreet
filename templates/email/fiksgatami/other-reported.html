@@ -1,0 +1,31 @@
+[%
+
+email_summary = "Takk for å ha lagt inn rapporten din";
+email_columns = 2;
+
+PROCESS '_email_settings.html';
+INCLUDE '_email_top.html';
+
+%]
+
+<th style="[% td_style %][% primary_column_style %]" id="primary_column">
+  [% start_padded_box %]
+  <h1 style="[% h1_style %]">Rapporten din har blitt lagret</h1>
+  <p style="[% p_style %]">Rapporten din til [% report.body %] har blitt lagret på [% site_name %].</p>
+[% IF cobrand.is_council && !cobrand.owns_problem( report ) %]
+<p style="[% p_style %]">Vennligst legg merke til at [% cobrand.council_name %] ikke er ansvarlig for
+denne typen rapporter, så den vil i stedet bli sendt til [% report.body %].</p>
+[% ELSE %]
+[% TRY %][% INCLUDE '_council_reference.html' problem=report %][% CATCH file %][% END %]
+[% END %]
+  <p style="margin: 20px auto; text-align: center">
+  <a style="[% button_style %]" href="[% cobrand.base_url_for_report(report) %][% report.url %]">Vis rapporten min</a>
+  </p>
+  [% end_padded_box %]
+</th>
+[% WRAPPER '_email_sidebar.html' object = report %]
+    <h2 style="[% h2_style %]">[% report.title | html %]</h2>
+    <p style="[% secondary_p_style %]">[% report.detail | html %]</p>
+[% END %]
+
+[% INCLUDE '_email_bottom.html' %]

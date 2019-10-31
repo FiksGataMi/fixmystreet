@@ -1,0 +1,29 @@
+Subject: Bekreft rapporten din på [% site_name %]
+
+Hei [% report.name %],
+
+Vennligst klikk på lenken under for å bekrefte at du ønsker at rapporten din
+skal vises på [% site_name %], til tross for at den ikke vil bli sendt til
+administrasjonen.
+
+[% token_url %]
+
+Hvis e-post programmet ikke lar deg klikke på lenken, kan du kopiere den til
+adressefeltet på nettleseren din.
+
+Rapporten din har tittelen:
+
+[% report.title %]
+
+Og innholdet:
+
+[% report.detail %]
+
+Hvis du ikke ønsker at rapporten din skal vises på siden alikevel, vennligst
+ikke gjør noe.
+
+Takk for at du støtter [% site_name %].
+
+[% signature %]
+
+Denne e-posten var sendt automatisk.

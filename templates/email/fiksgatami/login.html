@@ -1,0 +1,21 @@
+[%
+
+email_summary = "Følg lenken for å bekrefte din e-post og logge inn på " _ site_name;
+email_columns = 1;
+
+PROCESS '_email_settings.html';
+
+INCLUDE '_email_top.html';
+
+%]
+
+<th style="[% td_style %][% only_column_style %]">
+  <h1 style="[% h1_style %]">Takk for at du bruker [% site_name %]</h1>
+  <p style="[% p_style %]">Vennligst klikk på lenken under for å bekrefte din e-post og logge in på [% site_name %].</p>
+  <p style="margin: 20px auto; text-align: center">
+    <a style="[% button_style %]" href="[% c.uri_for_action( 'auth/token', token ) %]">Ja, dette er min e-post</a>
+  </p>
+  <p style="[% p_style %]">Når du har gjort dette, vil du kunne se og endre alle rapporter og oppdatering du har laget fra &ldquo;Din konto&rdquo; menyen på [% site_name %]</p>
+</th>
+
+[% INCLUDE '_email_bottom.html' %]

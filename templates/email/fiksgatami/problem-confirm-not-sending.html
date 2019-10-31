@@ -1,0 +1,28 @@
+[%
+
+email_summary = "Du må bekrefte rapporten din på " _ site_name _ " før den blir gjort offentlig.";
+email_columns = 2;
+
+PROCESS '_email_settings.html';
+
+INCLUDE '_email_top.html';
+
+%]
+
+<th style="[% td_style %][% primary_column_style %]" id="primary_column">
+  [% start_padded_box %]
+  <h1 style="[% h1_style %]">Vennligst bekreft rapporten din</h1>
+  <p style="[% p_style %]"> Vennligst klikk på lenken under for å bekrefte at du ønsker at rapporten din skal vises på [% site_name %], til tross for at den ikke vil bli sendt til administrasjonen.</p>
+  <p style="[% p_style %]">Rapporten din vil også vises på nettsiden til [% site_name %].</p>
+  <p style="margin: 20px auto; text-align: center">
+    <a style="[% button_style %]" href="[% token_url %]">Ja, publiser rapporten</a>
+  </p>
+  <p style="[% p_style %]">Hvis du ikke ønsker at rapporten din skal vises på siden alikevel, vennligst ikke gjør noe.</p>
+  [% end_padded_box %]
+</th>
+[% WRAPPER '_email_sidebar.html' object = report, url = token_url %]
+    <h2 style="[% h2_style %]">[% report.title | html %]</h2>
+    <p style="[% secondary_p_style %]">[% report.detail | html %]</p>
+[% END %]
+
+[% INCLUDE '_email_bottom.html' %]

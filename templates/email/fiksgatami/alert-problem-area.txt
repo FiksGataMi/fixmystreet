@@ -1,12 +1,11 @@
-Subject: Nye saker i [% area_name %] hos FiksGataMi.no
+Subject: Nye saker i [% area_name %] hos [% site_name %]
 
 Følgende saker er sendt til
 [% area_name %]:
 
 [% INCLUDE '_email_report_list.txt' %]
 
-Vennlig hilsen,  
-FiksGataMi-gruppen
+[% signature %]
 
 Hvis du ikke ønsker å motta e-post om saker som er sendt til
 [% area_name %] i fremtiden, klikk på følgende lenke: 
