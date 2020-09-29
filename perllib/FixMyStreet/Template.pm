@@ -6,6 +6,10 @@ use warnings;
 use FixMyStreet;
 use mySociety::Locale;
 use Attribute::Handlers;
+use HTML::Scrubber;
+use FixMyStreet::Template::SafeString;
+use FixMyStreet::Template::Context;
+use FixMyStreet::Template::Stash;
 
 my %FILTERS;
 my %SUBS;
@@ -37,8 +41,13 @@ sub Fn : ATTR(CODE,BEGIN) {
 
 sub new {
     my ($class, $config) = @_;
+    my $disable_autoescape = delete $config->{disable_autoescape};
     $config->{FILTERS}->{$_} = $FILTERS{$_} foreach keys %FILTERS;
     $config->{ENCODING} = 'utf8';
+    if (!$disable_autoescape) {
+        $config->{STASH} = FixMyStreet::Template::Stash->new($config);
+        $config->{CONTEXT} = FixMyStreet::Template::Context->new($config);
+    }
     $class->SUPER::new($config);
 }
 
@@ -53,11 +62,14 @@ sub process {
     [% loc('Some text to localize', 'Optional comment for translator') %]
 
 Passes the text to the localisation engine for translations.
+Pass in "JS" as the optional comment to escape single quotes (for use in JavaScript).
 
 =cut
 
 sub loc : Fn {
-    return _(@_);
+    my $s = _(@_);
+    $s =~ s/'/\\'/g if $_[1] && $_[1] eq 'JS';
+    return FixMyStreet::Template::SafeString->new($s);
 }
 
 =head2 nget
@@ -69,7 +81,7 @@ Use first or second string depending on the number.
 =cut
 
 sub nget : Fn {
-    return mySociety::Locale::nget(@_);
+    return FixMyStreet::Template::SafeString->new(mySociety::Locale::nget(@_));
 }
 
 =head2 file_exists
@@ -104,6 +116,12 @@ sub html_filter : Filter('html') {
     return $text;
 }
 
+sub conditional_escape {
+    my $text = shift;
+    $text = html_filter($text) unless UNIVERSAL::isa($text, 'FixMyStreet::Template::SafeString');
+    return $text;
+}
+
 =head2 html_paragraph
 
 Same as Template Toolkit's html_paragraph, but converts single newlines
@@ -113,9 +131,27 @@ into <br>s too.
 
 sub html_paragraph : Filter('html_para') {
     my $text = shift;
-    my @paras = split(/(?:\r?\n){2,}/, $text);
+    $text = conditional_escape($text);
+    my @paras = grep { $_ } split(/(?:\r?\n){2,}/, $text);
     s/\r?\n/<br>\n/g for @paras;
     $text = "<p>\n" . join("\n</p>\n\n<p>\n", @paras) . "</p>\n";
+    return FixMyStreet::Template::SafeString->new($text);
+}
+
+sub sanitize {
+    my $text = shift;
+
+    my %allowed_tags = map { $_ => 1 } qw( p ul ol li br b i strong em );
+    my $scrubber = HTML::Scrubber->new(
+        rules => [
+            %allowed_tags,
+            a => { href => qr{^(http|/|tel)}i, style => 1, target => qr/^_blank$/, title => 1, class => qr/^js-/ },
+            img => { src => 1, alt => 1, width => 1, height => 1, hspace => 1, vspace => 1, align => 1, sizes => 1, srcset => 1 },
+            font => { color => 1 },
+            span => { style => 1 },
+        ]
+    );
+    $text = $scrubber->scrub($text);
     return $text;
 }
 

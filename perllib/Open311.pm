@@ -8,10 +8,12 @@ use XML::Simple;
 use LWP::Simple;
 use LWP::UserAgent;
 use DateTime::Format::W3CDTF;
+use Encode;
 use HTTP::Request::Common qw(GET POST);
 use FixMyStreet::Cobrand;
 use FixMyStreet::DB;
 use Utils;
+use Path::Tiny 'path';
 
 has jurisdiction => ( is => 'ro', isa => Str );;
 has api_key => ( is => 'ro', isa => Str );
@@ -32,6 +34,8 @@ has use_service_as_deviceid => ( is => 'ro', isa => Bool, default => 0 );
 has extended_statuses => ( is => 'ro', isa => Bool, default => 0 );
 has always_send_email => ( is => 'ro', isa => Bool, default => 0 );
 has multi_photos => ( is => 'ro', isa => Bool, default => 0 );
+has upload_files => ( is => 'ro', isa => Bool, default => 0 );
+has always_upload_photos => ( is => 'ro', isa => Bool, default => 0 );
 has use_customer_reference => ( is => 'ro', isa => Bool, default => 0 );
 has mark_reopen => ( is => 'ro', isa => Bool, default => 0 );
 has fixmystreet_body => ( is => 'ro', isa => InstanceOf['FixMyStreet::DB::Result::Body'] );
@@ -63,20 +67,20 @@ sub get_service_meta_info {
     return $self->_get_xml_object( $service_meta_xml );
 }
 
-sub to_bristol {
+sub ignore_failure {
     my $problem = shift;
-    return unless $problem->cobrand =~ /fixmystreet|bristol/;
+    return unless $problem->cobrand =~ /fixmystreet|bristol|westminster/;
     my $bodies = $problem->bodies;
     return unless %$bodies;
     my $body = (values %$bodies)[0];
-    return unless $body->areas->{2561};
+    return unless $body->areas->{2561} || $body->areas->{2504};
     return 1;
 }
 
 sub warn_failure {
     my ($obj, $problem) = @_;
     # Special case a poorly behaving Open311 server
-    return 0 if to_bristol($problem || $obj);
+    return 0 if ignore_failure($problem || $obj);
     my $threshold = 1;
     return $obj->send_fail_count && $obj->send_fail_count == $threshold;
 }
@@ -90,8 +94,9 @@ sub send_service_request {
     my $params = $self->_populate_service_request_params(
         $problem, $extra, $service_code
     );
+    my $uploads = $self->_populate_service_request_uploads($problem, $params);
 
-    my $response = $self->_post( $self->endpoints->{requests}, $params );
+    my $response = $self->_post( $self->endpoints->{requests}, $params, $uploads );
 
     if ( $response ) {
         my $obj = $self->_get_xml_object( $response );
@@ -139,6 +144,8 @@ sub _populate_service_request_params {
 
     $params->{phone} = $problem->user->phone if $problem->user->phone;
     $params->{email} = $problem->user->email if $problem->user->email;
+
+    $params->{account_id} = $extra->{account_id} if defined $extra->{account_id};
 
     # Some endpoints don't follow the Open311 spec correctly and require an
     # email address for service requests.
@@ -189,6 +196,43 @@ sub _populate_service_request_params {
     }
 
     return $params;
+}
+
+sub _populate_service_request_uploads {
+    my $self = shift;
+    my $problem = shift;
+    my $params = shift;
+
+    return unless $self->upload_files;
+
+    my $uploads = {};
+
+    if ( $problem->get_extra_metadata('enquiry_files') ) {
+        my $cfg = FixMyStreet->config('PHOTO_STORAGE_OPTIONS');
+        my $dir = $cfg ? $cfg->{UPLOAD_DIR} : FixMyStreet->config('UPLOAD_DIR');
+        $dir = path($dir, "enquiry_files")->absolute(FixMyStreet->path_to());
+
+        my $files = $problem->get_extra_metadata('enquiry_files') || {};
+        for my $key (keys %$files) {
+            my $name = $files->{$key};
+            $uploads->{"file_$key"} = [ path($dir, $key)->canonpath, $name ];
+        }
+    }
+
+    if ( $self->always_upload_photos || ( $problem->photo && $problem->non_public ) ) {
+        # open311-adapter won't be able to download any photos if they're on
+        # a private report, so instead of sending the media_url parameter
+        # send the actual photo content with the POST request.
+        my $i = 0;
+        my $photoset = $problem->get_photoset;
+        for ( $photoset->all_ids ) {
+            my $photo = $photoset->get_image_data( num => $i++, size => 'full' );
+            $uploads->{"photo$i"} = [ undef, $_, Content_Type => $photo->{content_type}, Content => $photo->{data} ];
+        }
+        delete $params->{media_url};
+    }
+
+    return $uploads;
 }
 
 sub _generate_service_request_description {
@@ -417,7 +461,7 @@ sub split_name {
 
     return ('', '') unless $name;
 
-    my ( $first, $last ) = ( $name =~ /(\w+)(?:\.?\s+(.+))?/ );
+    my ( $first, $last ) = ( $name =~ /(\S+)(?:\.?\s+(.+))?/ );
 
     return ( $first || '', $last || '');
 }
@@ -442,6 +486,7 @@ sub _request {
     my $method = shift;
     my $path = shift;
     my $params = shift || {};
+    my $uploads = shift;
 
     my $uri = URI->new( $self->endpoint );
     $uri->path( $uri->path . $path );
@@ -454,11 +499,44 @@ sub _request {
     my $debug_request = $method . ' ' . $uri->as_string . "\n\n";
 
     my $req = do {
+        $params = {
+            map {
+                my $value = $params->{$_};
+                $_ => ref $value eq 'ARRAY'
+                        ? [ map { encode('UTF-8', $_) } @$value ]
+                        : encode('UTF-8', $value)
+            } keys %$params
+        };
         if ($method eq 'GET') {
             $uri->query_form( $params );
             GET $uri->as_string;
         } elsif ($method eq 'POST') {
-            POST $uri->as_string, $params;
+            if ($uploads && %$uploads) {
+                # HTTP::Request::Common needs to be constructed slightly
+                # differently if there are files to upload.
+
+                my @media_urls = ();
+                # HTTP::Request::Common treats an arrayref as a filespec,
+                # so we need to rejig the media_url parameter so it doesn't
+                # get confused...
+                # https://stackoverflow.com/questions/50705344/perl-httprequestcommon-post-file-and-array
+                if ($self->multi_photos) {
+                    my $media_urls = $params->{media_url};
+                    @media_urls = map { ( media_url => $_ ) } @$media_urls;
+                    delete $params->{media_url};
+                }
+                $params = {
+                    Content_Type => 'form-data',
+                    Content => [
+                        %$params,
+                        @media_urls,
+                        %$uploads
+                    ]
+                };
+                POST $uri->as_string, %$params;
+            } else {
+                POST $uri->as_string, $params;
+            }
         }
     };
 
@@ -536,6 +614,7 @@ sub _get_xml_object {
         service_requests => 'request',
         errors => 'error',
         service_request_updates => 'request_update',
+        groups => 'group',
     };
     my $simple = XML::Simple->new(
         ForceArray => [ values %$group_tags ],

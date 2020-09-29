@@ -1,37 +1,24 @@
 package FixMyStreet::Cobrand::Buckinghamshire;
-use parent 'FixMyStreet::Cobrand::UKCouncils';
+use parent 'FixMyStreet::Cobrand::Whitelabel';
 
 use strict;
 use warnings;
 
 use Moo;
+with 'FixMyStreet::Roles::ConfirmOpen311';
 with 'FixMyStreet::Roles::ConfirmValidation';
+with 'FixMyStreet::Roles::BoroughEmails';
 
 sub council_area_id { return 2217; }
 sub council_area { return 'Buckinghamshire'; }
-sub council_name { return 'Buckinghamshire County Council'; }
+sub council_name { return 'Buckinghamshire Council'; }
 sub council_url { return 'buckinghamshire'; }
-
-
-sub example_places {
-    return ( 'HP19 7QF', "Walton Road" );
-}
-
-sub base_url {
-    my $self = shift;
-    return $self->next::method() if FixMyStreet->config('STAGING_SITE');
-    return 'https://fixmystreet.buckscc.gov.uk';
-}
 
 sub disambiguate_location {
     my $self    = shift;
     my $string  = shift;
 
     my $town = 'Buckinghamshire';
-
-    # The geocoder returns two results for 'Aylesbury', so force the better
-    # result to be used.
-    $town = "$town, HP20 2NH" if $string =~ /[\s]*aylesbury[\s]*/i;
 
     return {
         %{ $self->SUPER::disambiguate_location() },
@@ -46,48 +33,16 @@ sub on_map_default_status { 'open' }
 
 sub pin_colour {
     my ( $self, $p, $context ) = @_;
-    return 'grey' if $p->state eq 'not responsible';
+    return 'grey' if $p->state eq 'not responsible' || !$self->owns_problem( $p );
     return 'green' if $p->is_fixed || $p->is_closed;
     return 'red' if $p->state eq 'confirmed';
     return 'yellow';
 }
 
-sub admin_user_domain { 'buckscc.gov.uk' }
-
-sub contact_email {
-    my $self = shift;
-    return join( '@', 'fixmystreetbs', 'email.buckscc.gov.uk' );
-}
+sub admin_user_domain { ( 'buckscc.gov.uk', 'buckinghamshire.gov.uk' ) }
 
 sub send_questionnaires {
     return 0;
-}
-
-sub open311_config {
-    my ($self, $row, $h, $params) = @_;
-
-    my $extra = $row->get_extra_fields;
-    push @$extra,
-        { name => 'report_url',
-          value => $h->{url} },
-        { name => 'title',
-          value => $row->title },
-        { name => 'description',
-          value => $row->detail };
-
-    # Reports made via FMS.com or the app probably won't have a site code
-    # value because we don't display the adopted highways layer on those
-    # frontends. Instead we'll look up the closest asset from the WFS
-    # service at the point we're sending the report over Open311.
-    if (!$row->get_extra_field_value('site_code')) {
-        if (my $site_code = $self->lookup_site_code($row)) {
-            push @$extra,
-                { name => 'site_code',
-                value => $site_code };
-        }
-    }
-
-    $row->set_extra_fields(@$extra);
 }
 
 sub open311_pre_send {
@@ -108,11 +63,12 @@ sub open311_post_send {
     return unless $row->external_id;
 
     # For certain categories, send an email also
+    my $emails = $self->feature('open311_email');
     my $addresses = {
-        'Flytipping' => [ join('@', 'illegaldumpingcosts', $self->admin_user_domain), "TfB" ],
-        'Blocked drain' => [ join('@', 'floodmanagement', $self->admin_user_domain), "Flood Management" ],
-        'Ditch issue' => [ join('@', 'floodmanagement', $self->admin_user_domain), "Flood Management" ],
-        'Flooded subway' => [ join('@', 'floodmanagement', $self->admin_user_domain), "Flood Management" ],
+        'Flytipping' => [ $emails->{flytipping}, "TfB" ],
+        'Blocked drain' => [ $emails->{flood}, "Flood Management" ],
+        'Ditch issue' => [ $emails->{flood}, "Flood Management" ],
+        'Flooded subway' => [ $emails->{flood}, "Flood Management" ],
     };
     my $dest = $addresses->{$row->category};
     return unless $dest;
@@ -143,41 +99,15 @@ sub open311_contact_meta_override {
     } if $service->{service_name} eq 'Flytipping';
 }
 
-sub process_open311_extras {
-    my ($self, $c, $body, $extra) = @_;
-
-    return unless $c->stash->{report}; # Don't care about updates
-
-    $self->flytipping_body_fix(
-        $c->stash->{report},
-        $c->get_param('road-placement'),
-        $c->stash->{field_errors},
-    );
-}
-
-sub flytipping_body_fix {
-    my ($self, $report, $road_placement, $errors) = @_;
+sub report_new_munge_before_insert {
+    my ($self, $report) = @_;
 
     return unless $report->category eq 'Flytipping';
 
-    if ($report->bodies_str =~ /,/) {
-        # Sent to both councils in the area
-        my @bodies = values %{$report->bodies};
-        my $county = (grep { $_->name =~ /^Buckinghamshire/ } @bodies)[0];
-        my $district = (grep { $_->name !~ /^Buckinghamshire/ } @bodies)[0];
-        # Decide which to send to based upon the answer to the extra question:
-        if ($road_placement eq 'road') {
-            $report->bodies_str($county->id);
-        } elsif ($road_placement eq 'off-road') {
-            $report->bodies_str($district->id);
-        }
-    } else {
-        # If the report is only being sent to the district, we do
-        # not care about the road question, if it is missing
-        if (!$report->to_body_named('Buckinghamshire')) {
-            delete $errors->{'road-placement'};
-        }
-    }
+    my $placement = $self->{c}->get_param('road-placement');
+    return unless $placement && $placement eq 'off-road';
+
+    $report->category('Flytipping (off-road)');
 }
 
 sub filter_report_description {
@@ -200,8 +130,6 @@ sub filter_report_description {
 sub map_type { 'Buckinghamshire' }
 
 sub default_map_zoom { 3 }
-
-sub enable_category_groups { 1 }
 
 sub _dashboard_export_add_columns {
     my $self = shift;
@@ -456,9 +384,8 @@ sub get_geocoder { 'OSM' }
 
 sub categories_restriction {
     my ($self, $rs) = @_;
-    # Buckinghamshire is a two-tier council, but only want to display
-    # county-level categories on their cobrand.
-    return $rs->search( [ { 'body_areas.area_id' => 2217 }, { category => 'Flytipping' } ], { join => { body => 'body_areas' } });
+
+    return $rs->search( { category => { '!=', 'Flytipping (off-road)'} } );
 }
 
 sub lookup_site_code_config { {
@@ -478,5 +405,24 @@ sub lookup_site_code_config { {
         return $valid_types{$type};
     }
 } }
+
+around 'munge_sendreport_params' => sub {
+    my ($orig, $self, $row, $h, $params) = @_;
+
+    # The district areas don't exist in MapIt past generation 36, so look up
+    # what district this report would have been in and temporarily override
+    # the areas column so BoroughEmails::munge_sendreport_params can do its
+    # thing.
+    my ($lat, $lon) = ($row->latitude, $row->longitude);
+    my $district = FixMyStreet::MapIt::call( 'point', "4326/$lon,$lat", type => 'DIS', generation => 36 );
+    ($district) = keys %$district;
+
+    my $original_areas = $row->areas;
+    $row->areas(",$district,");
+
+    $self->$orig($row, $h, $params);
+
+    $row->areas($original_areas);
+};
 
 1;

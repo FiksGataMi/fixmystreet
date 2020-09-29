@@ -231,27 +231,37 @@ sub check_and_stash_category : Private {
     my $all_areas = $c->stash->{all_areas};
     my @bodies = $c->model('DB::Body')->active->for_areas(keys %$all_areas)->all;
     my %bodies = map { $_->id => $_ } @bodies;
+    $c->cobrand->call_hook(munge_report_new_bodies => \%bodies); # To match setup_categories_and_bodies in New.pm
+
     my @list_of_names = map { $_->name } values %bodies;
     my $csv = Text::CSV->new();
     $csv->combine(@list_of_names);
+    $c->stash->{around_bodies} = \@bodies;
+    $c->stash->{bodies_ids} = [ map { $_->id } @bodies];
     $c->{stash}->{list_of_names_as_string} = $csv->string;
 
+    my $where  = { body_id => [ keys %bodies ], };
+
+    my $cobrand_where = $c->cobrand->call_hook('munge_around_category_where', $where );
+    if ( $cobrand_where ) {
+       $where = $cobrand_where;
+    }
+
     my @categories = $c->model('DB::Contact')->not_deleted->search(
-        {
-            body_id => [ keys %bodies ],
-        },
+        $where,
         {
             columns => [ 'category', 'extra' ],
-            order_by => [ 'category' ],
             distinct => 1
         }
-    )->all;
+    )->all_sorted;
     $c->stash->{filter_categories} = \@categories;
     my %categories_mapped = map { $_->category => 1 } @categories;
+    $c->forward('/report/stash_category_groups', [ \@categories ]) if $c->cobrand->enable_category_groups;
 
     my $categories = [ $c->get_param_list('filter_category', 1) ];
     my %valid_categories = map { $_ => 1 } grep { $_ && $categories_mapped{$_} } @$categories;
     $c->stash->{filter_category} = \%valid_categories;
+    $c->cobrand->call_hook('munge_around_filter_category_list');
 }
 
 sub map_features : Private {
@@ -312,6 +322,7 @@ sub ajax : Path('/ajax') {
 
     my %valid_categories = map { $_ => 1 } $c->get_param_list('filter_category', 1);
     $c->stash->{filter_category} = \%valid_categories;
+    $c->cobrand->call_hook('munge_around_filter_category_list');
 
     $c->forward('map_features', [ { bbox => $c->stash->{bbox} } ]);
     $c->forward('/reports/ajax', [ 'around/on_map_list_items.html' ]);
@@ -321,12 +332,14 @@ sub nearby : Path {
     my ($self, $c) = @_;
 
     my $states = FixMyStreet::DB::Result::Problem->open_states();
-    $c->forward('/report/_nearby_json', [ {
+    my $params = {
         latitude => $c->get_param('latitude'),
         longitude => $c->get_param('longitude'),
         categories => [ $c->get_param('filter_category') || () ],
         states => $states,
-    } ]);
+    };
+    $c->cobrand->call_hook('around_nearby_filter', $params);
+    $c->forward('/report/_nearby_json', [ $params ]);
 }
 
 sub location_closest_address : Path('/ajax/closest') {
@@ -416,7 +429,7 @@ sub lookup_by_ref : Private {
             external_id => $ref
         ];
 
-    my $problems = $c->cobrand->problems->search( $criteria );
+    my $problems = $c->cobrand->problems->search({ non_public => 0, -or => $criteria });
 
     my $count = try {
         $problems->count;

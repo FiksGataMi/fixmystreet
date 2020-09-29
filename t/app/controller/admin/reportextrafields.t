@@ -9,6 +9,8 @@ sub allow_report_extra_fields { 1 }
 
 sub area_types { [ 'UTA' ] }
 
+sub must_have_2fa { 0 }
+
 
 package FixMyStreet::Cobrand::SecondTester;
 
@@ -62,13 +64,12 @@ FixMyStreet::override_config {
         $mech->get_ok("/admin/body/" . $body->id . "/" . $contact->category);
 
         $mech->submit_form_ok( { with_fields => {
-            "metadata[0].order" => "1",
-            "metadata[0].code" => "string_test",
-            "metadata[0].required" => "on",
-            "metadata[0].notice" => "",
-            "metadata[0].description" => "this is a test description",
-            "metadata[0].datatype_description" => "hint here",
-            "metadata[0].datatype" => "string",
+            "metadata[9999].order" => "1",
+            "metadata[9999].code" => "string_test",
+            "metadata[9999].required" => 1,
+            "metadata[9999].behaviour" => "question",
+            "metadata[9999].description" => "<div style='foo'>this is a test description</div>",
+            "metadata[9999].datatype" => "string",
             "note" => "Added extra field",
         }});
         $mech->content_contains('Values updated');
@@ -78,25 +79,23 @@ FixMyStreet::override_config {
             code => "string_test",
             required => "true",
             variable => "true",
+            protected => "false",
             description => "this is a test description",
-            datatype_description => "hint here",
             datatype => "string",
         };
         $contact->discard_changes;
         is_deeply $contact->get_extra_fields, $contact_extra_fields, 'new string field was added';
 
-
         $mech->get_ok("/admin/body/" . $body->id . "/" . $contact->category);
         $mech->submit_form_ok( { with_fields => {
-            "metadata[1].order" => "2",
-            "metadata[1].code" => "list_test",
-            "metadata[1].required" => undef,
-            "metadata[1].notice" => "",
-            "metadata[1].description" => "this field is a list",
-            "metadata[1].datatype_description" => "",
-            "metadata[1].datatype" => "list",
-            "metadata[1].values[0].key" => "key1",
-            "metadata[1].values[0].name" => "name1",
+            "metadata[9999].order" => "2",
+            "metadata[9999].code" => "list_test",
+            "metadata[9999].required" => undef,
+            "metadata[9999].behaviour" => "question",
+            "metadata[9999].description" => "this field is a list",
+            "metadata[9999].datatype" => "singlevaluelist",
+            "metadata[9999].values[8888].key" => "key1",
+            "metadata[9999].values[8888].name" => "name1",
             "note" => "Added extra list field",
         }});
         $mech->content_contains('Values updated');
@@ -106,8 +105,8 @@ FixMyStreet::override_config {
             code => "list_test",
             required => "false",
             variable => "true",
+            protected => "false",
             description => "this field is a list",
-            datatype_description => "",
             datatype => "singlevaluelist",
             values => [
                 { name => "name1", key => "key1" },
@@ -115,6 +114,28 @@ FixMyStreet::override_config {
         };
         $contact->discard_changes;
         is_deeply $contact->get_extra_fields, $contact_extra_fields, 'new list field was added';
+
+        $mech->get_ok("/admin/body/" . $body->id . "/" . $contact->category);
+        $mech->submit_form_ok( { with_fields => {
+            "metadata[9999].order" => "3",
+            "metadata[9999].code" => "emergency",
+            "metadata[9999].behaviour" => "notice",
+            "metadata[9999].disable_form" => "1",
+            "metadata[9999].description" => "please ring",
+            "note" => "Added notice field",
+        }});
+        $mech->content_contains('Values updated');
+
+        push @$contact_extra_fields, {
+            order => "3",
+            code => "emergency",
+            protected => "false",
+            description => "please ring",
+            disable_form => 'true',
+            variable => 'false',
+        };
+        $contact->discard_changes;
+        is_deeply $contact->get_extra_fields, $contact_extra_fields, 'new field was added';
 
         $contact->set_extra_fields();
         $contact->update;
@@ -137,11 +158,7 @@ FixMyStreet::override_config {
         is $contact->email, 'test4@example.com', 'contact updated';
         is_deeply $meta_data, [ {
             order => 0,
-            datatype => 'string',
-            datatype_description => '',
-            description => '',
-            required => 'false',
-            variable => 'true',
+            protected => 'false',
             code => 'POT',
             automated => 'server_set'
         } ], "automated fields not unset";
@@ -151,7 +168,7 @@ FixMyStreet::override_config {
     subtest 'Create and update new ReportExtraFields' => sub {
         my $extra_fields = [];
 
-        my $model = FixMyStreet::App->model('DB::ReportExtraField');
+        my $model = FixMyStreet::DB->resultset('ReportExtraField');
         is $model->count, 0, 'no ReportExtraFields yet';
 
         $mech->get_ok("/admin/reportextrafields");
@@ -161,13 +178,12 @@ FixMyStreet::override_config {
             name => "Test extra fields",
             cobrand => "tester",
             language => undef,
-            "metadata[0].order" => "1",
-            "metadata[0].code" => "string_test",
-            "metadata[0].required" => "on",
-            "metadata[0].notice" => "",
-            "metadata[0].description" => "this is a test description",
-            "metadata[0].datatype_description" => "hint here",
-            "metadata[0].datatype" => "string",
+            "metadata[9999].order" => "1",
+            "metadata[9999].code" => "string_test",
+            "metadata[9999].required" => 1,
+            "metadata[9999].behaviour" => "question",
+            "metadata[9999].description" => "this is a test description",
+            "metadata[9999].datatype" => "string",
         }});
         is $model->count, 1, 'new ReportExtraFields created';
 
@@ -177,8 +193,8 @@ FixMyStreet::override_config {
             code => "string_test",
             required => "true",
             variable => "true",
+            protected => "false",
             description => "this is a test description",
-            datatype_description => "hint here",
             datatype => "string",
         };
         is_deeply $object->get_extra_fields, $extra_fields, 'new string field was added';
@@ -188,15 +204,14 @@ FixMyStreet::override_config {
         $mech->get_ok("/admin/reportextrafields/" . $object->id);
         $mech->submit_form_ok( { with_fields => {
             "language" => "en-gb",
-            "metadata[1].order" => "2",
-            "metadata[1].code" => "list_test",
-            "metadata[1].required" => undef,
-            "metadata[1].notice" => "",
-            "metadata[1].description" => "this field is a list",
-            "metadata[1].datatype_description" => "",
-            "metadata[1].datatype" => "list",
-            "metadata[1].values[0].key" => "key1",
-            "metadata[1].values[0].name" => "name1",
+            "metadata[9999].order" => "2",
+            "metadata[9999].code" => "list_test",
+            "metadata[9999].required" => undef,
+            "metadata[9999].behaviour" => "question",
+            "metadata[9999].description" => "this field is a list",
+            "metadata[9999].datatype" => "singlevaluelist",
+            "metadata[9999].values[8888].key" => "key1",
+            "metadata[9999].values[8888].name" => "name1",
         }});
 
         push @$extra_fields, {
@@ -204,8 +219,8 @@ FixMyStreet::override_config {
             code => "list_test",
             required => "false",
             variable => "true",
+            protected => "false",
             description => "this field is a list",
-            datatype_description => "",
             datatype => "singlevaluelist",
             values => [
                 { name => "name1", key => "key1" },
@@ -218,24 +233,16 @@ FixMyStreet::override_config {
 
         $mech->get_ok("/admin/reportextrafields/" . $object->id);
         $mech->submit_form_ok({ with_fields => {
-            "metadata[2].order" => "3",
-            "metadata[2].code" => "automated_test",
-            "metadata[2].required" => undef,
-            "metadata[2].notice" => "",
-            "metadata[2].description" => "",
-            "metadata[2].datatype_description" => "",
-            "metadata[2].datatype" => "string",
-            "metadata[2].automated" => "server_set",
+            "metadata[9999].order" => "3",
+            "metadata[9999].code" => "automated_test",
+            "metadata[9999].required" => undef,
+            "metadata[9999].behaviour" => "server",
         }});
 
         push @$extra_fields, {
             order => "3",
             code => "automated_test",
-            required => "false",
-            variable => "true",
-            description => "",
-            datatype_description => "",
-            datatype => "string",
+            protected => "false",
             automated => "server_set",
         };
 
@@ -245,8 +252,8 @@ FixMyStreet::override_config {
 
         $mech->get_ok("/admin/reportextrafields/" . $object->id);
         $mech->submit_form_ok( { with_fields => {
-            "metadata[1].values[1].key" => "key2",
-            "metadata[1].values[1].name" => "name2",
+            "metadata[1].values[8888].key" => "key2",
+            "metadata[1].values[8888].name" => "name2",
         }});
 
         push @{$extra_fields->[1]->{values}}, { name => "name2", key => "key2" };
@@ -291,7 +298,7 @@ FixMyStreet::override_config {
     LANGUAGES => [ 'en-gb,English,en_GB' ]
 }, sub {
     subtest "Extra fields are missing from cobrand that doesn't allow them" => sub {
-        my $object = FixMyStreet::App->model('DB::ReportExtraField')->first;
+        my $object = FixMyStreet::DB->resultset('ReportExtraField')->first;
         $object->update({ language => "", cobrand => ""});
 
         $mech->get_ok("/report/new?longitude=-1.351488&latitude=51.847235&category=" . $contact->category);
@@ -300,7 +307,7 @@ FixMyStreet::override_config {
     };
 };
 
-FixMyStreet::App->model('DB::ReportExtraField')->delete_all;
+FixMyStreet::DB->resultset('ReportExtraField')->delete_all;
 $mech->log_out_ok;
 
 subtest 'Reports are created with correct extra metadata' => sub {
@@ -308,7 +315,7 @@ subtest 'Reports are created with correct extra metadata' => sub {
         ALLOWED_COBRANDS => [ 'tester' ],
         MAPIT_URL => 'http://mapit.uk/',
     }, sub {
-        my $model = FixMyStreet::App->model('DB::ReportExtraField');
+        my $model = FixMyStreet::DB->resultset('ReportExtraField');
         my $extra_fields = $model->find_or_create({
             name => "Test extra fields",
             language => "",
@@ -320,7 +327,6 @@ subtest 'Reports are created with correct extra metadata' => sub {
             required => "true",
             variable => "true",
             description => "this is a test description",
-            datatype_description => "hint here",
             datatype => "string",
         });
         $extra_fields->push_extra_fields({
@@ -329,7 +335,6 @@ subtest 'Reports are created with correct extra metadata' => sub {
             required => "false",
             variable => "true",
             description => "this field is a list",
-            datatype_description => "",
             datatype => "singlevaluelist",
             values => [
                 { name => "name1", key => "key1" },

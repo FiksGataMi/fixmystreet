@@ -186,6 +186,7 @@ sub generate : Private {
     $c->stash->{rss} = new XML::RSS(
         version       => '2.0',
         encoding      => 'UTF-8',
+        stylesheet    => '/rss/xsl',
         encode_output => undef
     );
     $c->stash->{rss}->add_module(
@@ -222,8 +223,11 @@ sub query_main : Private {
     # FIXME Do this in a nicer way at some point in the future...
     my $query = 'select * from ' . $alert_type->item_table . ' where '
         . ($alert_type->head_table ? $alert_type->head_table . '_id=? and ' : '')
-        . $alert_type->item_where . ' order by '
-        . $alert_type->item_order;
+        . $alert_type->item_where . ' ';
+    if ($c->cobrand->can('problems_sql_restriction')) {
+        $query .= $c->cobrand->problems_sql_restriction($alert_type->item_table);
+    }
+    $query .= ' order by ' . $alert_type->item_order;
     my $rss_limit = FixMyStreet->config('RSS_LIMIT');
     $query .= " limit $rss_limit" unless $c->stash->{type} =~ /^all/;
 
@@ -298,9 +302,8 @@ sub add_row : Private {
         $item{description} .= encode_entities("\n<br>$address") if $address;
     }
 
-    my $recipient_name = $c->cobrand->contact_name;
     $item{description} .= encode_entities("\n<br><a href='$url'>" .
-        sprintf(_("Report on %s"), $recipient_name) . "</a>");
+        sprintf(_("Report on %s"), $c->stash->{site_name}) . "</a>");
 
     if ($row->{latitude} || $row->{longitude}) {
         $item{georss} = { point => "$row->{latitude} $row->{longitude}" };
@@ -328,6 +331,7 @@ sub add_parameters : Private {
     foreach ( keys %{ $c->stash->{title_params} } ) {
         $row->{$_} = $c->stash->{title_params}->{$_};
     }
+    $row->{SITE_NAME} = $c->stash->{site_name};
 
     (my $title = _($alert_type->head_title)) =~ s/\{\{(.*?)}}/$row->{$1}/g;
     (my $link = $alert_type->head_link) =~ s/\{\{(.*?)}}/$row->{$1}/g;
@@ -375,6 +379,20 @@ sub redirect_lat_lon : Private {
     my $state_qs = '';
     $state_qs    = $c->stash->{state_qs} if $c->stash->{state_qs};
     $c->res->redirect( "/rss/l/$lat,$lon" . $d_str . $state_qs );
+}
+
+sub xsl : Path {
+    my ($self, $c) = @_;
+
+    my @include_path = @{ $c->cobrand->path_to_email_templates($c->stash->{lang_code}) };
+    my $vars = {
+        %{ $c->stash },
+        additional_template_paths => \@include_path,
+    };
+    my $body = $c->view('Email')->render($c, 'xsl.xsl', $vars);
+
+    $c->response->header('Content-Type' => 'text/xml; charset=utf-8');
+    $c->response->body($body);
 }
 
 =head1 AUTHOR

@@ -24,6 +24,8 @@ sub setup_soap {
 
     # Variables for the SOAP web service
     my $geocoder = FixMyStreet->config('GEOCODER');
+    return unless ref $geocoder eq 'HASH';
+
     my $url = $geocoder->{url};
     my $username = $geocoder->{username};
     my $password = $geocoder->{password};
@@ -49,6 +51,34 @@ sub setup_soap {
     $method = SOAP::Data->name('getLocation95')->attr({ xmlns => $attr });
 }
 
+sub admin_district {
+    my ($e, $n) = @_;
+
+    setup_soap();
+    return unless $soap;
+
+    my $attr = 'http://ch/geoz/fixmyzuerich/service';
+    my $bo = 'http://ch/geoz/fixmyzuerich/bo';
+    my $method = SOAP::Data->name('getInfoByLocation')->attr({ xmlns => $attr });
+    my $location = SOAP::Data->name(
+        'location' => \SOAP::Data->value(
+            SOAP::Data->name('bo:easting', $e),
+            SOAP::Data->name('bo:northing', $n),
+        )
+    )->attr({ 'xmlns:bo' => $bo });
+    my $search = SOAP::Data->value($location);
+    my $result;
+    eval {
+        $result = $soap->call($method, $security, $search);
+    };
+    if ($@) {
+        warn $@ if FixMyStreet->config('STAGING_SITE');
+        return 'The geocoder appears to be down.';
+    }
+    $result = $result->result;
+    return $result;
+}
+
 # string STRING CONTEXT
 # Looks up on Zurich web service a user-inputted location.
 # Returns array of (LAT, LON, ERROR), where ERROR is either undef, a string, or
@@ -60,13 +90,14 @@ sub setup_soap {
 # versions of the site.
 
 sub string {
-    my ( $s, $c ) = @_;
+    my ( $cls, $s, $c ) = @_;
 
     setup_soap();
 
     my $cache_dir = path(FixMyStreet->config('GEO_CACHE'), 'zurich')->absolute(FixMyStreet->path_to());
     my $cache_file = $cache_dir->child(md5_hex($s));
     my $result;
+    $c->stash->{geocoder_url} = $s;
     if (-s $cache_file && -M $cache_file <= 7 && !FixMyStreet->config('STAGING_SITE')) {
         $result = retrieve($cache_file);
     } else {

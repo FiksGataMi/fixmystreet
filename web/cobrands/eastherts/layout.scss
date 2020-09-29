@@ -1,194 +1,156 @@
 @import "_colours";
 @import "../sass/layout";
 
-#site-logo {
-    margin: 0; // Left aligned again
+// give .eh-header a set height (like 8em) and a thick grey border-bottom
+
+// give .nav-wrapper { top: 6em } and remove all the { float: right }
+// so that it sits in front of the grey border-bottom from .eh-header
+
+.eh-header {
+    @include box-sizing(border-box);
+    height: $eh-header-height + $eh-nav-height;
+    border-bottom: $eh-nav-height solid $eh_light_grey;
 }
 
-// Put the nav underneath the East Herts nav
+.eh-header__form {
+    width: 70%;
+    max-width: 40em;
+    position: absolute;
+    top: 0.5em; // Note: this is relative to .container, not .eh-header!
+    right: 1em;
+
+    body.mappage & {
+        top: 1.5em; // Relative to .eh-header again.
+    }
+}
+
+.eh-header__button {
+    font-family: inherit;
+
+    i {
+        margin: 0 0.5em 0 0;
+    }
+
+    span {
+        clip: auto;
+        height: auto;
+        width: auto;
+        margin: 0;
+        overflow: visible;
+        position: static;
+
+        font-size: 1.1em;
+    }
+}
+
+.nav-wrapper {
+    top: $eh-header-height;
+}
 
 #main-nav {
-    display: block;
-    position: absolute;
-    top: 124px; // 80px + 40px + 4px gap
-    left: 0;
-    width: 100%;
-    float: none;
     min-height: 0;
-
-    .ie9 & > * {
-      -ms-transform: none;
-    }
+    height: auto;
+    display: block;
+    float: none;
+    margin: 0 -0.75em; // compensate for 0.75em padding on nav links
 }
-
-// And make it look the same
 
 .nav-menu {
-    background-color: $eh_dark_grey;
-    margin-right: calc(40px - -0.75em);
-    span {
-        color: #fff;
-        background-color: $eh_green;
+    float: none;
+
+    a, span, a:visited {
+        color: $eh_green;
+        font-size: 1em;
+    }
+
+    span,
+    span.report-a-problem-btn {
+        cursor: default;
+    }
+
+    a:hover,
+    a:focus {
+        color: #000;
+        background: transparent;
+        text-decoration: underline;
+    }
+
+    a.report-a-problem-btn,
+    span.report-a-problem-btn {
+        padding: 0.75em;
+        margin: 0;
+        color: $eh_green;
+        background: transparent;
+        border-radius: 0;
+
+        &:hover,
+        &:focus {
+            color: #000;
+            background: transparent;
+            text-decoration: underline;
+        }
     }
 }
 
-.nav-menu--main {
-    a, span {
-        padding: 0.5em;
-        margin: 0.25em;
-        @include border-radius(0.25em);
-    }
-    a.report-a-problem-btn {
-        background-color: transparent;
-        padding: 0.5em;
-        margin: 0.25em;
-    }
+.eh-header__nav-link {
+    display: none;
 }
 
-// Front page, light background bar
+.eh-footer__logo {
+    position: absolute;
+    top: 0;
+    right: 1em;
+}
 
 #front-main {
-    background-color: #f6f6f6;
-}
+    background-color: white;
+    text-align: left;
+    padding-top: 40px;
+    color: inherit;
 
-.content, #front-main {
-    color: $eh_dark_grey;
-}
+    #postcodeForm {
+        margin-top: 0;
 
-// Extra height needed
-body.twothirdswidthpage .content .sticky-sidebar aside {
-  top: 16em;
+        div {
+            margin: 0;
+        }
+    }
+
+    a#geolocate_link {
+        color: $eh_green;
+    }
+
+    h1 {
+        font-size: 2.5em;
+    }
+
+    h1 + p {
+        font-size: 1.5em;
+        line-height: 1.25em;
+        max-width: 640px;
+    }
 }
 
 body.mappage {
-    #site-header {
-        top: 40px;
-        height: 138px;
+    .eh-footer {
+        display: none;
     }
 }
 
-// Header bits from their stylesheet, tweaked for simpler display
-
-.toputils__right {
-    float: right;
-}
-.toputils__nav {
-    float: left;
-    padding: 0 0.25em;
-    li {
-        float: left;
-        list-style: none;
+body.frontpage {
+    .content {
+        padding: 2em 0;
+        margin: 2em 0 0 0;
+        border-top: 2px solid $eh_light_grey;
     }
 }
-.toputils__navlist {
-    margin: 0;
-    padding: 0;
-}
-a.toputils__navitem {
-    display: block;
-    color: #fff;
-    line-height: 2.5rem;
-    padding: 0 0.5em;
-    font-size: 0.875rem;
-}
 
-.mainmenu {
-    background-color: #00843d;
-}
+body.twothirdswidthpage {
+    .content .sticky-sidebar {
+        z-index: 1; // rather than -1, which hides it behind .container
 
-.mainmenu {
-    position:absolute;
-    display: block;
-    right: calc(40px - -0.75em);
-    top: 20px;
-}
-
-a.mainmenu__item {
-    font-size: 1.125rem;
-    line-height: normal;
-    display: block;
-    padding: 1em;
-    color: #fff
-}
-
-.mainmenu__list {
-    margin: 0;
-    padding: 0;
-}
-
-.mainmenu__list > li {
-    list-style: none;
-    float: left;
-    position: relative
-}
-
-.searchcontrol {
-    background-color: #fff;
-    font-size: .875rem;
-    position:absolute;
-    display: block;
-    top: 0;
-    right: 0;
-    width: 40px;
-    height: 40px;
-    overflow: hidden;
-    margin-top: 30px;
-    background-color: transparent
-}
-
-.searchcontrol__expandtoggle {
-    display:block;
-    width: 40px;
-    height: 40px;
-    background-image: url("https://www.eastherts.gov.uk/themes/cruise/images/searchbutton-transparent.png");
-    position: absolute;
-    right: 0;
-    text-indent: -99999px;
-}
-
-// Footer bits from their stylesheet, tweaked for smaller widths
-
-.footer__left {
-    float: left;
-    width: 266px;
-}
-.footer__right {
-    float: right;
-    width: 450px;
-}
-
-.footer__logo {
-    margin:0 0 1em 0
-}
-
-
-.footer__socialmedia {
-    text-align:left
-}
-
-.footer__socialmedia img {
-    margin: 0 1em 1em 0
-}
-
-a.footer__navlink {
-    padding:0;
-    padding-right: .5em;
-    margin-right: .5em;
-    border-right: 1px solid #fff;
-    text-align: left
-}
-
-.footer__navitem:last-child a.footer__navlink {
-    border-right: 0
-}
-
-.footer__navitem {
-    float:left
-}
-
-.footer__copyright {
-    text-align:left
-}
-.footer__goss > a {
-    text-align:left
+        aside {
+            top: 12em; // up from 7em, because of the taller header
+        }
+    }
 }

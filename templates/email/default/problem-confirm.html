@@ -10,7 +10,7 @@ INCLUDE '_email_top.html';
 %]
 
 <th style="[% td_style %][% primary_column_style %]" id="primary_column">
-  [% start_padded_box %]
+  [% start_padded_box | safe %]
   <h1 style="[% h1_style %]">Please confirm your&nbsp;report</h1>
   <p style="[% p_style %]">Please click on the link below to confirm that you want to send your report to [% report.body %].
 [% IF c.cobrand.is_council && !c.cobrand.owns_problem( report ) %]
@@ -20,12 +20,13 @@ of problem, so it will instead be sent to [% report.body %].
 
 [% TRY %][% INCLUDE '_problem-confirm_extra.html' %][% CATCH file %][% END %]
   </p>
-  <p style="[% p_style %]">Your report will also appear on the [% site_name %] website.</p>
+  [% UNLESS report.non_public %]<p style="[% p_style %]">Your report will also appear on the [% site_name %] website.</p>[% END %]
   <p style="margin: 20px auto; text-align: center">
     <a style="[% button_style %]" href="[% token_url %]">Yes, send my report</a>
   </p>
   <p style="[% p_style %]">If you no longer wish to send this report, please take no further action.</p>
-  [% end_padded_box %]
+  [% TRY %][% INCLUDE '_problem-confirm_footer.html' %][% CATCH file %][% END %]
+  [% end_padded_box | safe %]
 </th>
 [% WRAPPER '_email_sidebar.html' object = report, url = token_url %]
     <h2 style="[% h2_style %]">[% report.title | html %]</h2>

@@ -4,10 +4,10 @@ use Moose;
 use namespace::autoclean;
 BEGIN { extends 'Catalyst::Controller'; }
 
+use utf8;
 use Encode;
 use List::MoreUtils qw(uniq);
 use List::Util 'first';
-use POSIX 'strcoll';
 use HTML::Entities;
 use Path::Class;
 use Utils;
@@ -102,18 +102,18 @@ sub report_new : Path : Args(0) {
     $c->stash->{template} = "report/new/fill_in_details.html";
     $c->forward('setup_categories_and_bodies');
     $c->forward('setup_report_extra_fields');
-    $c->forward('generate_map');
     $c->forward('check_for_category');
+    $c->forward('setup_report_extras');
 
     # deal with the user and report and check both are happy
 
-    return unless $c->forward('check_form_submitted');
+    $c->detach('generate_map') unless $c->forward('check_form_submitted');
 
     $c->forward('/auth/check_csrf_token');
     $c->forward('process_report');
     $c->forward('process_user');
     $c->forward('/photo/process_photo');
-    return unless $c->forward('check_for_errors');
+    $c->detach('generate_map') unless $c->forward('check_for_errors');
     $c->forward('save_user_and_report');
     $c->forward('redirect_or_confirm_creation');
 }
@@ -142,6 +142,7 @@ sub report_new_ajax : Path('mobile') : Args(0) {
 
     $c->forward('setup_categories_and_bodies');
     $c->forward('setup_report_extra_fields');
+    $c->forward('check_for_category');
     $c->forward('process_report');
     $c->forward('process_user');
     $c->forward('/photo/process_photo');
@@ -157,7 +158,7 @@ sub report_new_ajax : Path('mobile') : Args(0) {
 
     my $report = $c->stash->{report};
     if ( $report->confirmed ) {
-        $c->forward( 'create_reporter_alert' );
+        $c->forward( 'create_related_things' );
         $c->stash->{ json_response } = { success => 1, report => $report->id };
     } else {
         $c->forward( 'send_problem_confirm_email' );
@@ -201,6 +202,10 @@ sub report_form_ajax : Path('ajax') : Args(0) {
     my $extra_titles_list = $c->cobrand->title_list($c->stash->{all_areas});
 
     my @list_of_names = map { $_->name } values %{$c->stash->{bodies}};
+    my %display_names = map {
+        my $name = $_->cobrand_name;
+        ( $_->name ne $name ) ? ( $_->name => $name ) : ();
+    } values %{$c->stash->{bodies}};
     my $contribute_as = {};
     if ($c->user_exists) {
         my @bodies = keys %{$c->stash->{bodies}};
@@ -227,6 +232,7 @@ sub report_form_ajax : Path('ajax') : Args(0) {
         category        => $category,
         extra_name_info => $extra_name_info,
         titles_list     => $extra_titles_list,
+        %display_names ? (display_names   => \%display_names) : (),
         %$contribute_as ? (contribute_as => $contribute_as) : (),
         $top_message ? (top_message => $top_message) : (),
         unresponsive => $c->stash->{unresponsive}->{ALL} || '',
@@ -247,42 +253,54 @@ sub category_extras_ajax : Path('category_extras') : Args(0) {
     $c->forward('setup_report_extra_fields');
 
     $c->forward('check_for_category');
-    my $category = $c->stash->{category} || "";
-    $category = '' if $category eq _('-- Pick a category --');
-
-    $c->stash->{json_response} = $c->forward('by_category_ajax_data', [ 'one', $category ]);
+    $c->stash->{json_response} = $c->forward('by_category_ajax_data', [ 'one', $c->stash->{category} ]);
     $c->forward('send_json_response');
 }
 
 sub by_category_ajax_data : Private {
     my ($self, $c, $type, $category) = @_;
 
-    my $generate;
-    if (($c->stash->{category_extras}->{$category} && @{ $c->stash->{category_extras}->{$category} } >= 1) or
-            $c->stash->{unresponsive}->{$category} or $c->stash->{report_extra_fields}) {
-        $generate = 1;
+    my @bodies;
+    my $bodies = [];
+    my $vars = {};
+    if ($category) {
+        $bodies = $c->forward('contacts_to_bodies', [ $category ]);
+        @bodies = @$bodies;
+        $vars->{list_of_names} = [ map { $_->cobrand_name } @bodies ];
+    } else {
+        @bodies = values %{$c->stash->{bodies_to_list}};
     }
 
-    my $bodies = $c->forward('contacts_to_bodies', [ $category ]);
-    my $list_of_names = [ map { $_->name } ($category ? @$bodies : values %{$c->stash->{bodies_to_list}}) ];
-    my $vars = {
-        $category ? (list_of_names => $list_of_names) : (),
-    };
-
+    my $non_public = $c->stash->{non_public_categories}->{$category};
+    my $anon_button = ($c->cobrand->allow_anonymous_reports($category) eq 'button');
     my $body = {
-        bodies => $list_of_names,
+        bodies => [ map { $_->name } @bodies ],
+        $non_public ? ( non_public => JSON->true ) : (),
+        $anon_button ? ( allow_anonymous => JSON->true ) : (),
     };
 
-    if ($generate) {
+    if ( $c->stash->{category_extras}->{$category} && @{ $c->stash->{category_extras}->{$category} } >= 1 ) {
+        my $disable_form = $c->forward('disable_form_message');
+        $body->{disable_form} = $disable_form if %$disable_form;
+
+        # Remove the full disable_form extras, as included in disable form output
+        @{$c->stash->{category_extras}->{$c->stash->{category}}} = grep {
+            !$_->{disable_form} || $_->{disable_form} ne 'true'
+        } @{$c->stash->{category_extras}->{$c->stash->{category}}};
+    }
+
+    if (($c->stash->{category_extras}->{$category} && @{ $c->stash->{category_extras}->{$category} } >= 1) or
+            $c->stash->{unresponsive}->{$category} or $c->stash->{report_extra_fields}) {
         $body->{category_extra} = $c->render_fragment('report/new/category_extras.html', $vars);
         $body->{category_extra_json} = $c->forward('generate_category_extra_json');
-
     }
 
     my $unresponsive = $c->stash->{unresponsive}->{$category};
     $unresponsive ||= $c->stash->{unresponsive}->{ALL} || '' if $type eq 'one';
 
     # unresponsive must return empty string if okay, as that's what mobile app checks
+    # councils_text.html must be rendered if it differs from the default output,
+    # which currently means for unresponsive and non_public categories.
     if ($type eq 'one' || ($type eq 'all' && $unresponsive)) {
         $body->{unresponsive} = $unresponsive;
         # Check for no bodies here, because if there are any (say one
@@ -292,8 +310,39 @@ sub by_category_ajax_data : Private {
             $body->{councils_text_private} = $c->render_fragment( 'report/new/councils_text_private.html');
         }
     }
+    if ($non_public) {
+        $body->{councils_text} = $c->render_fragment( 'report/new/councils_text.html', $vars);
+    }
 
     return $body;
+}
+
+sub disable_form_message : Private {
+    my ( $self, $c ) = @_;
+
+    my %out;
+
+    # do not set disable form message if they are a staff user
+    return \%out if $c->cobrand->call_hook('staff_ignore_form_disable_form');
+
+    foreach (@{$c->stash->{category_extras}->{$c->stash->{category}}}) {
+        if ($_->{disable_form} && $_->{disable_form} eq 'true') {
+            $out{all} .= ' ' if $out{all};
+            $out{all} .= $_->{description};
+        } elsif (($_->{variable} || '') eq 'true' && @{$_->{values} || []}) {
+            my %category;
+            foreach my $opt (@{$_->{values}}) {
+                if ($opt->{disable}) {
+                    $category{message} = $opt->{disable_message} || $_->{datatype_description};
+                    $category{code} = $_->{code};
+                    push @{$category{answers}}, $opt->{key};
+                }
+            }
+            push @{$out{questions}}, \%category if %category;
+        }
+    }
+
+    return \%out;
 }
 
 =head2 report_import
@@ -309,8 +358,7 @@ sub report_import : Path('/import') {
     # If this is not a POST then just print out instructions for using page
     return unless $c->req->method eq 'POST';
 
-    # anything else we return is plain text
-    $c->res->content_type('text/plain; charset=utf-8');
+    my $format = $c->get_param('web') ? 'web' : 'text';
 
     my %input =
       map { $_ => $c->get_param($_) || '' } (
@@ -363,8 +411,14 @@ sub report_import : Path('/import') {
 
     # if we have errors then we should bail out
     if (@errors) {
-        my $body = join '', map { "ERROR:$_\n" } @errors;
-        $c->res->body($body);
+        if ($format eq 'web') {
+            $c->stash->{input} = \%input;
+            $c->stash->{errors} = \@errors;
+        } else {
+            my $body = join '', map { "ERROR:$_\n" } @errors;
+            $c->res->content_type('text/plain; charset=utf-8');
+            $c->res->body($body);
+        }
         return;
     }
 
@@ -420,13 +474,13 @@ sub report_import : Path('/import') {
 
     $c->send_email( 'partial.txt', { to => $report->user->email, } );
 
-    if ( $c->get_param('web') ) {
-        $c->res->content_type('text/html; charset=utf-8');
+    if ($format eq 'web') {
         $c->stash->{template}   = 'email_sent.html';
         $c->stash->{email_type} = 'problem';
-        return 1;
+    } else {
+        $c->res->content_type('text/plain; charset=utf-8');
+        $c->res->body('SUCCESS');
     }
-    $c->res->body('SUCCESS');
     return 1;
 }
 
@@ -476,9 +530,11 @@ sub initialize_report : Private {
               ->first;
 
             if ($report) {
-                # log the problem creation user in to the site
-                $c->authenticate( { email => $report->user->email, email_verified => 1 },
-                    'no_password' );
+                # log the problem creation user in to the site, if not already logged in
+                if (!$c->user_exists || $c->user->email ne $report->user->email) {
+                    $c->authenticate( { email => $report->user->email, email_verified => 1 },
+                        'no_password' );
+                }
 
                 # save the token to delete at the end
                 $c->stash->{partial_token} = $token if $report;
@@ -637,12 +693,12 @@ sub setup_categories_and_bodies : Private {
     my @bodies = $c->model('DB::Body')->active->for_areas(keys %$all_areas)->all;
     my %bodies = map { $_->id => $_ } @bodies;
 
-    my $contacts                #
-      = $c                      #
-      ->model('DB::Contact')    #
-      ->active
-      ->search( { 'me.body_id' => [ keys %bodies ] }, { prefetch => 'body' } );
-    my @contacts = $c->cobrand->categories_restriction($contacts)->all;
+    $c->cobrand->call_hook(munge_report_new_bodies => \%bodies);
+
+    my $contacts = $c->model('DB::Contact')->for_new_reports($c, \%bodies);
+    my @contacts = $c->cobrand->categories_restriction($contacts)->all_sorted;
+
+    $c->cobrand->call_hook(munge_report_new_contacts => \@contacts);
 
     # variables to populate
     my %bodies_to_list = ();       # Bodies with categories assigned
@@ -650,6 +706,8 @@ sub setup_categories_and_bodies : Private {
     my %category_extras  = ();       # extra fields to fill in for open311
     my %category_extras_hidden =
       (); # whether all of a category's fields are hidden
+    my %category_extras_notices =
+      (); # whether all of a category's fields are simple notices and not inputs
     my %non_public_categories =
       ();    # categories for which the reports are not public
     $c->stash->{unresponsive} = {};
@@ -668,15 +726,6 @@ sub setup_categories_and_bodies : Private {
         $c->stash->{unresponsive}{$k} = { map { $_ => 1 } keys %bodies };
     }
 
-    # keysort does not appear to obey locale so use strcoll (see i18n.t)
-    @contacts = sort { strcoll( $a->category, $b->category ) } @contacts;
-
-    # Get defect types for inspectors
-    if ($c->cobrand->can('council_area_id')) {
-        my $category_defect_types = FixMyStreet::App->model('DB::DefectType')->by_categories($c->cobrand->council_area_id, @contacts);
-        $c->stash->{category_defect_types} = $category_defect_types;
-    }
-
     my %seen;
     foreach my $contact (@contacts) {
 
@@ -690,6 +739,16 @@ sub setup_categories_and_bodies : Private {
                 $category_extras_hidden{$contact->category} &&= $all_hidden;
             } else {
                 $category_extras_hidden{$contact->category} = $all_hidden;
+            }
+
+            my $all_notices = (grep {
+                ( $_->{variable} || '' ) ne 'false'
+                && !$c->cobrand->category_extra_hidden($_)
+            } @$metas) ? 0 : 1;
+            if (exists($category_extras_notices{$contact->category})) {
+                $category_extras_notices{$contact->category} &&= $all_notices;
+            } else {
+                $category_extras_notices{$contact->category} = $all_notices;
             }
         }
 
@@ -712,15 +771,17 @@ sub setup_categories_and_bodies : Private {
         push @category_options, $seen{_('Other')} if $seen{_('Other')};
     }
 
-    $c->cobrand->call_hook(munge_category_list => \@category_options, \@contacts, \%category_extras);
+    $c->cobrand->call_hook(munge_report_new_category_list => \@category_options, \@contacts, \%category_extras);
 
     # put results onto stash for display
     $c->stash->{bodies} = \%bodies;
     $c->stash->{contacts} = \@contacts;
     $c->stash->{bodies_to_list} = \%bodies_to_list;
+    $c->stash->{bodies_ids} = [ map { $_ } keys %bodies ];
     $c->stash->{category_options} = \@category_options;
     $c->stash->{category_extras}  = \%category_extras;
     $c->stash->{category_extras_hidden}  = \%category_extras_hidden;
+    $c->stash->{category_extras_notices}  = \%category_extras_notices;
     $c->stash->{non_public_categories}  = \%non_public_categories;
     $c->stash->{extra_name_info} = $first_area->{id} == COUNCIL_ID_BROMLEY ? 1 : 0;
 
@@ -736,20 +797,7 @@ sub setup_categories_and_bodies : Private {
     $c->stash->{missing_details_bodies} = \@missing_details_bodies;
     $c->stash->{missing_details_body_names} = \@missing_details_body_names;
 
-    if ( $c->cobrand->call_hook('enable_category_groups') ) {
-        my %category_groups = ();
-        for my $category (@category_options) {
-            my $group = $category->{group} // $category->get_extra_metadata('group') // '';
-            push @{$category_groups{$group}}, $category;
-        }
-
-        my @category_groups = ();
-        for my $group ( grep { $_ ne _('Other') } sort keys %category_groups ) {
-            push @category_groups, { name => $group, categories => $category_groups{$group} };
-        }
-        push @category_groups, { name => _('Other'), categories => $category_groups{_('Other')} } if ($category_groups{_('Other')});
-        $c->stash->{category_groups}  = \@category_groups;
-    }
+    $c->forward('/report/stash_category_groups', [ \@category_options ]) if $c->cobrand->enable_category_groups;
 }
 
 sub setup_report_extra_fields : Private {
@@ -794,10 +842,17 @@ sub process_user : Private {
     # Report form includes two username fields: #form_username_register and #form_username_sign_in
     $params{username} = (first { $_ } $c->get_param_list('username')) || '';
 
-    if ( $c->cobrand->allow_anonymous_reports ) {
+    my $anon_button = $c->cobrand->allow_anonymous_reports eq 'button' && $c->get_param('report_anonymously');
+    my $anon_fallback = $c->cobrand->allow_anonymous_reports eq '1' && !$c->user_exists && !$params{username};
+    if ($anon_button || $anon_fallback) {
         my $anon_details = $c->cobrand->anonymous_account;
-        $params{username} ||= $anon_details->{email};
-        $params{name} ||= $anon_details->{name};
+        my $user = $c->model('DB::User')->find_or_new({ email => $anon_details->{email} });
+        $user->name($anon_details->{name});
+        $report->user($user);
+        $report->name($user->name);
+        $c->stash->{no_reporter_alert} = 1;
+        $c->stash->{contributing_as_anonymous_user} = 1;
+        return 1;
     }
 
     # The user is already signed in. Extra bare block for 'last'.
@@ -805,9 +860,11 @@ sub process_user : Private {
         my $user = $c->user->obj;
 
         if ($c->stash->{contributing_as_another_user}) {
-            # Act as if not logged in (and it will be auto-confirmed later on)
-            $report->user(undef);
-            last;
+            if ($params{username} || $params{phone}) {
+                # Act as if not logged in (and it will be auto-confirmed later on)
+                $report->user(undef);
+                last;
+            }
         }
 
         $report->user( $user );
@@ -820,6 +877,8 @@ sub process_user : Private {
             my $name = $user->moderating_user_name;
             $report->name($name);
             $user->name($name) unless $user->name;
+            $c->stash->{no_reporter_alert} = 1;
+        } elsif ($c->stash->{contributing_as_another_user}) {
             $c->stash->{no_reporter_alert} = 1;
         }
 
@@ -854,7 +913,7 @@ sub process_user : Private {
             oauth_report => { $report->get_inflated_columns }
         };
         unless ( $c->forward( '/auth/sign_in', [ $params{username} ] ) ) {
-            $c->stash->{field_errors}->{password} = _('There was a problem with your login information. If you cannot remember your password, or do not have one, please fill in the &lsquo;No&rsquo; section of the form.');
+            $c->stash->{field_errors}->{password} = _('There was a problem with your login information. If you cannot remember your password, or do not have one, please fill in the ‘No’ section of the form.');
             return 1;
         }
         my $user = $c->user->obj;
@@ -907,12 +966,12 @@ sub process_report : Private {
         'title', 'detail', 'pc',                 #
         'detail_size',
         'may_show_name',                         #
-        'category',                              #
         'subcategory',                              #
         'partial',                               #
         'service',                               #
         'non_public',
       );
+    $params{category} = $c->stash->{category};
 
     # load the report
     my $report = $c->stash->{report};
@@ -928,6 +987,13 @@ sub process_report : Private {
         $c->stash->{contributing_as_another_user} = $user->contributing_as('another_user', $c, $c->stash->{bodies});
         $c->stash->{contributing_as_body} = $user->contributing_as('body', $c, $c->stash->{bodies});
         $c->stash->{contributing_as_anonymous_user} = $user->contributing_as('anonymous_user', $c, $c->stash->{bodies});
+    }
+    # This is also done in process_user, but is needed here for anonymous() just below
+    my $anon_button = $c->cobrand->allow_anonymous_reports($params{category}) eq 'button' && $c->get_param('report_anonymously');
+    if ($anon_button) {
+        $c->stash->{contributing_as_anonymous_user} = 1;
+        $c->stash->{contributing_as_body} = undef;
+        $c->stash->{contributing_as_another_user} = undef;
     }
 
     # set some simple bool values (note they get inverted)
@@ -971,12 +1037,20 @@ sub process_report : Private {
         }
 
         # check that we've not indicated we only want to sent to a single body
-        # and if we find a matching one then only send to that. e.g. if we clicked
-        # on a TfL road on the map.
+        # and if we find a matching one then only send to that.
         my $body_string = do {
             if (my $single_body_only = $c->get_param('single_body_only')) {
                 my $body = $c->model('DB::Body')->search({ name => $single_body_only })->first;
-                $body ? $body->id : '-1';
+                if ($body) {
+                    # Drop the contacts down to those in this body
+                    # (potentially none for e.g. Highways England)
+                    # so that set_report_extras doesn't error when
+                    # there are 'missing' extra fields
+                    @contacts = grep { $_->body->id == $body->id } @contacts;
+                    $body->id;
+                } else {
+                    '-1';
+                }
             } else {
                 my $contact_options = {};
                 $contact_options->{do_not_send} = [ $c->get_param_list('do_not_send', 1) ];
@@ -1065,18 +1139,26 @@ sub contacts_to_bodies : Private {
     [ map { $_->body } @contacts ];
 }
 
+sub setup_report_extras : Private {
+    my ($self, $c) = @_;
+
+    # report_meta is used by the templates to fill in the extra field values
+    my $extra = $c->stash->{report}->get_extra_fields;
+    $c->stash->{report_meta} = { map { 'x' . $_->{name} => $_ } @$extra };
+}
+
 sub set_report_extras : Private {
     my ($self, $c, $contacts, $param_prefix) = @_;
 
     $param_prefix ||= "";
-    my @metalist = map { [ $_->get_metadata_for_input, $param_prefix ] } @$contacts;
+    my @metalist = map { [ $_->get_metadata_for_storage, $param_prefix ] } @$contacts;
     push @metalist, map { [ $_->get_extra_fields, "extra[" . $_->id . "]" ] } @{$c->stash->{report_extra_fields}};
 
     my @extra;
     foreach my $item (@metalist) {
         my ($metas, $param_prefix) = @$item;
         foreach my $field ( @$metas ) {
-            if ( lc( $field->{required} ) eq 'true' && !$c->cobrand->category_extra_hidden($field)) {
+            if ( lc( $field->{required} || '' ) eq 'true' && !$c->cobrand->category_extra_hidden($field)) {
                 unless ( $c->get_param($param_prefix . $field->{code}) ) {
                     $c->stash->{field_errors}->{ 'x' . $field->{code} } = _('This information is required');
                 }
@@ -1112,12 +1194,13 @@ sub check_for_errors : Private {
     $c->stash->{field_errors} ||= {};
     my %field_errors = $c->cobrand->report_check_for_errors( $c );
 
+    my $report = $c->stash->{report};
+
     # Zurich, we don't care about title or name
     # There is no title, and name is optional
     if ( $c->cobrand->moniker eq 'zurich' ) {
         delete $field_errors{title};
         delete $field_errors{name};
-        my $report = $c->stash->{report};
         $report->title( Utils::cleanup_text( substr($report->detail, 0, 25) ) );
 
         # We only want to validate the phone number web requests (where the
@@ -1137,8 +1220,13 @@ sub check_for_errors : Private {
         delete $field_errors{name};
     }
 
+    # If we're making an anonymous report, we do not care about the name field
+    if ( $c->stash->{contributing_as_anonymous_user} ) {
+        delete $field_errors{name};
+    }
+
     # if using social login then we don't care about other errors
-    $c->stash->{is_social_user} = $c->get_param('facebook_sign_in') || $c->get_param('twitter_sign_in');
+    $c->stash->{is_social_user} = $c->get_param('social_sign_in') ? 1 : 0;
     if ( $c->stash->{is_social_user} ) {
         delete $field_errors{name};
         delete $field_errors{username};
@@ -1162,9 +1250,8 @@ sub check_for_errors : Private {
 
     if ( $c->cobrand->allow_anonymous_reports ) {
         my $anon_details = $c->cobrand->anonymous_account;
-        my $report = $c->stash->{report};
         $report->user->email(undef) if $report->user->email eq $anon_details->{email};
-        $report->name(undef) if $report->name eq $anon_details->{name};
+        $report->name(undef) if $report->name && $report->name eq $anon_details->{name};
     }
 
     return;
@@ -1180,10 +1267,8 @@ sub tokenize_user : Private {
         password => $report->user->password,
         title => $report->user->title,
     };
-    $c->stash->{token_data}{facebook_id} = $c->session->{oauth}{facebook_id}
-        if $c->get_param('oauth_need_email') && $c->session->{oauth}{facebook_id};
-    $c->stash->{token_data}{twitter_id} = $c->session->{oauth}{twitter_id}
-        if $c->get_param('oauth_need_email') && $c->session->{oauth}{twitter_id};
+    $c->forward('/auth/set_oauth_token_data', [ $c->stash->{token_data} ])
+        if $c->get_param('oauth_need_email');
 }
 
 sub send_problem_confirm_email : Private {
@@ -1278,7 +1363,7 @@ sub process_confirmation : Private {
     );
 
     # Subscribe problem reporter to email updates
-    $c->forward( '/report/new/create_reporter_alert' );
+    $c->forward( '/report/new/create_related_things' );
 
     # log the problem creation user in to the site
     if ( $data->{name} || $data->{password} ) {
@@ -1291,7 +1376,21 @@ sub process_confirmation : Private {
         for (qw(name title facebook_id twitter_id)) {
             $problem->user->$_( $data->{$_} ) if $data->{$_};
         }
+        $problem->user->add_oidc_id($data->{oidc_id}) if $data->{oidc_id};
+        $problem->user->extra({
+            %{ $problem->user->get_extra() },
+            %{ $data->{extra} }
+        }) if $data->{extra};
+
         $problem->user->update;
+
+        # Make sure extra oauth state is restored, if applicable
+        foreach (qw/logout_redirect_uri change_password_uri/) {
+            if ($data->{$_}) {
+                $c->session->{oauth} ||= ();
+                $c->session->{oauth}{$_} = $data->{$_};
+            }
+        }
     }
     if ($problem->user->email_verified) {
         $c->authenticate( { email => $problem->user->email, email_verified => 1 }, 'no_password' );
@@ -1351,11 +1450,7 @@ sub save_user_and_report : Private {
         $c->stash->{detach_to} = '/report/new/oauth_callback';
         $c->stash->{detach_args} = [$token->token];
 
-        if ( $c->get_param('facebook_sign_in') ) {
-            $c->detach('/auth/social/facebook_sign_in');
-        } elsif ( $c->get_param('twitter_sign_in') ) {
-            $c->detach('/auth/social/twitter_sign_in');
-        }
+        $c->forward('/auth/social/handle_sign_in') if $c->get_param('social_sign_in');
     }
 
     # Save or update the user if appropriate
@@ -1373,6 +1468,13 @@ sub save_user_and_report : Private {
         $report->confirm();
     } elsif ($c->stash->{contributing_as_anonymous_user}) {
         $report->set_extra_metadata( contributed_as => 'anonymous_user' );
+        if ( $c->user_exists && $c->user->from_body ) {
+            # If a staff user has clicked the 'report anonymously' button then
+            # there would be no record of who that staff member was as we've
+            # used the cobrand's anonymous_account for the report. In this case
+            # record the staff user ID in the report metadata.
+            $report->set_extra_metadata( contributed_by => $c->user->id );
+        }
         $report->confirm();
     } elsif ( !$report->user->in_storage ) {
         # User does not exist.
@@ -1450,9 +1552,61 @@ sub generate_map : Private {
 sub check_for_category : Private {
     my ( $self, $c ) = @_;
 
-    $c->stash->{category} = $c->get_param('category');
+    my $category = $c->get_param('category') || $c->stash->{report}->category || '';
+    $category = '' if $category eq _('Loading...') || $category eq _('-- Pick a category --');
+    # Just check to see if the filter had an option
+    $category ||= $c->get_param('filter_category') || '';
+    $c->stash->{category} = $category;
 
-    return 1;
+    # Bit of a copy of set_report_extras, because we need the results here, but
+    # don't want to run all of that fn until later as it e.g. alters field
+    # errors at that point. Also, the report might already have some answers in
+    # too if e.g. gone via social login... TODO Improve this?
+    my $extra = $c->stash->{report}->get_extra_fields;
+    my %current = map { $_->{name} => $_ } @$extra;
+
+    my @contacts = grep { $_->category eq $category } @{$c->stash->{contacts}};
+    my @metalist = map { @{$_->get_metadata_for_storage} } @contacts;
+    my @extra;
+    foreach my $field (@metalist) {
+        push @extra, {
+            name => $field->{code},
+            description => $field->{description},
+            value => $c->get_param($field->{code}) || $current{$field->{code}}{value} || '',
+        };
+    }
+    $c->stash->{report}->set_extra_fields( @extra );
+
+    # Work out if the selected category (or category extra question answer) should lead
+    # to a message being shown not to use the form
+    if ( $c->stash->{category_extras}->{$category} && @{ $c->stash->{category_extras}->{$category} } >= 1 ) {
+        my $disable_form_messages = $c->forward('disable_form_message');
+        if ($disable_form_messages->{all}) {
+            $c->stash->{disable_form_message} = $disable_form_messages->{all};
+        } elsif (my $questions = $disable_form_messages->{questions}) {
+            foreach my $question (@$questions) {
+                my $answer = $c->get_param($question->{code});
+                my $message = $question->{message};
+                if ($answer) {
+                    foreach (@{$question->{answers}}) {
+                        if ($answer eq $_) {
+                            $c->stash->{disable_form_message} = $message;
+                        }
+                    }
+                }
+            }
+            if (!$c->stash->{disable_form_message}) {
+                $c->stash->{have_disable_qn_to_answer} = 1;
+            }
+        }
+    }
+
+    if ($c->get_param('submit_category_part_only') || $c->stash->{disable_form_message}) {
+        # If we've clicked the first-part category button (no-JS only probably),
+        # or the category submitted will be showing a disabled form message,
+        # we only want to reshow the form
+        $c->stash->{force_form_not_submitted} = 1;
+    }
 }
 
 =head2 redirect_or_confirm_creation
@@ -1469,8 +1623,9 @@ sub redirect_or_confirm_creation : Private {
     # If confirmed send the user straight there.
     if ( $report->confirmed ) {
         # Subscribe problem reporter to email updates
-        $c->forward( 'create_reporter_alert' );
+        $c->forward( 'create_related_things' );
         if ($c->stash->{contributing_as_another_user} && $report->user->email
+            && $report->user->id != $c->user->id
             && !$c->cobrand->report_sent_confirmation_email) {
                 $c->send_email( 'other-reported.txt', {
                     to => [ [ $report->user->email, $report->name ] ],
@@ -1491,7 +1646,7 @@ sub redirect_or_confirm_creation : Private {
         return 1;
     }
 
-    # Superusers using 2FA can not log in by code
+    # People using 2FA can not log in by code
     $c->detach( '/page_error_403_access_denied', [] ) if $report->user->has_2fa;
 
     # otherwise email or text a confirm token to them.
@@ -1510,12 +1665,51 @@ sub redirect_or_confirm_creation : Private {
     $c->log->info($report->user->id . ' created ' . $report->id . ", $thing sent, " . ($c->stash->{token_data}->{password} ? 'password set' : 'password not set'));
 }
 
-sub create_reporter_alert : Private {
+sub create_related_things : Private {
     my ( $self, $c ) = @_;
 
-    return if $c->stash->{no_reporter_alert};
-
     my $problem = $c->stash->{report};
+
+    # If there is a special template, create a comment using that
+    foreach my $body (values %{$problem->bodies}) {
+        my $user = $body->comment_user or next;
+
+        my %open311_conf = (
+            endpoint => $body->endpoint || '',
+            api_key => $body->api_key || '',
+            jurisdiction => $body->jurisdiction || '',
+            extended_statuses => $body->send_extended_statuses,
+        );
+
+        my $cobrand = $body->get_cobrand_handler;
+        $cobrand->call_hook(open311_config_updates => \%open311_conf)
+            if $cobrand;
+
+        my $open311 = Open311->new(%open311_conf);
+        my $updates = Open311::GetServiceRequestUpdates->new(
+            system_user => $user,
+            current_open311 => $open311,
+            current_body => $body,
+            blank_updates_permitted => 1,
+        );
+
+        my $description = $updates->comment_text_for_request({}, $problem, 'confirmed', 'dummy', '', '');
+        next unless $description;
+
+        my $request = {
+            service_request_id => $problem->id,
+            update_id => 'auto-internal',
+            comment_time => DateTime->now,
+            status => 'open',
+            description => $description,
+        };
+        $updates->process_update($request, $problem);
+    }
+
+    # And now the reporter alert
+    return if $c->stash->{no_reporter_alert};
+    return if $c->cobrand->call_hook('suppress_reporter_alerts');
+
     my $alert = $c->model('DB::Alert')->find_or_create( {
         user         => $problem->user,
         alert_type   => 'new_updates',
@@ -1576,12 +1770,24 @@ sub generate_category_extra_json : Private {
     my $false = JSON->false;
 
     my @fields = map {
-        {
-            %$_,
-            required => $_->{required} eq "true" ? $true : $false,
-            variable => $_->{variable} eq "true" ? $true : $false,
-            order => int($_->{order}),
+        my %data = %$_;
+
+        # Mobile app still looks in datatype_description
+        if (($_->{variable} || '') eq 'true' && @{$_->{values} || []}) {
+            foreach my $opt (@{$_->{values}}) {
+                if ($opt->{disable}) {
+                    my $message = $opt->{disable_message} || $_->{datatype_description};
+                    $data{datatype_description} = $message;
+                }
+            }
         }
+
+        # Remove unneeded
+        delete $data{$_} for qw(datatype protected variable order disable_form);
+        delete $data{datatype_description} unless $data{datatype_description};
+
+        $data{required} = ($_->{required} || '') eq "true" ? $true : $false;
+        \%data;
     } @{ $c->stash->{category_extras}->{$c->stash->{category}} };
 
     return \@fields;

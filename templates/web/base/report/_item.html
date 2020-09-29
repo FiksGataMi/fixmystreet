@@ -22,15 +22,23 @@
 [% IF shortlist %]
     [% item_extra_class = "item-list__item--indented item-list__item--act-and-sort" %]
     [% item_action = BLOCK %]
-        [% item_action %]
+        [% item_action | safe %]
         <input type="submit" name="shortlist-up" value="[% loc('Up one') %]" title="[% loc('Up one') %]" class="item-list__item__shortlist-up" [% IF loop.first %]disabled[% END %]>
         <input type="submit" name="shortlist-down" value="[% loc('Down one') %]" title="[% loc('Down one') %]" class="item-list__item__shortlist-down" [% IF loop.last %]disabled[% END %]>
     [% END %]
 [% END %]
 
+[%~ TRY ~%]
+  [% PROCESS 'report/_item_extra_class.html' %]
+[%~ CATCH file ~%]
+[%~ END ~%]
+
 <li class="item-list__item item-list--reports__item [% item_extra_class %]"
     data-report-id="[% problem.id | html %]" data-lastupdate="[% problem.lastupdate %]" id="report-[% problem.id | html %]">
 <a href="[% c.cobrand.relative_url_for_report( problem ) %][% problem.url %]">
+  [% TRY ~%]
+    [% PROCESS 'report/_item_photo_title.html' ~%]
+  [% CATCH file ~%]
     [% IF problem.photo %]
         <img class="img" height="60" width="90" src="[% problem.photos.first.url_fp %]" alt="">
     [% END %]
@@ -39,6 +47,8 @@
       [% CATCH file %]
         <h3 class="item-list__heading">[% problem.title | html %]</h3>
       [% END %]
+  [% END ~%]
+
     [% IF c.user.has_permission_to('report_inspect', problem.bodies_str_ids) %]
         <div class="item-list__description">[% problem.detail | html %]</div>
     [% END %]
@@ -98,12 +108,12 @@
     [%# We don't want to output shortlist on report page (in duplicate list) %]
   [% ELSIF page == 'around' ~%]
     [%# The around page list is already contained within the new report form %]
-    [% item_action.replace('("shortlist-[^"]*)', '$1-' _ problem.id) %]
+    [% item_action.replace('("shortlist-[^"]*)', '$1-' _ problem.id) | safe %]
   [% ELSE ~%]
     <form method="post" action="/my/planned/change">
         <input type="hidden" name="id" value="[% problem.id %]">
         <input type="hidden" name="token" value="[% csrf_token %]">
-        [% item_action %]
+        [% item_action | safe %]
     </form>
   [% END ~%]
 [% END %]

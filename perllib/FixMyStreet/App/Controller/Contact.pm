@@ -7,6 +7,7 @@ BEGIN { extends 'Catalyst::Controller'; }
 use MIME::Base64;
 use mySociety::EmailUtil;
 use FixMyStreet::Email;
+use FixMyStreet::Template::SafeString;
 
 =head1 NAME
 
@@ -26,9 +27,13 @@ Functions to run on both GET and POST contact requests.
 
 sub auto : Private {
     my ($self, $c) = @_;
-    $c->forward('setup_request');
-    $c->forward('determine_contact_type');
     $c->forward('/auth/get_csrf_token');
+}
+
+sub begin : Private {
+    my ($self, $c) = @_;
+    $c->forward('/begin');
+    $c->forward('setup_request');
 }
 
 =head2 index
@@ -39,6 +44,7 @@ Display contact us page
 
 sub index : Path : Args(0) {
     my ( $self, $c ) = @_;
+    $c->forward('determine_contact_type');
 }
 
 =head2 submit
@@ -50,6 +56,7 @@ Handle contact us form submission
 sub submit : Path('submit') : Args(0) {
     my ( $self, $c ) = @_;
 
+    $c->forward('determine_contact_type');
     $c->res->redirect( '/contact' ) and return unless $c->req->method eq 'POST';
 
     $c->go('index') unless $c->forward('validate');
@@ -87,11 +94,11 @@ sub determine_contact_type : Private {
     } elsif ($id) {
         $c->forward( '/report/load_problem_or_display_error', [ $id ] );
         if ($update_id) {
-            my $update = $c->model('DB::Comment')->search(
+            my $update = $c->cobrand->updates->search(
                 {
-                    id => $update_id,
+                    "me.id" => $update_id,
                     problem_id => $id,
-                    state => 'confirmed',
+                    "me.state" => 'confirmed',
                 }
             )->first;
 
@@ -106,7 +113,14 @@ sub determine_contact_type : Private {
             $c->stash->{rejecting_report} = 1;
         }
     } elsif ( $c->cobrand->abuse_reports_only ) {
-        $c->detach( '/page_error_404_not_found' );
+        # General enquiries replaces contact form if enabled
+        if ( $c->cobrand->can('setup_general_enquiries_stash') ) {
+            $c->res->redirect( '/contact/enquiry' );
+            $c->detach;
+            return 1;
+        } else {
+            $c->detach( '/page_error_404_not_found' );
+        }
     }
 
     return 1;
@@ -185,6 +199,17 @@ sub prepare_params_for_email : Private {
     my $base_url = $c->cobrand->base_url();
     my $admin_url = $c->cobrand->admin_base_url;
 
+    my $user = $c->cobrand->users->find( { email => $c->stash->{em} } );
+    if ( $user ) {
+        $c->stash->{user_admin_url} = $admin_url . '/users/' . $user->id;
+        $c->stash->{user_reports_admin_url} = $admin_url . '/reports?search=' . $user->email;
+
+        my $user_latest_problem = $user->latest_visible_problem();
+        if ( $user_latest_problem) {
+            $c->stash->{user_latest_report_admin_url} = $admin_url . '/report_edit/' . $user_latest_problem->id;
+        }
+    }
+
     if ( $c->stash->{update} ) {
 
         $c->stash->{problem_url} = $base_url . $c->stash->{update}->url;
@@ -229,8 +254,9 @@ generally required to stash
 sub setup_request : Private {
     my ( $self, $c ) = @_;
 
-    $c->stash->{contact_email} = $c->cobrand->contact_email;
-    $c->stash->{contact_email} =~ s/\@/&#64;/;
+    my $email = $c->cobrand->contact_email;
+    $email =~ s/\@/&#64;/;
+    $c->stash->{contact_email} = FixMyStreet::Template::SafeString->new($email);
 
     for my $param (qw/em subject message/) {
         $c->stash->{$param} = $c->get_param($param);

@@ -14,6 +14,7 @@ use Digest::MD5 qw(md5_hex);
 
 use Carp;
 use mySociety::PostcodeUtil;
+use mySociety::Random;
 
 =head1 The default cobrand
 
@@ -57,6 +58,37 @@ sub path_to_email_templates {
         FixMyStreet->path_to( 'templates', 'email', $self->moniker ),
     ];
     return $paths;
+}
+
+=item feature
+
+A helper utility to let you provide per-cobrand hooks for configuration.
+Mostly useful if running a site with multiple cobrands.
+
+=cut
+
+sub feature {
+    my ($self, $feature) = @_;
+    my $features = FixMyStreet->config('COBRAND_FEATURES');
+    return unless $features && ref $features eq 'HASH';
+    return unless $features->{$feature} && ref $features->{$feature} eq 'HASH';
+    return $features->{$feature}->{$self->moniker};
+}
+
+sub csp_config {
+    FixMyStreet->config('CONTENT_SECURITY_POLICY');
+}
+
+sub add_response_headers {
+    my $self = shift;
+    # uncoverable branch true
+    return if $self->{c}->debug;
+    if (my $csp_domains = $self->csp_config) {
+        $csp_domains = '' if $csp_domains eq '1';
+        $csp_domains = join(' ', @$csp_domains) if ref $csp_domains;
+        my $csp_nonce = $self->{c}->stash->{csp_nonce} = unpack('h*', mySociety::Random::random_bytes(16, 1));
+        $self->{c}->res->header('Content-Security-Policy', "script-src 'self' 'unsafe-inline' 'nonce-$csp_nonce' $csp_domains; object-src 'none'; base-uri 'none'")
+    }
 }
 
 =item password_minimum_length
@@ -488,6 +520,19 @@ allowing them to report them as offensive.
 
 sub allow_update_reporting { return 0; }
 
+=item updates_disallowed
+
+Returns a boolean indicating whether updates on a particular report are allowed
+or not. Default behaviour is disallowed if "closed_updates" metadata is set.
+
+=cut
+
+sub updates_disallowed {
+    my ($self, $problem) = @_;
+    return 1 if $problem->get_extra_metadata('closed_updates');
+    return 0;
+}
+
 =item geocode_postcode
 
 Given a QUERY, return LAT/LON and/or ERROR.
@@ -632,7 +677,7 @@ sub admin_pages {
     my $pages = {
          'summary' => [_('Summary'), 0],
          'timeline' => [_('Timeline'), 5],
-         'stats'  => [_('Stats'), 8],
+         'stats'  => [_('Stats'), 8.5],
     };
 
     # There are some pages that only super users can see
@@ -640,6 +685,7 @@ sub admin_pages {
         $pages->{flagged} = [ _('Flagged'), 7 ];
         $pages->{states} = [ _('States'), 8 ];
         $pages->{config} = [ _('Configuration'), 9];
+        $pages->{manifesttheme} = [ _('Manifest Theme'), 11];
         $pages->{user_import} = [ undef, undef ];
     };
     # And some that need special permissions
@@ -665,6 +711,7 @@ sub admin_pages {
     if ( $user->has_body_permission_to('user_edit') ) {
         $pages->{reports} = [ _('Reports'), 2 ];
         $pages->{users} = [ _('Users'), 6 ];
+        $pages->{roles} = [ _('Roles'), 7 ];
         $pages->{user_edit} = [ undef, undef ];
     }
     if ( $self->allow_report_extra_fields && $user->has_body_permission_to('category_edit') ) {
@@ -719,12 +766,6 @@ sub available_permissions {
             contribute_as_body => _("Create reports/updates as the council"),
             default_to_body => _("Default to creating reports/updates as the council"),
             view_body_contribute_details => _("See user detail for reports created as the council"),
-
-            # NB this permission is special in that it can be assigned to users
-            # without their from_body being set. It's included here for
-            # reference, but left commented out because it's not assigned in the
-            # same way as other permissions.
-            # trusted => _("Trusted to make reports that don't need to be inspected"),
         },
         _("Users") => {
             user_edit => _("Edit users' details/search for their reports"),
@@ -750,15 +791,32 @@ The MaPit types this site handles
 sub area_types          { FixMyStreet->config('MAPIT_TYPES') || [ 'ZZZ' ] }
 sub area_types_children { FixMyStreet->config('MAPIT_TYPES_CHILDREN') || [] }
 
-=item contact_name, contact_email
+=item fetch_area_children
+
+Fetches the children of a particular MapIt area ID that match the current
+cobrand's area_types_children type.
+
+=cut
+
+sub fetch_area_children {
+    my ($self, $area_id) = @_;
+
+    return FixMyStreet::MapIt::call('area/children', $area_id,
+        type => $self->area_types_children
+    );
+}
+
+=item contact_name, contact_email, do_not_reply_email
 
 Return the contact name or email for the cobranded version of the site (to be
-used in emails).
+used in emails). do_not_reply_email is used for emails you don't expect a reply
+to (for example, confirmation emails).
 
 =cut
 
 sub contact_name  { FixMyStreet->config('CONTACT_NAME') }
 sub contact_email { FixMyStreet->config('CONTACT_EMAIL') }
+sub do_not_reply_email { FixMyStreet->config('DO_NOT_REPLY_EMAIL') }
 
 =item abuse_reports_only
 
@@ -1042,8 +1100,10 @@ sub never_confirm_reports { 0; }
 
 =item allow_anonymous_reports
 
-If true then can have reports that are truely anonymous - i.e with no email or name. You
-need to also put details in the anonymous_account function too.
+If true then a report submission with no user details will default to the user
+given via the anonymous_account function, and create it anonymously. If set to
+'button', then this will happen only when a report_anonymously button is
+pressed in the front end, rather than whenever a username is not provided.
 
 =cut
 
@@ -1067,6 +1127,18 @@ Whether reports in state 'unconfirmed' should still be shown on the public site.
 
 sub show_unconfirmed_reports {
     0;
+}
+
+=item enable_category_groups
+
+Whether body category groups should be displayed on the new report form. If this is
+not enabled then any groups will be ignored and a flat list of categories displayed.
+
+=cut
+
+sub enable_category_groups {
+    my $self = shift;
+    return $self->feature('category_groups');
 }
 
 sub default_problem_state { 'unconfirmed' }
@@ -1137,8 +1209,7 @@ Return the default geocoder from config.
 =cut
 
 sub get_geocoder {
-    my ($self, $c) = @_;
-    return $c->config->{GEOCODER};
+    FixMyStreet->config('GEOCODER');
 }
 
 
@@ -1185,16 +1256,6 @@ sub category_extra_hidden {
     return 0;
 }
 
-=item reputation_increment_states/reputation_decrement_states
-
-Get a hashref of states that cause the reporting user's reputation to be
-incremented/decremented, if a report is changed to this state upon inspection.
-
-=cut
-
-sub reputation_increment_states { {} };
-sub reputation_decrement_states { {} };
-
 sub traffic_management_options {
     return [
         _("Yes"),
@@ -1224,7 +1285,7 @@ sub allow_report_extra_fields { 0 }
 
 sub social_auth_enabled {
     my $self = shift;
-    my $key_present = FixMyStreet->config('FACEBOOK_APP_ID') or FixMyStreet->config('TWITTER_KEY');
+    my $key_present = FixMyStreet->config('FACEBOOK_APP_ID') || FixMyStreet->config('TWITTER_KEY');
     return $key_present && !$self->call_hook("social_auth_disabled");
 }
 

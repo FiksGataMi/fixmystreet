@@ -14,8 +14,8 @@ use Memcached;
 use XML::Simple;
 use Utils;
 
-my $osmapibase    = "http://www.openstreetmap.org/api/";
-my $nominatimbase = "http://nominatim.openstreetmap.org/";
+my $osmapibase    = "https://www.openstreetmap.org/api/";
+my $nominatimbase = "https://nominatim.openstreetmap.org/";
 
 # string STRING CONTEXT
 # Looks up on Nominatim, and caches, a user-inputted location.
@@ -23,7 +23,7 @@ my $nominatimbase = "http://nominatim.openstreetmap.org/";
 # an array of matches if there are more than one. The information in the query
 # may be used to disambiguate the location in cobranded versions of the site.
 sub string {
-    my ( $s, $c ) = @_;
+    my ( $cls, $s, $c ) = @_;
 
     my $params = $c->cobrand->disambiguate_location($s);
     # Allow cobrand to fixup the user input
@@ -47,19 +47,22 @@ sub string {
         if $params->{country};
     $url .= join('&', map { "$_=$query_params{$_}" } sort keys %query_params);
 
+    $c->stash->{geocoder_url} = $url;
     my $js = FixMyStreet::Geocode::cache('osm', $url);
     if (!$js) {
         return { error => _('Sorry, we could not find that location.') };
     }
 
-    my ( $error, @valid_locations, $latitude, $longitude );
+    my ( $error, @valid_locations, $latitude, $longitude, $address );
     foreach (@$js) {
         $c->cobrand->call_hook(geocoder_munge_results => $_);
+        next unless $_->{display_name};
         ( $latitude, $longitude ) =
             map { Utils::truncate_coordinate($_) }
             ( $_->{lat}, $_->{lon} );
+        $address = $_->{display_name};
         push (@$error, {
-            address => $_->{display_name},
+            address => $address,
             icon => $_->{icon},
             latitude => $latitude,
             longitude => $longitude
@@ -67,7 +70,7 @@ sub string {
         push (@valid_locations, $_);
     }
 
-    return { latitude => $latitude, longitude => $longitude } if scalar @valid_locations == 1;
+    return { latitude => $latitude, longitude => $longitude, address => $address } if scalar @valid_locations == 1;
     return { error => $error };
 }
 

@@ -6,9 +6,9 @@
     [% INCLUDE form_as %]
   </div>
 [% ELSE %]
-  [% can_contribute_as_another_user = c.user.has_permission_to("contribute_as_another_user", bodies.keys) %]
-  [% can_contribute_as_anonymous_user = c.user.has_permission_to("contribute_as_anonymous_user", bodies.keys) %]
-  [% can_contribute_as_body = c.user.from_body AND c.user.has_permission_to("contribute_as_body", bodies.keys) %]
+  [% can_contribute_as_another_user = c.user.has_permission_to("contribute_as_another_user", bodies_ids) %]
+  [% can_contribute_as_anonymous_user = c.user.has_permission_to("contribute_as_anonymous_user", bodies_ids) %]
+  [% can_contribute_as_body = c.user.from_body AND c.user.has_permission_to("contribute_as_body", bodies_ids) %]
   [% IF can_contribute_as_another_user OR can_contribute_as_anonymous_user OR can_contribute_as_body %]
     [% INCLUDE form_as %]
   [% END %]
@@ -25,7 +25,7 @@
         <option value="another_user">[% loc('Another user') %]</option>
       [% END %]
       [% IF js || can_contribute_as_body %]
-        <option value="body" [% c.user.from_body AND ( c.user.has_body_permission_to('planned_reports') || c.user.has_body_permission_to('default_to_body') ) ? 'selected' : ''  %]>[% c.user.from_body.name %]</option>
+      <option value="body" [% c.user.from_body AND ( c.user.has_body_permission_to('planned_reports') || c.user.has_body_permission_to('default_to_body') ) ? 'selected' : ''  %]>[% c.user.from_body.cobrand_name %]</option>
       [% END %]
     </select>
 [% END %]
@@ -61,9 +61,11 @@
     <input class="form-control" type="text" value="[% report.user.email | html %]" name="email" id="form_email">
 [% END %]
 
-[% IF c.user.has_permission_to("report_inspect", bodies.keys) OR c.user.has_permission_to("report_mark_private", bodies.keys) %]
+[% IF c.user.has_permission_to("report_inspect", bodies_ids) OR c.user.has_permission_to("report_mark_private", bodies_ids) %]
     <div class="checkbox-group">
-        <input type="checkbox" name="non_public" id="form_non_public" value="1"[% ' checked' IF report.non_public %]>
+        <input type="checkbox" name="non_public" id="form_non_public" value="1"
+            [%~ ' checked' IF report.non_public OR non_public_categories.$category %]
+            [%~ ' disabled' IF non_public_categories.$category %]>
         <label class="inline" for="form_non_public">[% loc('Private') %] </label>
     </div>
 [% END %]

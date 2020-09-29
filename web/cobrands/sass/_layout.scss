@@ -11,6 +11,8 @@ $mappage-actions-width--medium: 20em;
 $header-top-border-width: 0.25em !default;
 $header-top-border: $header-top-border-width solid $primary !default;
 
+$container-max-width: 60em !default;
+
 .internal-link-fixed-header {
     display: block;
     position: relative;
@@ -551,6 +553,13 @@ body.authpage {
 #fms_pan_zoom_panup,
 #fms_pan_zoom_pandown,
 #fms_pan_zoom_panleft,
+#fms_pan_zoom_panright {
+    display: block;
+}
+
+#fms_pan_zoom_panup,
+#fms_pan_zoom_pandown,
+#fms_pan_zoom_panleft,
 #fms_pan_zoom_panright,
 #fms_pan_zoom_zoomin,
 #fms_pan_zoom_zoomout,
@@ -561,14 +570,12 @@ body.authpage {
   }
 }
 
-// push zoom back over to right
+// indent zoom to line up with pan
 #fms_pan_zoom_zoomin {
-  #{$left}: auto;
   #{$right}: 30px;
   top: 130px;
 }
 #fms_pan_zoom_zoomout {
-  #{$left}: auto;
   #{$right}: 30px;
   top: 174px;
 }
@@ -651,7 +658,7 @@ body.authpage {
     top: 50%;
     margin-top: -6px;
     #{$left}: ((16px - 6px) / 2); // horizontally centre in 16px wide parent
-    background-size: 96px 12px;
+    background-size: 108px 12px;
     @include svg-background-image('/cobrands/fixmystreet/images/map-tools');
   }
 
@@ -722,8 +729,6 @@ body.authpage {
   height: 64px;
   width: 64px;
   background-color: rgba(0, 0, 0, 0.7);
-  // Reset the base left, as zoom buttons now elsewhere
-  #{$left}: 0.5em;
 }
 
 .big-green-banner {
@@ -812,7 +817,7 @@ textarea.form-error {
 
 // More general notes
 .general-notes {
-    font-size: 0.75em;
+    font-size: 0.9em;
 }
 
 // Frontpage
@@ -824,7 +829,7 @@ textarea.form-error {
   margin: 0;
   padding: 1em;
   #front-main-container {
-    max-width: 60em;
+    max-width: $container-max-width;
     margin: 0 auto;
   }
   h2 {
@@ -837,7 +842,6 @@ textarea.form-error {
     background:none;
     overflow:hidden;
     padding-bottom: 0;
-    margin-#{$right}: 0.5em;
     label {
       margin:0.5em 0;
     }
@@ -845,24 +849,8 @@ textarea.form-error {
         margin-top: -0.25em;
     }
     div {
-      display:block;
       margin:0 auto;
       width:20em;
-      overflow:hidden;
-      input#pc {
-        display:block;
-        float: $left;
-        padding:0.25em 0.5em;
-        height:2em;
-        width:17em;
-      }
-      input#sub {
-        display:block;
-        float: $right;
-        width:3em;
-        height:2.3em;
-        padding-top:0.2em;
-      }
     }
   }
   a {

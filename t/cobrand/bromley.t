@@ -169,7 +169,7 @@ for my $test (
         like $body, qr/This update will be sent to Bromley Council/i, "Email indicates problem will be sent to Bromley";
         unlike $body, qr/Note that we do not send updates to/i, "Email does not say updates aren't sent to Bromley";
 
-        my $unreg_user = FixMyStreet::App->model( 'DB::User' )->find( { email => 'unregistered@example.com' } );
+        my $unreg_user = FixMyStreet::DB->resultset('User')->find( { email => 'unregistered@example.com' } );
 
         ok $unreg_user, 'found user';
 
@@ -233,10 +233,11 @@ subtest 'check heatmap page' => sub {
     FixMyStreet::override_config {
         ALLOWED_COBRANDS => 'bromley',
         MAPIT_URL => 'http://mapit.uk/',
+        COBRAND_FEATURES => { category_groups => { bromley => 1 }, heatmap => { bromley => 1 } },
     }, sub {
         $mech->log_in_ok($user->email);
-        $mech->get_ok('/about/heatmap?end_date=2018-12-31');
-        $mech->get_ok('/about/heatmap?filter_category=RED&ajax=1');
+        $mech->get_ok('/dashboard/heatmap?end_date=2018-12-31');
+        $mech->get_ok('/dashboard/heatmap?filter_category=RED&ajax=1');
     };
 };
 

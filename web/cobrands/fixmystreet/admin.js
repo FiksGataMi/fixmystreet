@@ -80,22 +80,30 @@ $(function(){
         $("form#user_edit .js-user-categories").toggle(show_area);
     });
 
-    // On category edit page, hide the reputation input if inspection isn't required
-    $("form#category_edit #inspection_required").change(function() {
-        var $p = $("form#category_edit #reputation_threshold").closest("p");
-        var $hint = $p.prevUntil().first();
-        if (this.checked) {
-            $p.removeClass("hidden");
-            if ($hint.length) {
-                $hint.removeClass("hidden");
-            }
+    $('form#user_edit select#roles').change(function() {
+        var $perms = $('.permissions-checkboxes');
+        if ($(this).val()) {
+            var selected_perms = {};
+            $(this).find(':selected').each(function() {
+                $.each($(this).data('permissions'), function(i, p) {
+                    selected_perms['permissions[' + p + ']'] = 1;
+                });
+            });
+            $perms.css('color', '#666');
+            $perms.find('a').css('color', '#666');
+            $perms.find('input').each(function() {
+                this.checked = selected_perms[this.name] || false;
+            });
+            $perms.find('input').prop('disabled', true);
         } else {
-            $p.addClass("hidden");
-            if ($hint.length) {
-                $hint.addClass("hidden");
-            }
+            $perms.css('color', '');
+            $perms.find('a').css('color', '');
+            $perms.find('input').each(function() {
+                this.checked = this.hasAttribute('checked');
+            });
+            $perms.find('input').prop('disabled', false);
         }
-    });
+    }).change();
 
     // Bits for the report extra fields form builder:
 
@@ -106,81 +114,88 @@ $(function(){
         $(".js-extra-fields-ui").removeClass("hidden-js");
     });
 
-    // If type is changed to 'singlevaluelist' show the options list
-    $(".js-metadata-items").on("change", ".js-metadata-item-type", function() {
-        var $this = $(this);
-        var shown = $this.val() === 'singlevaluelist';
-        var $list = $this.closest(".js-metadata-item").find('.js-metadata-options');
-        $list.toggle(shown);
-    });
-    // call immediately to perform page setup
-    $(".js-metadata-item-type").change();
-
-    // Options can be removed by clicking the 'remove' button
-    $(".js-metadata-items").on("click", ".js-metadata-option-remove", function(e) {
+    // For "parent categories"
+    $(".js-group-item-add").on("click", function(e) {
         e.preventDefault();
-        var $this = $(this);
-        var $item = $this.closest(".js-metadata-item");
-        $this.closest('li').remove();
-        return true;
-    });
-
-    // New options can be added by clicking the appropriate button
-    $(".js-metadata-items").on("click", ".js-metadata-option-add", function(e) {
-        e.preventDefault();
-        var $ul = $(this).closest("ul");
-        var $template_option = $ul.find(".js-metadata-option-template");
-        var $new_option = $template_option.clone();
-        $new_option.removeClass("hidden-js js-metadata-option-template");
-        $new_option.show();
-        $new_option.insertBefore($template_option);
-        $new_option.find("input").first().focus();
-        renumber_metadata_options($(this).closest(".js-metadata-item"));
-        return true;
-    });
-
-    // Fields can be added/removed
-    $(".js-metadata-item-add").on("click", function(e) {
-        e.preventDefault();
-        var $template_item = $(".js-metadata-items .js-metadata-item-template");
+        var $template_item = $(".js-group-item-template");
         var $new_item = $template_item.clone();
-        $new_item.data('index', Math.max.apply(
-            null,
-            $(".js-metadata-item").map(function() {
-                return $(this).data('index');
-            }).get()
-        ) + 1);
-        renumber_metadata_fields($new_item);
-        $new_item.removeClass("hidden-js js-metadata-item-template");
-        $new_item.show();
+        $new_item.removeClass("hidden-js js-group-item-template");
         $new_item.insertBefore($template_item);
-        $new_item.find("input").first().focus();
-        return true;
-    });
-    $(".js-metadata-items").on("click", ".js-metadata-item-remove", function(e) {
-        e.preventDefault();
-        $(this).closest(".js-metadata-item").remove();
+        $new_item.focus();
         return true;
     });
 
-    function renumber_metadata_fields($item) {
-        var item_index = $item.data("index");
-        $item.find("[data-field-name]").each(function(i) {
-            var $input = $(this);
-            var prefix = "metadata["+item_index+"].";
-            var name = prefix + $input.data("fieldName");
-            $input.attr("name", name);
+    $('.js-metadata-item-add').on('click', function(){
+        var $container = $(this).prevAll('.js-metadata-items');
+        var i = $container.children().length + 1;
+        var html = $('#js-template-extra-metadata-item').html().replace(/9999/g, i);
+        $container.append(html);
+        fixmystreet.set_up.toggle_visibility();
+        reloadSortableMetadataItems();
+    });
+
+    $('.js-metadata-items').on('click', '.js-metadata-item-remove', function(){
+        $(this).parents('.js-metadata-item').remove();
+    }).on('change', '.js-metadata-item', updateMetadataItemTitle);
+
+    var items = sortable('.js-metadata-items', {
+        forcePlaceholderSize: true,
+        handle: '.js-metadata-item-header-grab',
+        placeholder: '<div class="extra-metadata-item-placeholder"></div>'
+    });
+    if (items.length) {
+        items[0].addEventListener('sortupdate', function(e) {
+            $(e.detail.destination.items).each(function(i){
+                $(this).find('.js-sort-order input').val(i);
+            });
         });
+    }
+    $('.js-sort-order').addClass('hidden-js');
+
+    function reloadSortableMetadataItems(){
+        sortable('.js-metadata-items', 'reload');
+        $('.js-sort-order').addClass('hidden-js');
     }
 
-    function renumber_metadata_options($item) {
-        var item_index = $item.data("index");
-        $item.find(".js-metadata-option").each(function(i) {
-            var $li = $(this);
-            var prefix = "metadata["+item_index+"].values["+i+"]";
-            $li.find(".js-metadata-option-key").attr("name", prefix+".key");
-            $li.find(".js-metadata-option-name").attr("name", prefix+".name");
-        });
+    $('.js-metadata-item').each(updateMetadataItemTitle);
+
+    function updateMetadataItemTitle(){
+        var $title = $(this).find('.js-metadata-item-header-title');
+        var defaultTitle = $title.attr('data-default');
+        var html = '<strong>' + defaultTitle + '</strong>';
+        var code = $(this).find('input[name$=".code"]').val();
+        if ( code ) {
+            html = '<strong>' + code + '</strong>';
+            var behaviour = $(this).find('input[name$=".behaviour"]:checked');
+            if ( behaviour.length ) {
+                html += ' / ' + behaviour.val();
+            }
+            var description = $(this).find('textarea[name$=".description"]').val();
+            if ( description && (behaviour.val() == 'question' || behaviour.val() == 'notice') ) {
+                html += ' / ' + description.substring(0, 50);
+            }
+        }
+        $title.html(html);
     }
+
+    $('.js-metadata-items').on('click', '.js-metadata-option-add', function(){
+        var $container = $(this).prevAll('.js-metadata-options');
+        var i = $(this).parents('.js-metadata-item').attr('data-i');
+        var j = $container.children().length + 1;
+        var html = $('#js-template-extra-metadata-option').html().replace(/9999/g, i).replace(/8888/g, j);
+        $container.append(html);
+        fixmystreet.set_up.toggle_visibility();
+    });
+
+    $('.js-metadata-items').on('click', '.js-metadata-option-remove', function(){
+        $(this).parents('.js-metadata-option').remove();
+    });
+
+    // On the manifest theme editing page we have tickboxes for deleting individual
+    // icons - ticking one of these should grey out that row to indicate it will be
+    // deleted upon form submission.
+    $("input[name=delete_icon]").change(function() {
+        $(this).closest("tr").toggleClass("is-deleted", this.checked);
+    });
 });
 

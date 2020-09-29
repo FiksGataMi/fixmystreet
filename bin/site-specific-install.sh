@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # Set this to the version we want to check out
-VERSION=${VERSION_OVERRIDE:-v2.6}
+VERSION=${VERSION_OVERRIDE:-v3.0.1}
 
 PARENT_SCRIPT_URL=https://github.com/mysociety/commonlib/blob/master/bin/install-site.sh
 
@@ -31,7 +31,7 @@ misuse() {
 [ -z "$INSTALL_POSTFIX" ] && misuse INSTALL_POSTFIX
 
 add_locale cy_GB
-add_locale nb_NO
+add_locale sv_SE
 add_locale de_CH
 
 if [ $INSTALL_POSTFIX = true ]; then

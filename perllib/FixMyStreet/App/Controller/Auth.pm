@@ -44,13 +44,12 @@ sub general : Path : Args(0) {
 
     # decide which action to take
     $c->detach('code_sign_in') if $clicked_sign_in_by_code || ($data_email && !$data_password);
-    if (!$data_username && !$data_password && !$data_email) {
-        $c->detach('social/facebook_sign_in') if $c->get_param('facebook_sign_in');
-        $c->detach('social/twitter_sign_in') if $c->get_param('twitter_sign_in');
+    if (!$data_username && !$data_password && !$data_email && $c->get_param('social_sign_in')) {
+        $c->forward('social/handle_sign_in');
     }
 
-       $c->forward( 'sign_in', [ $data_username ] )
-    && $c->detach( 'redirect_on_signin', [ $c->get_param('r') ] );
+    $c->forward( 'sign_in', [ $data_username ] )
+        && $c->detach( 'redirect_on_signin', [ $c->get_param('r') ] );
 
 }
 
@@ -66,6 +65,25 @@ sub forgot : Path('forgot') : Args(0) {
     $c->stash->{template} = 'auth/create.html';
     return unless $c->req->method eq 'POST';
     $c->detach('code_sign_in');
+}
+
+sub expired : Path('expired') : Args(0) {
+    my ( $self, $c ) = @_;
+
+    $c->detach('/page_error_403_access_denied', []) unless $c->user_exists;
+
+    my $expiry = $c->cobrand->call_hook('password_expiry');
+    $c->detach('/page_error_403_access_denied', []) unless $expiry;
+
+    my $last_change = $c->user->get_extra_metadata('last_password_change') || 0;
+    my $midnight = int(time()/86400)*86400;
+    my $expired = $last_change + $expiry < $midnight;
+    $c->detach('/page_error_403_access_denied', []) unless $expired;
+
+    $c->stash->{expired_password} = 1;
+    $c->stash->{template} = 'auth/create.html';
+    return unless $c->req->method eq 'POST';
+    $c->detach('code_sign_in', [ $c->user->email ]);
 }
 
 sub authenticate : Private {
@@ -122,9 +140,9 @@ they come back with a token (which contains the email/phone).
 =cut
 
 sub code_sign_in : Private {
-    my ( $self, $c ) = @_;
+    my ( $self, $c, $override_username ) = @_;
 
-    my $username = $c->stash->{username} = $c->get_param('username') || '';
+    my $username = $c->stash->{username} = $override_username || $c->get_param('username') || '';
 
     my $parsed = FixMyStreet::SMS->parse_username($username);
 
@@ -180,10 +198,13 @@ sub email_sign_in : Private {
         name => $c->get_param('name'),
         password => $user->password,
     };
-    $token_data->{facebook_id} = $c->session->{oauth}{facebook_id}
-        if $c->get_param('oauth_need_email') && $c->session->{oauth}{facebook_id};
-    $token_data->{twitter_id} = $c->session->{oauth}{twitter_id}
-        if $c->get_param('oauth_need_email') && $c->session->{oauth}{twitter_id};
+
+    if ($c->get_param('oauth_need_email')) {
+        $token_data->{name} = $c->session->{oauth}{name}
+            if $c->session->{oauth}{name} && !$token_data->{name};
+        $c->forward('set_oauth_token_data', [ $token_data ]);
+    }
+
     if ($c->stash->{current_user}) {
         $token_data->{old_user_id} = $c->stash->{current_user}->id;
         $token_data->{r} = 'auth/change_email/success';
@@ -214,6 +235,14 @@ sub get_token : Private {
     return $data;
 }
 
+sub set_oauth_token_data : Private {
+    my ( $self, $c, $token_data ) = @_;
+
+    foreach (qw/facebook_id twitter_id oidc_id extra logout_redirect_uri change_password_uri/) {
+        $token_data->{$_} = $c->session->{oauth}{$_} if $c->session->{oauth}{$_};
+    }
+}
+
 =head2 token
 
 Handle the 'email_sign_in' tokens. Find the account for the email address
@@ -231,11 +260,11 @@ sub token : Path('/M') : Args(1) {
             && (!$c->user_exists || $c->user->id ne $data->{old_user_id});
 
     my $type = $data->{login_type} || 'email';
-    $c->detach( '/auth/process_login', [ $data, $type ] );
+    $c->detach( '/auth/process_login', [ $data, $type, $url_token ] );
 }
 
 sub process_login : Private {
-    my ( $self, $c, $data, $type ) = @_;
+    my ( $self, $c, $data, $type, $url_token ) = @_;
 
     # sign out in case we are another user
     $c->logout();
@@ -247,8 +276,15 @@ sub process_login : Private {
     $c->detach( '/page_error_403_access_denied', [] )
         if FixMyStreet->config('SIGNUPS_DISABLED') && !$user->in_storage && !$data->{old_user_id};
 
-    # Superusers using 2FA can not log in by code
-    $c->detach( '/page_error_403_access_denied', [] ) if $user->has_2fa;
+    # People using 2FA need to supply a code
+    my $must_have_2fa = $c->cobrand->call_hook('must_have_2fa', $user) || '';
+    if ($must_have_2fa ne 'skip') {
+        if ($user->has_2fa) {
+            $c->forward( 'token_2fa', [ $user, $url_token ] );
+        } elsif ($c->cobrand->call_hook('must_have_2fa', $user)) {
+            $c->forward( 'signup_2fa', [ $user ] );
+        }
+    }
 
     if ($data->{old_user_id}) {
         # Were logged in as old_user_id, want to switch to $user
@@ -272,11 +308,72 @@ sub process_login : Private {
     $user->password( $data->{password}, 1 ) if $data->{password};
     $user->facebook_id( $data->{facebook_id} ) if $data->{facebook_id};
     $user->twitter_id( $data->{twitter_id} ) if $data->{twitter_id};
+    $user->add_oidc_id( $data->{oidc_id} ) if $data->{oidc_id};
+    $user->extra({
+        %{ $user->get_extra() },
+        %{ $data->{extra} }
+    }) if $data->{extra};
+
     $user->update_or_insert;
     $c->authenticate( { $type => $data->{$type}, $ver => 1 }, 'no_password' );
 
+    foreach (qw/logout_redirect_uri change_password_uri/) {
+        if ($data->{$_}) {
+            $c->session->{oauth} ||= ();
+            $c->session->{oauth}{$_} = $data->{$_};
+        }
+    }
+
+
     # send the user to their page
     $c->detach( 'redirect_on_signin', [ $data->{r}, $data->{p} ] );
+}
+
+=head2 token_2fa
+
+Used after clicking an email token link to request a 2FA code
+
+=cut
+
+sub token_2fa : Private {
+    my ($self, $c, $user, $url_token) = @_;
+
+    return if $c->check_2fa($user->has_2fa);
+
+    $c->stash->{form_action} = $c->req->path;
+    $c->stash->{token} = $url_token;
+    $c->stash->{template} = 'auth/2fa/form.html';
+    $c->detach;
+}
+
+sub signup_2fa : Private {
+    my ($self, $c, $user) = @_;
+
+    $c->stash->{form_action} = $c->req->path;
+    $c->stash->{template} = 'auth/2fa/intro.html';
+    my $action = $c->get_param('2fa_action') || '';
+
+    my $secret;
+    if ($action eq 'confirm') {
+        $secret = $c->get_param('secret32');
+        if ($c->check_2fa($secret)) {
+            $user->set_extra_metadata('2fa_secret' => $secret);
+            $user->update;
+            $c->stash->{stage} = 'success';
+            return;
+        } else {
+            $action = 'activate'; # Incorrect code, reshow
+        }
+    }
+
+    if ($action eq 'activate') {
+        my $auth = FixMyStreet::Auth::GoogleAuth->new;
+        $c->stash->{qr_code} = $auth->qr_code($secret, $user->email, $c->cobrand->base_url);
+        $c->stash->{secret32} = $auth->secret32;
+        $c->stash->{stage} = 'activate';
+    }
+
+    $c->detach;
 }
 
 =head2 redirect_on_signin
@@ -294,8 +391,11 @@ sub redirect_on_signin : Private {
     }
 
     unless ( $redirect ) {
-        $c->detach('redirect_to_categories') if $c->user->from_body && scalar @{ $c->user->categories };
-        $redirect = 'my';
+        my $inspector = $c->user->from_body && (
+            scalar @{ $c->user->categories } ||
+            scalar @{ $c->user->area_ids || [] }
+        );
+        $redirect = $inspector ? 'my/inspector_redirect' : 'my';
     }
     $redirect = 'my' if $redirect =~ /^admin/ && !$c->cobrand->admin_allow_user($c->user);
     if ( $c->cobrand->moniker eq 'zurich' ) {
@@ -306,22 +406,6 @@ sub redirect_on_signin : Private {
     } else {
         $c->res->redirect( $c->uri_for( "/$redirect" ) );
     }
-}
-
-=head2 redirect_to_categories
-
-Redirects the user to their body's reports page, prefiltered to whatever
-categories this user has been assigned to.
-
-=cut
-
-sub redirect_to_categories : Private {
-    my ( $self, $c ) = @_;
-
-    my $categories = $c->user->categories_string;
-    my $body_short = $c->cobrand->short_name( $c->user->from_body );
-
-    $c->res->redirect( $c->uri_for( "/reports/" . $body_short, { filter_category => $categories } ) );
 }
 
 =head2 redirect
@@ -429,6 +513,12 @@ Log the user out. Tell them we've done so.
 sub sign_out : Local {
     my ( $self, $c ) = @_;
     $c->logout();
+
+    if ( $c->sessionid && $c->session->{oauth} && $c->session->{oauth}{logout_redirect_uri} ) {
+        $c->response->redirect($c->session->{oauth}{logout_redirect_uri});
+        delete $c->session->{oauth}{logout_redirect_uri};
+        $c->detach;
+    }
 }
 
 sub ajax_sign_in : Path('ajax/sign_in') {
@@ -436,7 +526,8 @@ sub ajax_sign_in : Path('ajax/sign_in') {
 
     my $return = {};
     if ( $c->forward( 'sign_in', [ $c->get_param('email') ] ) ) {
-        $return->{name} = $c->user->name;
+        $return->{name} = $c->user->name || '-'; # App currently requires something returned
+        $return->{success} = 1;
     } else {
         $return->{error} = 1;
     }
@@ -507,6 +598,11 @@ sub check_auth : Local {
     # header but we ignore that here. The spec is not keeping up with usage.
 
     return;
+}
+
+sub two_factor_setup_success : Private {
+    my ($self, $c) = @_;
+    # Only here to be detached to after setup success
 }
 
 __PACKAGE__->meta->make_immutable;

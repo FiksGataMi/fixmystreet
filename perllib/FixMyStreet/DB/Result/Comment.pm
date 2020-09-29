@@ -101,6 +101,7 @@ __PACKAGE__->load_components("+FixMyStreet::DB::RABXColumn");
 __PACKAGE__->rabx_column('extra');
 
 use Moo;
+use FixMyStreet::Template::SafeString;
 use namespace::clean -except => [ 'meta' ];
 use FixMyStreet::Template;
 
@@ -201,7 +202,7 @@ sub moderation_filter {
 =head2 meta_line
 
 Returns a string to be used on a report update, describing some of the metadata
-about an update
+about an update. Can include HTML.
 
 =cut
 
@@ -225,10 +226,15 @@ sub meta_line {
             } else {
                 $body = $self->user->body;
             }
+            $body = FixMyStreet::Template::html_filter($body);
             if ($body eq 'Bromley Council') {
                 $body = "$body <img src='/cobrands/bromley/favicon.png' alt=''>";
             } elsif ($body eq 'Royal Borough of Greenwich') {
                 $body = "$body <img src='/cobrands/greenwich/favicon.png' alt=''>";
+            } elsif ($body eq 'Hounslow Borough Council') {
+                $body = 'Hounslow Highways';
+            } elsif ($body eq 'Isle of Wight Council') {
+                $body = 'Island Roads';
             }
         }
         my $cobrand_always_view_body_user = $c->cobrand->call_hook("always_view_body_contribute_details");
@@ -255,7 +261,7 @@ sub meta_line {
         $meta .= ', ' . _( 'and a defect raised' );
     }
 
-    return $meta;
+    return FixMyStreet::Template::SafeString->new($meta);
 };
 
 sub problem_state_processed {
@@ -272,7 +278,11 @@ sub problem_state_display {
     return '' unless $state;
 
     my $cobrand_name = $c->cobrand->moniker;
-    $cobrand_name = 'bromley' if $self->problem->to_body_named('Bromley');
+    my $names = join(',,', @{$self->problem->body_names});
+    if ($names =~ /(Bromley|Isle of Wight|TfL)/) {
+        ($cobrand_name = lc $1) =~ s/ //g;
+    }
+
     return FixMyStreet::DB->resultset("State")->display($state, 1, $cobrand_name);
 }
 
@@ -282,6 +292,7 @@ sub is_latest {
         { problem_id => $self->problem_id, state => 'confirmed' },
         { order_by => [ { -desc => 'confirmed' }, { -desc => 'id' } ] }
     )->first;
+    return unless $latest_update;
     return $latest_update->id == $self->id;
 }
 

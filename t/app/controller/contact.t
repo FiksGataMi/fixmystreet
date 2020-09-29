@@ -6,6 +6,16 @@ sub abuse_reports_only { 1; }
 
 1;
 
+package FixMyStreet::Cobrand::GeneralEnquiries;
+
+use base 'FixMyStreet::Cobrand::Default';
+
+sub abuse_reports_only { 1 }
+
+sub setup_general_enquiries_stash { 1 }
+
+1;
+
 package main;
 
 use FixMyStreet::TestMech;
@@ -104,7 +114,7 @@ for my $test (
     subtest 'check reporting a problem displays correctly' => sub {
         my $user = $mech->create_user_ok($test->{email}, name => $test->{name});
 
-        my $problem = FixMyStreet::App->model('DB::Problem')->create(
+        my $problem = FixMyStreet::DB->resultset('Problem')->create(
             {
                 title     => $test->{title},
                 detail    => $test->{detail},
@@ -128,7 +138,7 @@ for my $test (
             my $update_user = $mech->create_user_ok($update_info->{email},
                 name => $update_info->{name});
 
-            $update = FixMyStreet::App->model('DB::Comment')->create(
+            $update = FixMyStreet::DB->resultset('Comment')->create(
                 {
                     problem_id => $update_info->{other_problem} ? $problem_main->id : $problem->id,
                     user        => $update_user,
@@ -327,6 +337,71 @@ for my $test (
 }
 
 for my $test (
+    { fields => \%common }
+  )
+{
+    subtest 'check email contains user details' => sub {
+        my $user = $mech->create_user_ok(
+            $test->{fields}->{em},
+            name => $test->{fields}->{name}
+        );
+
+        my $older_unhidden_problem = FixMyStreet::DB->resultset('Problem')->create(
+            {
+                title     => 'Some problem or other',
+                detail    => 'More detail on the problem',
+                postcode  => 'EH99 1SP',
+                confirmed => '2011-05-04 10:44:28.145168',
+                anonymous => 0,
+                name      => $test->{fields}->{name},
+                state     => 'confirmed',
+                user      => $user,
+                latitude  => 0,
+                longitude => 0,
+                areas     => 0,
+                used_map  => 0,
+            }
+        );
+
+        my $newer_hidden_problem = FixMyStreet::DB->resultset('Problem')->create(
+            {
+                title     => 'A hidden problem',
+                detail    => 'Shhhh secret',
+                postcode  => 'EH99 1SP',
+                confirmed => '2012-06-05 10:44:28.145168',
+                anonymous => 0,
+                name      => $test->{fields}->{name},
+                state     => 'hidden',
+                user      => $user,
+                latitude  => 0,
+                longitude => 0,
+                areas     => 0,
+                used_map  => 0,
+            }
+        );
+
+        $mech->clear_emails_ok;
+        $mech->get_ok('/contact');
+        $test->{fields}{em} = $user->email;
+        $mech->submit_form_ok( { with_fields => $test->{fields} } );
+
+        my $email = $mech->get_email;
+        my $body = $mech->get_text_body_from_email($email);
+
+        my $user_id = $user->id;
+        my $user_email = $user->email;
+        my $older_unhidden_problem_id = $older_unhidden_problem->id;
+        my $newer_hidden_problem_id = $newer_hidden_problem->id;
+
+        like $body, qr/admin\/users\/$user_id/, 'email contains admin link to edit user';
+        like $body, qr/admin\/reports\?search=$user_email/, 'email contains admin link to show users reports';
+        like $body, qr/admin\/report_edit\/$older_unhidden_problem_id/, 'email contains admin link for users latest unhidden report';
+        unlike $body, qr/admin\/report_edit\/$newer_hidden_problem_id/, 'email does not link to hidden reports';
+
+    };
+}
+
+for my $test (
     {
         fields => { %common, dest => undef },
         page_errors =>
@@ -482,7 +557,28 @@ subtest 'check can limit contact to abuse reports' => sub {
         is $mech->res->code, 404, 'cannot visit contact page';
         $mech->get_ok( '/contact?id=' . $problem_main->id, 'can visit for abuse report' );
 
-        my $token = FixMyStreet::App->model("DB::Token")->create({
+        my $token = FixMyStreet::DB->resultset("Token")->create({
+            scope => 'moderation',
+            data => { id => $problem_main->id }
+        });
+
+        $mech->get_ok( '/contact?m=' . $token->token, 'can visit for moderation complaint' );
+
+    }
+};
+
+subtest 'check redirected to correct form for general enquiries cobrand' => sub {
+    FixMyStreet::override_config {
+        'ALLOWED_COBRANDS' => [ 'generalenquiries' ],
+    }, sub {
+        $mech->get( '/contact' );
+        is $mech->res->code, 200, "got 200 for final destination";
+        is $mech->res->previous->code, 302, "got 302 for redirect";
+        is $mech->uri->path, '/contact/enquiry';
+
+        $mech->get_ok( '/contact?id=' . $problem_main->id, 'can visit for abuse report' );
+
+        my $token = FixMyStreet::DB->resultset("Token")->create({
             scope => 'moderation',
             data => { id => $problem_main->id }
         });

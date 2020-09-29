@@ -2,13 +2,17 @@
 
 $menu-image: 'menu-black';
 
-$bromley_blue: rgb(91,120,147);
+$bromley_blue: #647890;
 $bromley_green: #235e1c;
 $bromley_dark_green: #505050;
 
 $primary: $bromley_blue;
 $primary_b: #ffffff;
 $primary_text: #ffffff;
+
+$link-color: $bromley_green;
+$link-hover-color: $bromley_green;
+$link-visited-color: $bromley_dark_green;
 
 $base_bg: #f4f4f4;
 $base_fg: #1a1a1a;

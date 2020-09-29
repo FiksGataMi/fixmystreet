@@ -115,12 +115,34 @@ sub email_previewer : Path('/_dev/email') : Args(1) {
         }
     } elsif ($template eq 'questionnaire') {
         $vars->{created} = 'N weeks';
+    } elsif ($template eq 'contact') {
+        $vars->{problem} = $c->model('DB::Problem')->search(undef, { rows => 1 } )->first;
+        $vars->{subject} = 'Please remove my details';
+        $vars->{message} = 'I accidentally put my phone number, address, mothers maiden name, and facebook password in my most recent report!! Please remove it!!';
+        $vars->{form_name} = $c->user->name;
+        $vars->{em} = $c->user->email;
+        $vars->{host} = $c->req->header('HOST');
+        $vars->{ip} = $c->req->address;
+        $vars->{user_agent} = $c->req->user_agent;
+        $vars->{complaint} = sprintf(
+            "Complaint about report %d",
+            $vars->{problem}->id,
+        );
+        $vars->{problem_url} = $c->cobrand->base_url() . '/report/' . $vars->{problem}->id;
+        $vars->{admin_url} = $c->cobrand->admin_base_url . '/report_edit/' . $vars->{problem}->id;
+        $vars->{user_admin_url} = $c->cobrand->admin_base_url . '/users/' . $c->user->id;
+        $vars->{user_reports_admin_url} = $c->cobrand->admin_base_url . '/reports?search=' . $c->user->email;
+        my $user_latest_problem = $c->user->latest_visible_problem();
+        if ( $user_latest_problem ) {
+            $vars->{user_latest_report_admin_url} = $c->cobrand->admin_base_url . '/report_edit/' . $user_latest_problem->id;
+        }
     }
 
     my $email = $c->construct_email("$template.txt", $vars);
 
     # Look through the Email::MIME email for the text/html part, and any inline
     # images. Turn the images into data: URIs.
+    my $text = '';
     my $html = '';
     my %images;
     $email->walk_parts(sub {
@@ -130,6 +152,8 @@ sub email_previewer : Path('/_dev/email') : Args(1) {
             (my $cid = $part->header('Content-ID')) =~ s/[<>]//g;
             (my $ct = $part->content_type) =~ s/;.*//;
             $images{$cid} = "$ct;base64," . $part->body_raw;
+        } elsif ($part->content_type =~ m[text/plain]i) {
+            $text = $part->body_str;
         } elsif ($part->content_type =~ m[text/html]i) {
             $html = $part->body_str;
         }
@@ -139,7 +163,12 @@ sub email_previewer : Path('/_dev/email') : Args(1) {
         $html =~ s/cid:([^"]*)/data:$images{$1}/g;
     }
 
-    $c->response->body($html);
+    if ($c->get_param('text')) {
+        $c->response->header(Content_type => 'text/plain');
+        $c->response->body($text);
+    } else {
+        $c->response->body($html);
+    }
 }
 
 =item problem_confirm_previewer

@@ -24,7 +24,7 @@ my $dt = DateTime->new(
     second => 23
 );
 
-my $report = FixMyStreet::App->model('DB::Problem')->find_or_create(
+my $report = FixMyStreet::DB->resultset('Problem')->find_or_create(
     {
         postcode           => 'SW1A 1AA',
         bodies_str         => '2504',
@@ -52,7 +52,7 @@ my $report = FixMyStreet::App->model('DB::Problem')->find_or_create(
 
 $mech->log_in_ok( $superuser->email );
 
-my $log_entries = FixMyStreet::App->model('DB::AdminLog')->search(
+my $log_entries = FixMyStreet::DB->resultset('AdminLog')->search(
     {
         object_type => 'problem',
         object_id   => $report->id
@@ -353,7 +353,7 @@ foreach my $test (
         user_body => $oxfordshire,
         changes   => { state => 'in progress', category => 'Potholes' },
         log_entries => [
-            qw/edit state_change edit state_change edit edit resend edit state_change edit state_change edit state_change edit state_change edit state_change edit edit edit edit edit/
+            qw/edit state_change category_change edit state_change edit edit resend edit state_change edit state_change edit state_change edit state_change edit state_change edit edit edit edit edit/
         ],
         resend => 0,
     },
@@ -410,6 +410,13 @@ foreach my $test (
             $report->unset_extra_metadata('closed_updates');
             $report->update;
             delete $test->{changes}->{closed_updates};
+        }
+
+        if ($test->{changes}{title} || $test->{changes}{detail} || $test->{changes}{anonymous}) {
+            $mech->get_ok("/report/$report_id");
+            $mech->content_contains("Anonymous: <del style='background-color:#fcc'>No</del><ins style='background-color:#cfc'>Yes</ins>") if $test->{changes}{anonymous};
+            $mech->content_contains("Details: <ins style='background-color:#cfc'>Edited </ins>Detail<del style='background-color:#fcc'> for Report to Edit</del>") if $test->{changes}{detail};
+            $mech->content_contains("Subject: <ins style='background-color:#cfc'>Edited </ins>Repor<del style='background-color:#fcc'>t to Edi</del>") if $test->{changes}{title};
         }
 
         is $report->$_, $test->{changes}->{$_}, "$_ updated" for grep { $_ ne 'username' } keys %{ $test->{changes} };
@@ -504,7 +511,7 @@ subtest 'change email to new user' => sub {
         username => 'test3@example.com'
     };
 
-    my $user3 = FixMyStreet::App->model('DB::User')->find( { email => 'test3@example.com' } );
+    my $user3 = FixMyStreet::DB->resultset('User')->find( { email => 'test3@example.com' } );
 
     ok !$user3, 'user not in database';
 
@@ -523,7 +530,7 @@ subtest 'change email to new user' => sub {
     is $log_entries->first->action, 'edit', 'log action';
     is_deeply( $mech->visible_form_values(), $new_fields, 'changed form values' );
 
-    $user3 = FixMyStreet::App->model('DB::User')->find( { email => 'test3@example.com' } );
+    $user3 = FixMyStreet::DB->resultset('User')->find( { email => 'test3@example.com' } );
 
     $report->discard_changes;
 
@@ -534,7 +541,7 @@ subtest 'change email to new user' => sub {
 subtest 'adding email to abuse list from report page' => sub {
     my $email = $report->user->email;
 
-    my $abuse = FixMyStreet::App->model('DB::Abuse')->find( { email => $email } );
+    my $abuse = FixMyStreet::DB->resultset('Abuse')->find( { email => $email } );
     $abuse->delete if $abuse;
 
     $mech->get_ok( '/admin/report_edit/' . $report->id );
@@ -545,7 +552,7 @@ subtest 'adding email to abuse list from report page' => sub {
     $mech->content_contains('User added to abuse list');
     $mech->content_contains('<small>User in abuse table</small>');
 
-    $abuse = FixMyStreet::App->model('DB::Abuse')->find( { email => $email } );
+    $abuse = FixMyStreet::DB->resultset('Abuse')->find( { email => $email } );
     ok $abuse, 'entry created in abuse table';
 
     $mech->get_ok( '/admin/report_edit/' . $report->id );
@@ -612,7 +619,7 @@ subtest "Test alert count display" => sub {
     $mech->get_ok("/admin/report_edit/$report_id");
     $mech->content_contains('Alerts: 0');
 
-    my $alert = FixMyStreet::App->model('DB::Alert')->find_or_create(
+    my $alert = FixMyStreet::DB->resultset('Alert')->find_or_create(
         {
             alert_type => 'new_updates',
             parameter => $report_id,
@@ -634,7 +641,7 @@ subtest "Test alert count display" => sub {
     $alert->delete;
 };
 
-my $report2 = FixMyStreet::App->model('DB::Problem')->find_or_create(
+my $report2 = FixMyStreet::DB->resultset('Problem')->find_or_create(
     {
         postcode           => 'SW1A 1AA',
         bodies_str         => '2504',

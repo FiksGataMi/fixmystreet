@@ -1,6 +1,5 @@
 use FixMyStreet::TestMech;
 use FixMyStreet;
-use FixMyStreet::App;
 use FixMyStreet::DB;
 use FixMyStreet::Script::Reports;
 use Sub::Override;
@@ -103,15 +102,6 @@ for my $test (
             bodies_str => '1001',
         },
         errors => {
-        }
-    },
-    {
-        desc => 'bad category',
-        changed => {
-            category => '-- Pick a category --',
-        },
-        errors => {
-            category => 'Please choose a category',
         }
     },
     {
@@ -625,6 +615,8 @@ subtest 'check can set multiple emails as a single contact' => sub {
         FixMyStreet::Script::Reports::send();
     };
 
+    $problem->discard_changes;
+    is_deeply $problem->get_extra_metadata('sent_to'), [ '2636@example.com', '2636-2@example.com' ];
     $mech->email_count_is(1);
     my $email = $mech->get_email;
     is $email->header('To'), '"City of Edinburgh Council" <2636@example.com>, "City of Edinburgh Council" <2636-2@example.com>', 'To contains two email addresses';
@@ -671,6 +663,7 @@ subtest 'check can turn on report sent email alerts' => sub {
 
     $problem->discard_changes;
     ok defined( $problem->whensent ), 'whensent set';
+    is_deeply $problem->get_extra_metadata('sent_to'), [ 'test@example.org' ];
 
     $email = $emails[1];
     like $email->header('Subject'), qr/FixMyStreet Report Sent/, 'report sent email title correct';
@@ -791,7 +784,7 @@ subtest 'generates a tokenised url for a user' => sub {
 
     like $url, qr/\/M\//, 'problem generates tokenised url';
 
-    my $token_obj = FixMyStreet::App->model('DB::Token')->find( {
+    my $token_obj = FixMyStreet::DB->resultset('Token')->find( {
         scope => 'email_sign_in', token => $token
     } );
     is $token, $token_obj->token, 'token is generated in database with correct scope';
@@ -803,7 +796,7 @@ subtest 'stores params in a token' => sub {
     my $url = $problem->tokenised_url($user, { foo => 'bar', baz => 'boo'});
     (my $token = $url) =~ s/\/M\///g;
 
-    my $token_obj = FixMyStreet::App->model('DB::Token')->find( {
+    my $token_obj = FixMyStreet::DB->resultset('Token')->find( {
         scope => 'email_sign_in', token => $token
     } );
 

@@ -1,5 +1,1 @@
-[% scripts.push(
-    version('/vendor/OpenLayers.Projection.OrdnanceSurvey.js')
-    version('/cobrands/fixmystreet-uk-councils/js.js'),
-    version('/cobrands/highways/assets.js'),
-) %]
+[% PROCESS 'footer_extra_js_base.html' highways=1 cobrand_js=1 ~%]

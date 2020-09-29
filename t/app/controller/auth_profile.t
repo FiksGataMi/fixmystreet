@@ -1,5 +1,16 @@
+package FixMyStreet::Cobrand::Dummy;
+use parent 'FixMyStreet::Cobrand::Default';
+
+sub must_have_2fa { 1 }
+
+package main;
+
+use Test::MockModule;
 use FixMyStreet::TestMech;
 my $mech = FixMyStreet::TestMech->new;
+
+my $resolver = Test::MockModule->new('Email::Valid');
+$resolver->mock('address', sub { $_[1] });
 
 use t::Mock::Twilio;
 
@@ -9,10 +20,6 @@ LWP::Protocol::PSGI->register($twilio->to_psgi_app, host => 'api.twilio.com');
 my $test_email    = 'test@example.com';
 my $test_email2   = 'test@example.net';
 my $test_password = 'foobar123';
-
-END {
-    done_testing();
-}
 
 # get a sign in email and change password
 subtest "Test change password page" => sub {
@@ -66,7 +73,7 @@ subtest "Test change password page" => sub {
         $mech->content_contains( $test->{err}, "found expected error" );
     }
 
-    my $user = FixMyStreet::App->model('DB::User')->find( { email => $test_email } );
+    my $user = FixMyStreet::DB->resultset('User')->find( { email => $test_email } );
     ok $user, "got a user";
     ok !$user->password, "user has no password";
 
@@ -126,7 +133,7 @@ subtest "Test change password page with current password" => sub {
         $mech->content_contains( $test->{err}, "found expected error" );
     }
 
-    my $user = FixMyStreet::App->model('DB::User')->find( { email => $test_email } );
+    my $user = FixMyStreet::DB->resultset('User')->find( { email => $test_email } );
     ok $user, "got a user";
 
     $mech->get_ok('/auth/change_password');
@@ -179,12 +186,12 @@ subtest "Test change email page" => sub {
     $mech->get_ok($link);
     is $mech->uri->path, '/my', "redirected to /my page";
     $mech->content_contains('successfully confirmed');
-    ok(FixMyStreet::App->model('DB::User')->find( { email => $test_email2 } ), "got a user");
+    ok(FixMyStreet::DB->resultset('User')->find( { email => $test_email2 } ), "got a user");
 
     my $p = FixMyStreet::DB->resultset("Problem")->first;
     is $p->user->email, $test_email2, 'problem user updated';
 
-    my $user1 = FixMyStreet::App->model('DB::User')->create( { email => $test_email, email_verified => 1 } );
+    my $user1 = FixMyStreet::DB->resultset('User')->create( { email => $test_email, email_verified => 1 } );
     ok($user1, "created old user");
     $mech->create_problems_for_body(1, 2514, 'Title1', { user => $user1 } );
 
@@ -222,7 +229,7 @@ my $test_landline = '01214960000';
 my $test_mobile = '+61491570156';
 my $test_mobile2 = '+61491570157';
 
-my $user_mob2 = FixMyStreet::App->model('DB::User')->create( {
+my $user_mob2 = FixMyStreet::DB->resultset('User')->create( {
     phone => $test_mobile,
     phone_verified => 1,
     name => 'Aus Mobile user',
@@ -284,7 +291,7 @@ subtest "Test add/verify/change phone page" => sub {
         with_fields => { code => $code }
     }, 'submit correct code');
 
-    my $user = FixMyStreet::App->model('DB::User')->find( { phone => $test_mobile } );
+    my $user = FixMyStreet::DB->resultset('User')->find( { phone => $test_mobile } );
     ok $user, "user exists";
     is $user->email_verified, 1;
     is $user->email, $test_email, 'email still same';
@@ -320,9 +327,9 @@ subtest "Test change phone to existing account" => sub {
     my $code = $twilio->get_text_code;
     $mech->submit_form_ok({ with_fields => { code => $code } }, 'submit correct code');
 
-    my $user = FixMyStreet::App->model('DB::User')->find( { phone => $test_mobile } );
+    my $user = FixMyStreet::DB->resultset('User')->find( { phone => $test_mobile } );
     ok !$user, 'old user does not exist';
-    $user = FixMyStreet::App->model('DB::User')->find( { phone => $test_mobile2 } );
+    $user = FixMyStreet::DB->resultset('User')->find( { phone => $test_mobile2 } );
     ok $user, "new mobile user exists";
     is $user->email_verified, 1;
     is $user->email, $test_email, 'email still same';
@@ -335,7 +342,7 @@ subtest "Test change phone to existing account" => sub {
 };
 
 subtest "Test superuser can access generate token page" => sub {
-    my $user = FixMyStreet::App->model('DB::User')->find( { email => $test_email } );
+    my $user = FixMyStreet::DB->resultset('User')->find( { email => $test_email } );
     ok $user->update({ is_superuser => 0 }), 'user not superuser';
 
     $mech->log_out_ok;
@@ -359,8 +366,10 @@ subtest "Test superuser can access generate token page" => sub {
     $mech->get_ok('/auth/generate_token');
 };
 
+my $body = $mech->create_body_ok(2237, 'Oxfordshire');
+
 subtest "Test staff user can access generate token page" => sub {
-    my $user = FixMyStreet::App->model('DB::User')->find( { email => $test_email } );
+    my $user = FixMyStreet::DB->resultset('User')->find( { email => $test_email } );
     ok $user->update({ is_superuser => 0 }), 'user not superuser';
 
     $mech->log_out_ok;
@@ -374,8 +383,6 @@ subtest "Test staff user can access generate token page" => sub {
 
     $mech->content_lacks('Security');
 
-    my $body = $mech->create_body_ok(2237, 'Oxfordshire');
-
     $mech->get('/auth/generate_token');
     is $mech->res->code, 403, "access denied";
 
@@ -387,7 +394,7 @@ subtest "Test staff user can access generate token page" => sub {
 };
 
 subtest "Test generate token page" => sub {
-    my $user = FixMyStreet::App->model('DB::User')->find( { email => $test_email } );
+    my $user = FixMyStreet::DB->resultset('User')->find( { email => $test_email } );
     ok $user->update({ is_superuser => 1 }), 'user set to superuser';
 
     $mech->log_out_ok;
@@ -425,28 +432,80 @@ subtest "Test generate token page" => sub {
     $mech->log_out_ok;
     $mech->add_header('Authorization', "Bearer $token");
     $mech->logged_in_ok;
+    $mech->delete_header('Authorization');
 };
 
 subtest "Test two-factor authentication admin" => sub {
-    my $user = FixMyStreet::App->model('DB::User')->find( { email => $test_email } );
-    ok $user->update({ is_superuser => 1 }), 'user set to superuser';
+  for (0, 1) {
+    my $user = $mech->log_in_ok($test_email);
+    if ($_) {
+        ok $user->update({ is_superuser => 1, from_body => undef }), 'user set to superuser';
+    } else {
+        ok $user->update({ is_superuser => 0, from_body => $body }), 'user set to staff user';
+    }
 
-    $mech->log_in_ok($test_email);
     $mech->get_ok('/auth/generate_token');
     ok !$user->get_extra_metadata('2fa_secret');
 
-    $mech->submit_form_ok({ button => 'toggle_2fa' }, "submit 2FA activation");
+    $mech->submit_form_ok({ button => '2fa_activate' }, "submit 2FA activation");
+    my ($token) = $mech->content =~ /name="secret32" value="([^"]*)">/;
+
+    use Auth::GoogleAuth;
+    my $auth = Auth::GoogleAuth->new({ secret32 => $token });
+    my $code = $auth->code;
+    my $wrong_code = $auth->code(undef, time() - 120);
+
+    $mech->submit_form_ok({ with_fields => { '2fa_code' => $wrong_code } }, "provide wrong 2FA code" );
+    $mech->content_contains('Try again');
+    $mech->submit_form_ok({ with_fields => { '2fa_code' => $code } }, "provide correct 2FA code" );
+
     $mech->content_contains('has been activated', "2FA activated");
 
     $user->discard_changes();
-    my $token = $user->get_extra_metadata('2fa_secret');
-    ok $token, '2FA secret set';
-
-    $mech->content_contains($token, 'secret displayed');
+    my $user_token = $user->get_extra_metadata('2fa_secret');
+    is $token, $user_token, '2FA secret set';
 
     $mech->get_ok('/auth/generate_token');
     $mech->content_lacks($token, 'secret no longer displayed');
 
-    $mech->submit_form_ok({ button => 'toggle_2fa' }, "submit 2FA deactivation");
+    $mech->submit_form_ok({ button => '2fa_deactivate' }, "submit 2FA deactivation");
     $mech->content_contains('has been deactivated', "2FA deactivated");
+  }
 };
+
+subtest "Test enforced two-factor authentication" => sub {
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => 'dummy',
+    }, sub {
+        use Auth::GoogleAuth;
+        my $auth = Auth::GoogleAuth->new;
+        my $code = $auth->code;
+
+        # Sign in with 2FA
+        my $user = FixMyStreet::DB->resultset('User')->find( { email => $test_email } );
+        $user->password('password');
+        $user->set_extra_metadata('2fa_secret', $auth->secret32);
+        $user->update;
+
+        $mech->get_ok('/auth');
+        $mech->submit_form_ok(
+            { with_fields => { username => $test_email, password_sign_in => 'password' } },
+            "sign in using form" );
+        $mech->content_contains('Please generate a two-factor code');
+        $mech->submit_form_ok({ with_fields => { '2fa_code' => $code } }, "provide correct 2FA code" );
+
+        $mech->get_ok('/auth/generate_token');
+        $mech->content_contains('Change two-factor');
+        $mech->content_lacks('Deactivate two-factor');
+
+        my ($csrf) = $mech->content =~ /meta content="([^"]*)" name="csrf-token"/;
+        $mech->post_ok('/auth/generate_token', {
+            '2fa_deactivate' => 1,
+            'token' => $csrf,
+        });
+        $mech->content_lacks('has been deactivated', "2FA not deactivated");
+        $mech->content_contains('Please scan this image', 'Change 2FA page shown instead');
+    };
+};
+
+done_testing();

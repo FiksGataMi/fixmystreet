@@ -1,5 +1,5 @@
 package FixMyStreet::Cobrand::Bristol;
-use parent 'FixMyStreet::Cobrand::UKCouncils';
+use parent 'FixMyStreet::Cobrand::Whitelabel';
 
 use strict;
 use warnings;
@@ -8,16 +8,6 @@ sub council_area_id { return 2561; }
 sub council_area { return 'Bristol'; }
 sub council_name { return 'Bristol County Council'; }
 sub council_url { return 'bristol'; }
-
-sub base_url {
-    my $self = shift;
-    return $self->next::method() if FixMyStreet->config('STAGING_SITE');
-    return 'https://fixmystreet.bristol.gov.uk';
-}
-
-sub example_places {
-    return ( 'BS1 5TR', "Broad Quay" );
-}
 
 sub map_type {
     'Bristol';
@@ -50,11 +40,6 @@ sub pin_colour {
     return 'yellow';
 }
 
-sub contact_email {
-    my $self = shift;
-    return join( '@', 'customer.services', 'bristol.gov.uk' );
-}
-
 sub send_questionnaires {
     return 0;
 }
@@ -66,6 +51,7 @@ sub categories_restriction {
     # cobrand, not the email categories from FMS.com. We've set up the
     # Email categories with a devolved send_method, so can identify Open311
     # categories as those which have a blank send_method.
+    # Also Highways England categories have a blank send_method.
     return $rs->search( { 'me.send_method' => undef } );
 }
 
@@ -78,10 +64,15 @@ sub open311_config {
 sub open311_contact_meta_override {
     my ($self, $service, $contact, $meta) = @_;
 
+    # Bristol returns groups we do not want to use
+    $service->{group} = [];
+
     my %server_set = (easting => 1, northing => 1);
     foreach (@$meta) {
         $_->{automated} = 'server_set' if $server_set{$_->{code}};
     }
 }
+
+sub admin_user_domain { 'bristol.gov.uk' }
 
 1;

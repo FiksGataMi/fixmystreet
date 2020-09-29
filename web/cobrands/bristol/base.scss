@@ -109,22 +109,12 @@ dl dt {
   }
 }
 
-p, dd, aside {
-  a, a:visited, a:hover {
-    color: $b3;
-  }
-}
-
 a#geolocate_link {
   color: $b3;
 }
 
 label {
   @extend %bold-font;
-}
-
-#map #drag .square-map__tile {
-  position: static;
 }
 
 // uses important because btn also uses it

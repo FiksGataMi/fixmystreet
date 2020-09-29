@@ -2,6 +2,167 @@
 
 * Unreleased
 
+* v3.0.1 (6th May 2020)
+    - New features:
+        - Provide access to staff-only categories in admin. #2925 #2958
+        - Allow anonymous updating if anonymous reporting enabled.
+    - Admin improvements:
+        - Order unsent reports by confirmed date. #2911
+        - Disable staff private tickbox on new reports if category is private. #2961
+        - Move stats from main admin index to stats index. #2982
+        - Speed up dashboard export and report search. #2988
+        - Allow a template to be an initial update on reports. #2973
+    - Bugfixes:
+        - Application user in Docker container can't install packages. #2914
+        - Look at all categories when sending reports.
+        - Fixes the To header when sending emails about inactive accounts. #2935
+        - Recent reports, use same query regardless of cache. #2926 #2999
+        - Match body construction on Around with New setup.
+        - Only one duplicate call in progress at once. #2941
+        - Stop double escape in Google Maps URL.
+        - Refactor/stop double escape in report nav link. #2956
+        - Maintain group on pin move with same category in multiple groups. #2962
+        - Remove unnecessary margin-right on #postcodeForm. #3010
+        - Fix sorting by most commented on /around map view. #3013
+    - Development improvements:
+        - Refactor Script::Report into an object. #2927
+        - Move summary failures to a separate script. #2927
+        - Add generic import categories from JSON script.
+        - Add script to export/import body data. #2905
+        - Add fetch script that does combined job of fetch-comments and fetch-reports. #2689
+        - Allow fetch script to parallelize fetching. #2689
+        - Do all retry timeout or skip checks in database. #2947
+        - Show error page when submitting with web param to /import. #2233
+        - Add a daemon option for sending reports and updates. #2924
+        - Update Getopt::Long::Descriptive to stop warning. #3003
+    - Open311 improvements:
+        - Allow save/drop of row extra during sending. #2788
+        - Match response templates on external status code over state. #2921
+        - Add flag to protect category/group names from Open311 overwrite. #2986
+    - Documentation:
+         - Remove part about restricting access to /admin. #2937
+    - UK:
+        - Added junction lookup, so you can search for things like "M60, Junction 2". #2918
+
+* v3.0 (4th March 2020)
+    - Security:
+        - Fix XSS vulnerability in pagination page number.
+        - Rotate session ID after successful login.
+        - Switch to auto-escaping of all template variables (see below). #2772
+        - Scrub admin description fields. #2791
+    - Front end improvements:
+        - Improved 403 message, especially for private reports. #2511
+        - Mobile users can now filter the pins on the `/around` map view. #2366
+        - Maintain whitespace formatting in email report/update lists. #2525
+        - Improve keyboard accessibility. #2542
+        - Report form now indicates that details are kept private if report is
+          made in a private category. #2528
+        - Improve map JavaScript defensiveness.
+        - Upgrade jquery-validation plugin. #2540
+        - Pass ‘filter_category’ param to front page to pre-filter map.
+        - Remove on-map Permalink. #2631
+        - Darken front page step numbers, and improve nested heading structure. #2631
+        - Set report title autocomplete to off to prevent email autocompleting. #2518
+        - Add map filter debouncing to reduce server requests. #2675
+        - Add XSL to RSS feeds so they look nicer in browsers. #2736
+        - Add per-report OpenGraph images. #2394
+        - Display GPS marker on /around map. #2359
+        - Use nicer default photo upload message. #2358
+        - Remove pan control from mobile widths. #2865
+        - Use category groups whenever category lists are shown. #2702
+        - Display map inline with duplicate suggestions on mobile. #2668
+        - Improved try again process on mobile. #2863
+        - Improve messaging/display of private reports. #2884
+        - Add a web manifest and service worker. #2220
+        - Also check filter_category for category choice. #2893
+        - Reduce duplicate Permalink.updateLink calls when zooming map. #2824
+        - Hide ‘provide extra information’ preamble when no visible fields are present. #2811
+        - Improve user flow when JavaScript is not available. #2619
+        - Change ‘locate me automatically’ to ‘use my location’. #2615
+        - Include ‘submit’ button at very bottom of report form when signing in during report
+        - Provide ARIA roles for message controller box.
+    - Admin improvements:
+        - Add new roles system, to group permissions and apply to users. #2483
+        - Contact form emails now include user admin links. #2608
+        - Allow categories/Open311 questions to disable the reporting form. #2599
+        - Improve category edit form. #2469
+        - Allow editing of category name. #1398
+        - Allow non-superuser staff to use 2FA, and optional enforcement of 2FA. #2701
+        - Add optional enforced password expiry. #2705
+        - Store a moderation history on admin report edit. #2722
+        - Add user admin log page. #2722
+        - Allow report as another user with only name. #2781
+        - Allow staff users to sign other people up for alerts. #2783
+        - Group categories on body page. #2850
+        - Add admin UI for managing web manifest themes. #2792
+        - Add a new "staff" contact state. #2891
+        - Store staff user when staff make anonymous report. #2802
+        - Record first time fixed/closed update sent to reporter in email.
+        - Pre-filter ‘all reports’ by area for inspectors
+        - show open311 failure details in admin report edit page. #2468
+    - New features:
+        - Categories can be listed under more than one group #2475
+        - OpenID Connect login support. #2523
+        - Heatmap dashboard. #2675
+        - Allow anonymous submission by a button, optionally per-category.
+    - Bugfixes:
+        - Prevent creation of two templates with same title. #2471
+        - Fix bug going between report/new pages client side. #2484
+        - Don't include private reports when searching by ref from front page.
+        - Set fixmystreet.bodies sooner client-side, for two-tier locations. #2498
+        - Fix front-end testing script when run with Vagrant. #2514
+        - Handle missing category when sending open311 reports #2502
+        - Fix label associations with category groups. #2541
+        - Hide category extras when duplicate suggestions shown. #2588
+        - Hide duplicate suggestions when signing in during reporting. #2588
+        - Retain extra data if signing in during reporting. #2588
+        - Have duplicate suggestion and assets coexist better. #2589
+        - Don't include lat/lon of private reports in ‘Report another problem here’ link. #2605
+        - Allow contact send method to be unset always. #2622
+        - Fix z-index stacking bug that was causing unclickable RSS icons on /alert page. #2624
+        - Fix issue with inspector duplication workflow. #2678
+        - Fix removal of cached photos on moderation. #2696
+        - Checking of cached front page details against database. #2696
+        - Inconsistent display of mark private checkbox for staff users
+        - Clear user categories when staff access is removed. #2815
+        - Only trigger one change event on initial popstate. #2862
+        - Fix error when hiding a user's updates with no confirmed updates. #2898
+        - Sort reporting categories in display order. #2704
+        - Do not clear asset attributes on category change.
+    - Development improvements:
+        - Upgrade the underlying framework and a number of other packages. #2473
+        - Add feature cobrand helper function.
+        - Add front-end testing support for WSL. #2514
+        - Allow cobrands to disable admin resending. #2553
+        - Sass variables for default link colour and decoration. #2538
+        - Make contact edit note optional on staging sites.
+        - Store email addresses report sent to on the report. #2730
+        - Add configuration for setting Content-Security-Policy header. #2759
+        - Add banner on staging website/emails, and STAGING_FLAGS option to hide it. #2784 #2820
+        - Do not hard code site name in database fixture. #2794
+        - Ensure OS dependencies are kept updated in development environments. #2886
+        - Enhance inactive scripts to act per-cobrand, or full deletion. #2827
+    - Open311 improvements:
+        - Support use of 'private' service definition <keywords> to mark
+          reports made in that category private. #2488
+        - Ensure any reports fetched in a category marked private are also
+          marked private on the site. #2488
+        - Add new upload_files flag which sends files/photos as part of the
+          POST service request. #2495
+        - Allow description in email template with placeholder. #2470
+        - Do not store display-only extra fields on new reports. #2560
+        - Support receiving updates from external source. #2521
+        - Improve JSON output of controller.
+        - unset external_status_code if blank in update. #2573
+        - Add support for account_id parameter to POST Service Request calls.
+        - Do not overwrite/remove protected meta data. #2598
+        - Spot multiple groups inside a <groups> element. #2641
+        - Always update problem state from first comment #2832
+    - Backwards incompatible changes:
+        - The FixMyStreet templating code will now escape all variables by
+          default. If you need to output HTML in a variable directly, you will
+          need to escape it with the `safe` filter, e.g. `[% some_html | safe %]`.
+
 * v2.6 (3rd May 2019)
     - New features:
         - (Optional) auto-suggestion of similar nearby problems,
@@ -49,6 +210,7 @@
         - Make front page cache time configurable.
         - Better working of /fakemapit/ under https.
         - Improve Open311 error output on failing GET requests.
+        - Optionally log failed geocoder searches.
     - Backwards incompatible changes:
         - If you wish the default for the showname checkbox to be checked,
           add `sub default_show_name { 1 }` to your cobrand file.

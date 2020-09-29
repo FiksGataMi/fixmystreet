@@ -151,6 +151,7 @@ sub ward : Path : Args(2) {
         if @wards;
     $c->forward( 'check_canonical_url', [ $body ] );
     $c->forward( 'stash_report_filter_status' );
+    $c->forward('stash_report_sort', [ $c->cobrand->reports_ordering ]);
     $c->forward( 'load_and_group_problems' );
 
     if ($c->get_param('ajax')) {
@@ -164,27 +165,7 @@ sub ward : Path : Args(2) {
 
     $c->stash->{stats} = $c->cobrand->get_report_stats();
 
-    my @categories = $c->stash->{body}->contacts->not_deleted->search( undef, {
-        columns => [ 'id', 'category', 'extra' ],
-        distinct => 1,
-        order_by => [ 'category' ],
-    } )->all;
-    $c->stash->{filter_categories} = \@categories;
-    $c->stash->{filter_category} = { map { $_ => 1 } $c->get_param_list('filter_category', 1) };
-
-    my $pins = $c->stash->{pins} || [];
-
-    my %map_params = (
-        latitude  => @$pins ? $pins->[0]{latitude} : 0,
-        longitude => @$pins ? $pins->[0]{longitude} : 0,
-        area      => [ $c->stash->{wards} ? map { $_->{id} } @{$c->stash->{wards}} : keys %{$c->stash->{body}->areas} ],
-        any_zoom  => 1,
-    );
-    FixMyStreet::Map::display_map(
-        $c, %map_params, pins => $pins,
-    );
-
-    $c->cobrand->tweak_all_reports_map( $c );
+    $c->forward('setup_categories_and_map');
 
     # List of wards
     if ( !$c->stash->{wards} && $c->stash->{body}->id && $c->stash->{body}->body_areas->first ) {
@@ -198,6 +179,37 @@ sub ward : Path : Args(2) {
             $c->stash->{children} = $children;
         }
     }
+}
+
+sub setup_categories_and_map :Private {
+    my ($self, $c) = @_;
+
+    my @categories = $c->stash->{body}->contacts->not_deleted->search( undef, {
+        columns => [ 'id', 'category', 'extra', 'body_id', 'send_method' ],
+        distinct => 1,
+    } )->all_sorted;
+
+    $c->cobrand->call_hook('munge_reports_category_list', \@categories);
+
+    $c->stash->{filter_categories} = \@categories;
+    $c->stash->{filter_category} = { map { $_ => 1 } $c->get_param_list('filter_category', 1) };
+    $c->forward('/report/stash_category_groups', [ \@categories ]) if $c->cobrand->enable_category_groups;
+
+    my $pins = $c->stash->{pins} || [];
+
+    my $areas = [ $c->stash->{wards} ? map { $_->{id} } @{$c->stash->{wards}} : keys %{$c->stash->{body}->areas} ];
+    $c->cobrand->call_hook(munge_reports_area_list => $areas);
+    my %map_params = (
+        latitude  => @$pins ? $pins->[0]{latitude} : 0,
+        longitude => @$pins ? $pins->[0]{longitude} : 0,
+        area      => $areas,
+        any_zoom  => 1,
+    );
+    FixMyStreet::Map::display_map(
+        $c, %map_params, pins => $pins,
+    );
+
+    $c->cobrand->tweak_all_reports_map( $c );
 }
 
 sub rss_area : Path('/rss/area') : Args(1) {
@@ -287,12 +299,12 @@ sub rss_ward : Path('/rss/reports') : Args(2) {
     if ($c->stash->{ward}) {
         # Problems sent to a council, restricted to a ward
         $c->stash->{type} = 'ward_problems';
-        $c->stash->{title_params} = { COUNCIL => $c->stash->{body}->name, WARD => $c->stash->{ward}{name} };
+        $c->stash->{title_params} = { COUNCIL => $c->stash->{body}->cobrand_name, WARD => $c->stash->{ward}{name} };
         $c->stash->{db_params} = [ $c->stash->{body}->id, $c->stash->{ward}->{id} ];
     } else {
         # Problems sent to a council
         $c->stash->{type} = 'council_problems';
-        $c->stash->{title_params} = { COUNCIL => $c->stash->{body}->name };
+        $c->stash->{title_params} = { COUNCIL => $c->stash->{body}->cobrand_name };
         $c->stash->{db_params} = [ $c->stash->{body}->id ];
     }
 
@@ -391,9 +403,7 @@ sub ward_check : Private {
         $parent_id = $c->stash->{area}->{id};
     }
 
-    my $qw = FixMyStreet::MapIt::call('area/children', [ $parent_id ],
-        type => $c->cobrand->area_types_children,
-    );
+    my $qw = $c->cobrand->fetch_area_children($parent_id);
     my %names = map { $c->cobrand->short_name({ name => $_ }) => 1 } @wards;
     my @areas;
     foreach my $area (sort { $a->{name} cmp $b->{name} } values %$qw) {
@@ -548,9 +558,51 @@ sub load_dashboard_data : Private {
 sub load_and_group_problems : Private {
     my ( $self, $c ) = @_;
 
-    $c->forward('stash_report_sort', [ $c->cobrand->reports_ordering ]);
+    my $parameters = $c->forward('load_problems_parameters');
 
+    my $body = $c->stash->{body}; # Might be undef
     my $page = $c->get_param('p') || 1;
+
+    my $problems = $c->cobrand->problems;
+    my $where = $parameters->{where};
+    my $filter = $parameters->{filter};
+
+    if ($where->{areas} || $body) {
+        $problems = $problems->to_body($body);
+    }
+
+    $problems = $problems->search(
+        $where,
+        $filter
+    )->include_comment_counts->page( $page );
+
+    $c->stash->{pager} = $problems->pager;
+
+    my ( %problems, @pins );
+    while ( my $problem = $problems->next ) {
+        if ( !$body ) {
+            add_row( $c, $problem, 0, \%problems, \@pins );
+            next;
+        }
+        # Add to bodies it was sent to
+        my $bodies = $problem->bodies_str_ids;
+        foreach ( @$bodies ) {
+            next if $_ != $body->id;
+            add_row( $c, $problem, $_, \%problems, \@pins );
+        }
+    }
+
+    $c->stash(
+        problems      => \%problems,
+        pins          => \@pins,
+    );
+
+    return 1;
+}
+
+sub load_problems_parameters : Private {
+    my ($self, $c) = @_;
+
     my $category = [ $c->get_param_list('filter_category', 1) ];
 
     my $states = $c->stash->{filter_problem_states};
@@ -563,7 +615,7 @@ sub load_and_group_problems : Private {
     my $body = $c->stash->{body}; # Might be undef
 
     my $filter = {
-        order_by => $c->stash->{sort_order},
+        order_by => [ $c->stash->{sort_order}, { -desc => 'me.id' } ],
         rows => $c->cobrand->reports_per_page,
     };
     if ($c->user_exists && $body) {
@@ -597,15 +649,10 @@ sub load_and_group_problems : Private {
         $where->{category} = $category;
     }
 
-    my $problems = $c->cobrand->problems;
-
     if ($c->stash->{wards}) {
         $where->{areas} = [
             map { { 'like', '%,' . $_->{id} . ',%' } } @{$c->stash->{wards}}
         ];
-        $problems = $problems->to_body($body);
-    } elsif ($body) {
-        $problems = $problems->to_body($body);
     }
 
     if (my $bbox = $c->get_param('bbox')) {
@@ -614,44 +661,13 @@ sub load_and_group_problems : Private {
         $where->{longitude} = { '>=', $min_lon, '<', $max_lon };
     }
 
-    my $cobrand_problems = $c->cobrand->call_hook('munge_load_and_group_problems', $where, $filter);
+    $c->cobrand->call_hook('munge_load_and_group_problems', $where, $filter);
 
-    # JS will request the same (or more) data client side
-    return if $c->get_param('js');
-
-    if ($cobrand_problems) {
-        $problems = $cobrand_problems;
-    } else {
-        $problems = $problems->search(
-            $where,
-            $filter
-        )->include_comment_counts->page( $page );
-
-        $c->stash->{pager} = $problems->pager;
-    }
-
-    my ( %problems, @pins );
-    while ( my $problem = $problems->next ) {
-        if ( !$body ) {
-            add_row( $c, $problem, 0, \%problems, \@pins );
-            next;
-        }
-        # Add to bodies it was sent to
-        my $bodies = $problem->bodies_str_ids;
-        foreach ( @$bodies ) {
-            next if $_ != $body->id;
-            add_row( $c, $problem, $_, \%problems, \@pins );
-        }
-    }
-
-    $c->stash(
-        problems      => \%problems,
-        pins          => \@pins,
-    );
-
-    return 1;
+    return {
+        where => $where,
+        filter => $filter,
+    };
 }
-
 
 sub check_non_public_reports_permission : Private {
     my ($self, $c, $where) = @_;
@@ -659,7 +675,7 @@ sub check_non_public_reports_permission : Private {
     if ( $c->user_exists ) {
         my $user_has_permission;
 
-        if ( $c->user->is_super_user ) {
+        if ( $c->user->is_superuser ) {
             $user_has_permission = 1;
         } else {
             my $body = $c->stash->{body};
@@ -702,8 +718,9 @@ sub stash_report_filter_status : Private {
 
     my @status = $c->get_param_list('status', 1);
     @status = ($c->stash->{page} eq 'my' ? 'all' : $c->cobrand->on_map_default_status) unless @status;
-    my %status = map { $_ => 1 } @status;
+    $c->cobrand->call_hook(hook_report_filter_status => \@status);
 
+    my %status = map { $_ => 1 } @status;
     my %filter_problem_states;
     my %filter_status;
 
@@ -810,7 +827,12 @@ sub ajax : Private {
     my @pins = map {
         my $p = $_;
         # lat, lon, 'colour', ID, title, type/size, draggable
-        [ $p->{latitude}, $p->{longitude}, $p->{colour}, $p->{id}, $p->{title}, '', JSON->false ]
+        my $parts = [ $p->{latitude}, $p->{longitude}, $p->{colour}, $p->{id}, $p->{title}, '', JSON->false ];
+        # Some reports may only be visible on a specific cobrand on this FMS site.
+        # If that's the case, include the base URL for the pin's cobrand here so
+        # the app can link to the right place.
+        push @$parts, $p->{base_url} if $p->{base_url};
+        $parts;
     } @{$c->stash->{pins}};
 
     my $list_html = $c->render_fragment($template);

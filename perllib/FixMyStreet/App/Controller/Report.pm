@@ -1,5 +1,6 @@
 package FixMyStreet::App::Controller::Report;
 
+use utf8;
 use Moose;
 use namespace::autoclean;
 use JSON::MaybeXS;
@@ -85,10 +86,14 @@ sub display :PathPart('') :Chained('id') :Args(0) {
     $c->forward( 'format_problem_for_display' );
 
     my $permissions = $c->stash->{_permissions} ||= $c->forward( 'check_has_permission_to',
-        [ qw/report_inspect report_edit_category report_edit_priority report_mark_private/ ] );
+        [ qw/report_inspect report_edit_category report_edit_priority report_mark_private triage/ ] );
     if (any { $_ } values %$permissions) {
         $c->stash->{template} = 'report/inspect.html';
         $c->forward('inspect');
+    }
+
+    if ($c->user_exists && $c->user->has_permission_to(contribute_as_another_user => $c->stash->{problem}->bodies_str_ids)) {
+        $c->stash->{email} = $c->user->email;
     }
 }
 
@@ -155,10 +160,20 @@ sub load_problem_or_display_error : Private {
         $c->stash->{problem} = $problem;
         my $permissions = $c->stash->{_permissions} = $c->forward( 'check_has_permission_to',
             [ qw/report_inspect report_edit_category report_edit_priority report_mark_private / ] );
-        if ( !$c->user || ($c->user->id != $problem->user->id && !($permissions->{report_inspect} || $permissions->{report_mark_private})) ) {
+
+        # If someone has clicked a unique token link in an email to them
+        my $from_email = $c->sessionid && $c->flash->{alert_to_reporter} && $c->flash->{alert_to_reporter} == $problem->id;
+
+        my $allowed = 0;
+        $allowed = 1 if $from_email;
+        $allowed = 1 if $c->user_exists && $c->user->id == $problem->user->id;
+        $allowed = 1 if $permissions->{report_inspect} || $permissions->{report_mark_private};
+
+        unless  ($allowed) {
+            my $url = '/auth?r=report/' . $problem->id;
             $c->detach(
                 '/page_error_403_access_denied',
-                [ sprintf(_('That report cannot be viewed on %s.'), $c->stash->{site_name}) ]
+                [ sprintf(_('Sorry, you don’t have permission to do that. If you are the problem reporter, or a member of staff, please <a href="%s">sign in</a> to view this report.'), $url) ]
             );
         }
     }
@@ -181,9 +196,9 @@ sub load_problem_or_display_error : Private {
 sub load_updates : Private {
     my ( $self, $c ) = @_;
 
-    my $updates = $c->model('DB::Comment')->search(
-        { problem_id => $c->stash->{problem}->id, state => 'confirmed' },
-        { order_by => [ 'confirmed', 'id' ] }
+    my $updates = $c->cobrand->updates->search(
+        { problem_id => $c->stash->{problem}->id, "me.state" => 'confirmed' },
+        { order_by => [ 'me.confirmed', 'me.id' ] }
     );
 
     my $questionnaires_still_open = $c->model('DB::Questionnaire')->search(
@@ -293,7 +308,8 @@ sub format_problem_for_display : Private {
         delete $report_hashref->{created};
         delete $report_hashref->{confirmed};
 
-        my $content = encode_json(
+        my $json = JSON::MaybeXS->new( convert_blessed => 1, utf8 => 1 );
+        my $content = $json->encode(
             {
                 report => $report_hashref,
                 updates => $c->cobrand->updates_as_hashref( $problem, $c ),
@@ -354,8 +370,6 @@ sub delete :Chained('id') :Args(0) {
     $p->lastupdate( \'current_timestamp' );
     $p->update;
 
-    $p->user->update_reputation(-1);
-
     $c->model('DB::AdminLog')->create( {
         user => $c->user->obj,
         admin_user => $c->user->from_body->name,
@@ -372,13 +386,19 @@ sub inspect : Private {
     my $problem = $c->stash->{problem};
     my $permissions = $c->stash->{_permissions};
 
-    $c->forward('/admin/categories_for_point');
+    $c->forward('/admin/reports/categories_for_point');
     $c->stash->{report_meta} = { map { 'x' . $_->{name} => $_ } @{ $c->stash->{problem}->get_extra_fields() } };
 
-    if ($c->cobrand->can('council_area_id')) {
-        my $priorities_by_category = FixMyStreet::App->model('DB::ResponsePriority')->by_categories($c->cobrand->council_area_id, @{$c->stash->{contacts}});
+    if ($c->cobrand->can('body')) {
+        my $priorities_by_category = FixMyStreet::App->model('DB::ResponsePriority')->by_categories(
+            $c->stash->{contacts},
+            body_id => $c->cobrand->body->id
+        );
         $c->stash->{priorities_by_category} = $priorities_by_category;
-        my $templates_by_category = FixMyStreet::App->model('DB::ResponseTemplate')->by_categories($c->cobrand->council_area_id, @{$c->stash->{contacts}});
+        my $templates_by_category = FixMyStreet::App->model('DB::ResponseTemplate')->by_categories(
+            $c->stash->{contacts},
+            body_id => $c->cobrand->body->id
+        );
         $c->stash->{templates_by_category} = $templates_by_category;
     }
 
@@ -394,12 +414,18 @@ sub inspect : Private {
 
     $c->stash->{max_detailed_info_length} = $c->cobrand->max_detailed_info_length;
 
-    if ( $c->get_param('save') ) {
+    if ( $c->get_param('triage') ) {
+        $c->forward('/auth/check_csrf_token');
+        $c->forward('/admin/triage/update');
+        my $redirect_uri = $c->uri_for( '/admin/triage' );
+        $c->log->debug( "Redirecting to: " . $redirect_uri );
+        $c->res->redirect( $redirect_uri );
+    }
+    elsif ( $c->get_param('save') ) {
         $c->forward('/auth/check_csrf_token');
 
         my $valid = 1;
         my $update_text = '';
-        my $reputation_change = 0;
         my %update_params = ();
 
         if ($permissions->{report_inspect}) {
@@ -435,7 +461,7 @@ sub inspect : Private {
                 $problem->confirmed( \'current_timestamp' );
             }
             if ( $problem->state eq 'hidden' ) {
-                $problem->get_photoset->delete_cached;
+                $problem->get_photoset->delete_cached(plus_updates => 1);
             }
             if ( $problem->state eq 'duplicate') {
                 if (my $duplicate_of = $c->get_param('duplicate_of')) {
@@ -454,8 +480,6 @@ sub inspect : Private {
                 $update_params{problem_state} = $problem->state;
 
                 my $state = $problem->state;
-                $reputation_change = 1 if $c->cobrand->reputation_increment_states->{$state};
-                $reputation_change = -1 if $c->cobrand->reputation_decrement_states->{$state};
 
                 # If an inspector has changed the state, subscribe them to
                 # updates
@@ -466,19 +490,14 @@ sub inspect : Private {
                 };
                 $c->user->create_alert($problem->id, $options);
             }
-
-            # If the state has been changed to action scheduled and they've said
-            # they want to raise a defect, consider the report to be inspected.
-            if ($problem->state eq 'action scheduled' && $c->get_param('raise_defect') && !$problem->get_extra_metadata('inspected')) {
-                $update_params{extra} = { 'defect_raised' => 1 };
-                $problem->set_extra_metadata( inspected => 1 );
-                $c->forward( '/admin/log_edit', [ $problem->id, 'problem', 'inspected' ] );
-            }
         }
 
         $problem->non_public($c->get_param('non_public') ? 1 : 0);
+        if ($problem->non_public) {
+            $problem->get_photoset->delete_cached(plus_updates => 1);
+        }
 
-        if ( !$c->forward( '/admin/report_edit_location', [ $problem ] ) ) {
+        if ( !$c->forward( '/admin/reports/edit_location', [ $problem ] ) ) {
             # New lat/lon isn't valid, show an error
             $valid = 0;
             $c->stash->{errors} ||= [];
@@ -486,10 +505,11 @@ sub inspect : Private {
         }
 
         if ($permissions->{report_inspect} || $permissions->{report_edit_category}) {
-            $c->forward( '/admin/report_edit_category', [ $problem, 1 ] );
+            $c->forward( '/admin/reports/edit_category', [ $problem, 1 ] );
 
             if ($c->stash->{update_text}) {
-                $update_text .= "\n\n" . $c->stash->{update_text};
+                $update_text .= "\n\n" if $update_text;
+                $update_text .= $c->stash->{update_text};
             }
 
             # The new category might require extra metadata (e.g. pothole size), so
@@ -511,22 +531,12 @@ sub inspect : Private {
             }
         }
 
-        if ($permissions->{report_inspect}) {
-            if ( $c->get_param('defect_type') ) {
-                $problem->defect_type($problem->defect_types->find($c->get_param('defect_type')));
-            } else {
-                $problem->defect_type(undef);
-            }
-        }
-
         $c->cobrand->call_hook(report_inspect_update_extra => $problem);
 
         if ($valid) {
-            if ( $reputation_change != 0 ) {
-                $problem->user->update_reputation($reputation_change);
-            }
             $problem->lastupdate( \'current_timestamp' );
             $problem->update;
+            $c->forward( '/admin/log_edit', [ $problem->id, 'problem', 'edit' ] );
             if ($update_text || %update_params) {
                 my $timestamp = \'current_timestamp';
                 if (my $saved_at = $c->get_param('saved_at')) {
@@ -590,7 +600,13 @@ sub inspect : Private {
 sub map :Chained('id') :Args(0) {
     my ($self, $c) = @_;
 
-    my $image = $c->stash->{problem}->static_map;
+    my %params;
+    if ( $c->get_param('inline_duplicate') ) {
+        $params{full_size} = 1;
+        $params{zoom} = 5;
+    }
+
+    my $image = $c->stash->{problem}->static_map(%params);
     $c->res->content_type($image->{content_type});
     $c->res->body($image->{data});
 }
@@ -639,7 +655,7 @@ sub _nearby_json :Private {
 
     my $list_html = $c->render_fragment(
         'report/nearby.html',
-        { reports => $nearby }
+        { reports => $nearby, inline_maps => $c->get_param("inline_maps") ? 1 : 0 }
     );
 
     my $json = { pins => \@pins };
@@ -664,6 +680,33 @@ sub check_has_permission_to : Private {
     my %permissions = map { $_ => $c->user->has_permission_to($_, $bodies) } @permissions;
     return \%permissions;
 };
+
+
+sub stash_category_groups : Private {
+    my ( $self, $c, $contacts, $combine_multiple ) = @_;
+
+    my %category_groups = ();
+    for my $category (@$contacts) {
+        my $group = $category->{group} // $category->get_extra_metadata('group') // [''];
+        # this could be an array ref or a string
+        my @groups = ref $group eq 'ARRAY' ? @$group : ($group);
+        if (scalar @groups > 1 && $combine_multiple) {
+            @groups = sort @groups;
+            $category->{group} = \@groups;
+            push( @{$category_groups{_('Multiple Groups')}}, $category );
+        } else {
+            push( @{$category_groups{$_}}, $category ) for @groups;
+        }
+    }
+
+    my @category_groups = ();
+    for my $group ( grep { $_ ne _('Other') && $_ ne _('Multiple Groups') } sort keys %category_groups ) {
+        push @category_groups, { name => $group, categories => $category_groups{$group} };
+    }
+    push @category_groups, { name => _('Other'), categories => $category_groups{_('Other')} } if ($category_groups{_('Other')});
+    push @category_groups, { name => _('Multiple Groups'), categories => $category_groups{_('Multiple Groups')} } if ($category_groups{_('Multiple Groups')});
+    $c->stash->{category_groups}  = \@category_groups;
+}
 
 __PACKAGE__->meta->make_immutable;
 

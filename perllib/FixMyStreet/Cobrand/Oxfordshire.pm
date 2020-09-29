@@ -37,12 +37,6 @@ sub is_council_with_case_management {
     return FixMyStreet->config('STAGING_SITE');
 }
 
-sub base_url {
-    my $self = shift;
-    return $self->next::method() if FixMyStreet->config('STAGING_SITE');
-    return 'https://fixmystreet.oxfordshire.gov.uk';
-}
-
 sub enter_postcode_text {
     my ($self) = @_;
     return 'Enter an Oxfordshire postcode, or street name and area';
@@ -58,10 +52,6 @@ sub disambiguate_location {
         span   => '0.709058,0.849434',
         bounds => [ 51.459413, -1.719500, 52.168471, -0.870066 ],
     };
-}
-
-sub example_places {
-    return ( 'OX20 1SZ', 'Park St, Woodstock' );
 }
 
 # don't send questionnaires to people who used the OCC cobrand to report their problem
@@ -85,54 +75,6 @@ sub lookup_by_ref {
         my $filter = "%T18:customer_reference,T$len:$ref,%";
         return { 'extra' => { -like => $filter } };
     }
-
-    return 0;
-}
-
-=head2 problem_response_days
-
-Returns the number of working days that are expected to elapse
-between the problem being reported and it being responded to by
-the council/body.
-If the value 'emergency' is returned, a different template block
-is triggered that has custom wording.
-
-=cut
-
-sub problem_response_days {
-    my $self = shift;
-    my $p = shift;
-
-    return 'emergency' if $p->category eq 'Street lighting';
-
-    # Temporary, see https://github.com/mysociety/fixmystreetforcouncils/issues/291
-    return 0;
-
-    return 10 if $p->category eq 'Bridges';
-    return 10 if $p->category eq 'Carriageway Defect'; # phone if urgent
-    return 10 if $p->category eq 'Debris/Spillage';
-    return 10 if $p->category eq 'Drainage';
-    return 10 if $p->category eq 'Fences';
-    return 10 if $p->category eq 'Flyposting';
-    return 10 if $p->category eq 'Footpaths/ Rights of way (usually not tarmac)';
-    return 10 if $p->category eq 'Gully and Catchpits';
-    return 10 if $p->category eq 'Ice/Snow'; # phone if urgent
-    return 10 if $p->category eq 'Manhole';
-    return 10 if $p->category eq 'Mud and Debris'; # phone if urgent
-    return 10 if $p->category eq 'Oil Spillage';  # phone if urgent
-    return 10 if $p->category eq 'Pavements';
-    return 10 if $p->category eq 'Pothole'; # phone if urgent
-    return 10 if $p->category eq 'Property Damage';
-    return 10 if $p->category eq 'Public rights of way';
-    return 10 if $p->category eq 'Road Marking';
-    return 10 if $p->category eq 'Road traffic signs';
-    return 10 if $p->category eq 'Roads/highways';
-    return 10 if $p->category eq 'Skips and scaffolding';
-    return 10 if $p->category eq 'Traffic lights'; # phone if urgent
-    return 10 if $p->category eq 'Traffic';
-    return 10 if $p->category eq 'Trees';
-    return 10 if $p->category eq 'Utilities';
-    return 10 if $p->category eq 'Vegetation';
 
     return 0;
 }
@@ -176,17 +118,19 @@ sub state_groups_inspect {
 sub open311_config {
     my ($self, $row, $h, $params) = @_;
 
-    my $extra = $row->get_extra_fields;
-    push @$extra, { name => 'external_id', value => $row->id };
-    push @$extra, { name => 'northing', value => $h->{northing} };
-    push @$extra, { name => 'easting', value => $h->{easting} };
-
-    if ($h->{closest_address}) {
-        push @$extra, { name => 'closest_address', value => "$h->{closest_address}" }
-    }
-    $row->set_extra_fields( @$extra );
-
+    $params->{multi_photos} = 1;
     $params->{extended_description} = 'oxfordshire';
+}
+
+sub open311_extra_data {
+    my ($self, $row, $h, $extra) = @_;
+
+    return [
+        { name => 'external_id', value => $row->id },
+        { name => 'northing', value => $h->{northing} },
+        { name => 'easting', value => $h->{easting} },
+        $h->{closest_address} ? { name => 'closest_address', value => "$h->{closest_address}" } : (),
+    ];
 }
 
 sub open311_config_updates {
@@ -198,16 +142,16 @@ sub should_skip_sending_update {
     my ($self, $update ) = @_;
 
     # Oxfordshire stores the external id of the problem as a customer reference
-    # in metadata
-    return 1 if !$update->problem->get_extra_metadata('customer_reference');
+    # in metadata, it arrives in a fetched update (but give up if it never does,
+    # or the update is for an old pre-ref report)
+    my $customer_ref = $update->problem->get_extra_metadata('customer_reference');
+    my $diff = time() - $update->confirmed->epoch;
+    return 1 if !$customer_ref && $diff > 60*60*24;
+    return 'WAIT' if !$customer_ref;
+    return 0;
 }
 
 sub on_map_default_status { return 'open'; }
-
-sub contact_email {
-    my $self = shift;
-    return join( '@', 'highway.enquiries', 'oxfordshire.gov.uk' );
-}
 
 sub admin_user_domain { 'oxfordshire.gov.uk' }
 
@@ -226,33 +170,12 @@ sub admin_pages {
 
     my $pages = $self->next::method();
 
-    # Oxfordshire have a custom admin page for downloading reports in an Exor-
-    # friendly format which anyone with report_instruct permission can use.
-    if ( $user->has_body_permission_to('report_instruct') ) {
-        $pages->{exordefects} = [ ('Download Exor RDI'), 10 ];
-    }
     if ( $user->has_body_permission_to('defect_type_edit') ) {
         $pages->{defecttypes} = [ ('Defect Types'), 11 ];
         $pages->{defecttype_edit} = [ undef, undef ];
     };
 
     return $pages;
-}
-
-sub defect_types {
-    {
-        SFP2 => "SFP2: sweep and fill <1m2",
-        POT2 => "POT2",
-    };
-}
-
-sub exor_rdi_link_id { 1989169 }
-sub exor_rdi_link_length { 50 }
-
-sub reputation_increment_states {
-    return {
-        'action scheduled' => 1,
-    };
 }
 
 sub user_extra_fields {
@@ -276,14 +199,30 @@ sub available_permissions {
     my $perms = $self->next::method();
     $perms->{Bodies}->{defect_type_edit} = "Add/edit defect types";
 
-    delete $perms->{Problems}->{report_edit};
-    delete $perms->{Problems}->{report_edit_category};
-    delete $perms->{Problems}->{report_edit_priority};
-    delete $perms->{Problems}->{report_inspect};
-    delete $perms->{Problems}->{report_instruct};
-    delete $perms->{Problems}->{planned_reports};
-
     return $perms;
+}
+
+sub dashboard_export_problems_add_columns {
+    my $self = shift;
+    my $c = $self->{c};
+
+    push @{$c->stash->{csv}->{headers}}, "HIAMS/Exor Ref";
+    push @{$c->stash->{csv}->{columns}}, "external_ref";
+
+    $c->stash->{csv}->{extra_data} = sub {
+        my $report = shift;
+        # Try and get a HIAMS reference first of all
+        my $ref = $report->get_extra_metadata('customer_reference');
+        unless ($ref) {
+            # No HIAMS ref which means it's either an older Exor report
+            # or a HIAMS report which hasn't had its reference set yet.
+            # We detect the latter case by the id and external_id being the same.
+            $ref = $report->external_id if $report->id ne ( $report->external_id || '' );
+        }
+        return {
+            external_ref => ( $ref || '' ),
+        };
+    };
 }
 
 1;

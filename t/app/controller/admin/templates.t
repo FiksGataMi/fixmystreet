@@ -8,18 +8,36 @@ my $superuser = $mech->create_user_ok('superuser@example.com', name => 'Super Us
 
 my $oxfordshire = $mech->create_body_ok(2237, 'Oxfordshire County Council');
 my $oxfordshirecontact = $mech->create_contact_ok( body_id => $oxfordshire->id, category => 'Potholes', email => 'potholes@example.com' );
+my $oxfordshirecontact2 = $mech->create_contact_ok( body_id => $oxfordshire->id, category => 'Flytipping', email => 'flytipping@example.com' );
 my $oxfordshireuser = $mech->create_user_ok('counciluser@example.com', name => 'Council User', from_body => $oxfordshire);
 
-my $dt = DateTime->new(
-    year   => 2011,
-    month  => 04,
-    day    => 16,
-    hour   => 15,
-    minute => 47,
-    second => 23
-);
+my $bromley = $mech->create_body_ok(2482, 'Bromley Borough Council');
+my $bromleycontact = $mech->create_contact_ok( body_id => $bromley->id, category => 'Potholes', email => 'potholes@example.com' );
+my $bromleyuser = $mech->create_user_ok('bromleyuser@example.com', name => 'Council User', from_body => $bromley);
+$bromleyuser->user_body_permissions->find_or_create({
+    body => $bromley,
+    permission_type => 'report_inspect',
+});
+my $bromleytemplate = $bromley->response_templates->create({
+    title => "Bromley-specific response template.",
+    text => "This template will only appear on the Bromley cobrand.",
+});
 
-my $report = FixMyStreet::App->model('DB::Problem')->find_or_create(
+my $tfl = $mech->create_body_ok(2482, 'TfL');
+my $tflcontact = $mech->create_contact_ok( body_id => $tfl->id, category => 'Potholes', email => 'potholes@example.com' );
+my $tfluser = $mech->create_user_ok('tfluser@example.com', name => 'Council User', from_body => $tfl);
+$tfluser->user_body_permissions->find_or_create({
+    body => $tfl,
+    permission_type => 'report_inspect',
+});
+my $tfltemplate = $tfl->response_templates->create({
+    title => "TfL-specific response template.",
+    text => "This template will only appear on the TfL cobrand.",
+});
+
+my $dt = DateTime->now();
+
+my $report = FixMyStreet::DB->resultset('Problem')->find_or_create(
     {
         postcode           => 'SW1A 1AA',
         bodies_str         => '2504',
@@ -45,8 +63,6 @@ my $report = FixMyStreet::App->model('DB::Problem')->find_or_create(
     }
 );
 
-$mech->log_in_ok( $superuser->email );
-
 my $report_id = $report->id;
 ok $report, "created test report - $report_id";
 
@@ -63,7 +79,37 @@ subtest "response templates can be added" => sub {
     };
     $mech->submit_form_ok( { with_fields => $fields } );
 
-     is $oxfordshire->response_templates->count, 1, "Response template was added";
+    is $oxfordshire->response_templates->count, 1, "Response template was added";
+};
+
+subtest 'check log of the above' => sub {
+    my $template_id = $oxfordshire->response_templates->first->id;
+    $mech->get_ok('/admin/users/' . $superuser->id . '/log');
+    $mech->content_contains('Added template <a href="/admin/templates/' . $oxfordshire->id . '/' . $template_id . '">Report acknowledgement</a>');
+};
+
+subtest "but not another with the same title" => sub {
+    my $fields = {
+        title => "Report acknowledgement",
+        text => "Another report acknowledgement.",
+        auto_response => undef,
+        "contacts[".$oxfordshirecontact->id."]" => 1,
+    };
+    my $list_url = "/admin/templates/" . $oxfordshire->id;
+    $mech->get_ok( "$list_url/new" );
+    $mech->submit_form_ok( { with_fields => $fields } );
+    is $mech->uri->path, "$list_url/new", 'not redirected';
+    $mech->content_contains( 'Please correct the errors below' );
+    $mech->content_contains( 'There is already a template with that title.' );
+
+    my @ts = $oxfordshire->response_templates->all;
+    is @ts, 1, "No new response template was added";
+
+    my $url = "$list_url/" . $ts[0]->id;
+    $mech->get_ok($url);
+    $mech->submit_form_ok( { with_fields => $fields } );
+    is $mech->uri->path, $list_url, 'redirected';
+    is $oxfordshire->response_templates->count, 1, "No new response template was added";
 };
 
 subtest "response templates are included on page" => sub {
@@ -193,7 +239,6 @@ subtest "auto-response templates that duplicate external_status_code can't be ad
     });
     is $oxfordshire->response_templates->count, 1, "Initial response template was created";
 
-
     $mech->log_in_ok( $superuser->email );
     $mech->get_ok( "/admin/templates/" . $oxfordshire->id . "/new" );
 
@@ -229,6 +274,92 @@ subtest "templates that set state and external_status_code can't be added" => su
     $mech->content_contains( 'State and external status code cannot be used simultaneously.' );
 
     is $oxfordshire->response_templates->count, 0, "Invalid response template wasn't added";
+};
+
+subtest "category groups are shown" => sub {
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => [ 'oxfordshire' ],
+        COBRAND_FEATURES => {
+            category_groups => {
+                oxfordshire => 1,
+            },
+            multiple_category_groups => {
+                oxfordshire => 1,
+            },
+        },
+    }, sub {
+
+        $mech->log_in_ok( $superuser->email );
+
+        $mech->get_ok( "/admin/templates/" . $oxfordshire->id . "/new" );
+        $mech->content_contains("No Group") or diag $mech->content;
+        $mech->content_lacks("Multiple Groups");
+        $mech->content_lacks("These categories appear in more than one group:");
+
+        $oxfordshirecontact->set_extra_metadata( group => [ 'Highways' ] );
+        $oxfordshirecontact->update;
+        $oxfordshirecontact2->set_extra_metadata( group => [ 'Street Cleaning' ] );
+        $oxfordshirecontact2->update;
+        $mech->get_ok( "/admin/templates/" . $oxfordshire->id . "/new" );
+        $mech->content_lacks("No Group");
+        $mech->content_lacks("Multiple Groups");
+        $mech->content_lacks("These categories appear in more than one group:");
+        $mech->content_contains("Highways");
+        $mech->content_contains("Street Cleaning");
+
+        $oxfordshirecontact->set_extra_metadata( group => [ 'Highways', 'Roads & Pavements' ] );
+        $oxfordshirecontact->update;
+        $oxfordshirecontact2->set_extra_metadata( group => [ 'Street Cleaning' ] );
+        $oxfordshirecontact2->update;
+        $mech->get_ok( "/admin/templates/" . $oxfordshire->id . "/new" );
+        $mech->content_lacks("No Group");
+        $mech->content_contains("Multiple Groups");
+        $mech->content_contains("These categories appear in more than one group:");
+        $mech->content_contains("Highways; Roads &amp; Pavements");
+        $mech->content_contains("Street Cleaning");
+    };
+};
+
+subtest "TfL cobrand only shows TfL templates" => sub {
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => [ 'tfl' ],
+        COBRAND_FEATURES => { internal_ips => { tfl => [ '127.0.0.1' ] } },
+    }, sub {
+        $report->update({
+            category => $tflcontact->category,
+            bodies_str => $tfl->id,
+            latitude => 51.402096,
+            longitude => 0.015784,
+            state => 'confirmed',
+            areas => ',2482,',
+        });
+        $mech->log_in_ok( $tfluser->email );
+
+        $mech->get_ok("/report/" . $report->id);
+        $mech->content_contains( $tfltemplate->text );
+        $mech->content_contains( $tfltemplate->title );
+        $mech->content_lacks( $bromleytemplate->text );
+        $mech->content_lacks( $bromleytemplate->title );
+
+        $mech->log_out_ok;
+    };
+};
+
+subtest "Bromley cobrand only shows Bromley templates" => sub {
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => [ 'bromley', 'tfl' ],
+    }, sub {
+        $report->update({ category => $bromleycontact->category, bodies_str => $bromley->id });
+        $mech->log_in_ok( $bromleyuser->email );
+
+        $mech->get_ok("/report/" . $report->id);
+        $mech->content_contains( $bromleytemplate->text );
+        $mech->content_contains( $bromleytemplate->title );
+        $mech->content_lacks( $tfltemplate->text );
+        $mech->content_lacks( $tfltemplate->title );
+
+        $mech->log_out_ok;
+    };
 };
 
 done_testing();

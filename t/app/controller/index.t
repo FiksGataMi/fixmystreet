@@ -58,7 +58,7 @@ subtest "does pc, (x,y), (e,n) or (lat,lon) go to /around" => sub {
     }
 };
 
-my $problem_rs = FixMyStreet::App->model('DB::Problem');
+my $problem_rs = FixMyStreet::DB->resultset('Problem');
 my $num = $problem_rs->count;
 
 my @edinburgh_problems = $mech->create_problems_for_body(5, 2651, 'Front page');
@@ -89,6 +89,13 @@ subtest "prefilters /around if user has categories" => sub {
     $mech->get_ok('/');
     # NB can't use visible_form_values because categories field is hidden
     $mech->content_contains("Cows,Potholes");
+};
+
+subtest "prefilters /around if filter_category given in URL" => sub {
+    $mech->get_ok('/?filter_category=MyUniqueTestCategory&filter_group=MyUniqueTestGroup');
+    # NB can't use visible_form_values because fields are hidden
+    $mech->content_contains("MyUniqueTestCategory");
+    $mech->content_contains("MyUniqueTestGroup");
 };
 
 END {

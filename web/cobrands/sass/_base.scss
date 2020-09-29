@@ -5,9 +5,15 @@ $meta-font: Helmet, Freesans, sans-serif !default;
 $heading-font: 'Museo300-display', MuseoSans, Helmet, Freesans, sans-serif !default;
 $menu-image: 'menu-white' !default;
 
+$link-color: #005ea5 !default;
+$link-hover-color: #2b8cc4 !default;
+$link-visited-color: $link-color !default;
+$link-text-decoration: none !default;
+$link-hover-text-decoration: underline !default;
+
 $itemlist_item_background: #f6f6f6 !default;
 $itemlist_item_background_hover: #e6e6e6 !default;
-$col_big_numbers: #ccc !default;
+$col_big_numbers: #666 !default;
 $col_fixed_label: #00BD08 !default;
 $col_fixed_label_light: mix($col_fixed_label, #fff, 10%) !default;
 
@@ -127,11 +133,9 @@ ol.big-numbers {
       top:-0.2em;
       color:$col_big_numbers;
       line-height:1;
-      font: {
-        family: $meta-font;
-        weight:bold;
-        size:2.5rem;
-      }
+      font-family: $meta-font;
+      font-weight: bold;
+      font-size: 2.5rem;
     }
   }
 }
@@ -186,17 +190,17 @@ select {
 
 a,
 .fake-link {
-  text-decoration: none;
-  color: #0BA7D1;
+  text-decoration: $link-text-decoration;
+  color: $link-color;
 
   &:visited {
-    color: #0BA7D1;
+    color: $link-visited-color;
   }
 
   &:hover,
   &:active {
-    text-decoration: underline;
-    color: #0D7CCE;
+    text-decoration: $link-hover-text-decoration;
+    color: $link-hover-color;
   }
 }
 
@@ -274,7 +278,8 @@ textarea {
 }
 
 label,
-legend {
+legend,
+.label {
   display: block;
   margin-top: 1.25em;
   margin-bottom: 0.5em;
@@ -327,6 +332,45 @@ select.form-control {
   max-width: 27em;
 }
 
+// Handy for lining up "child" form groups below show/hide checkboxes.
+.form-group--indented {
+  padding-left: 2em;
+}
+
+.form-check {
+  margin-top: 1.5em; // match margin-top on regular labels
+  padding-left: 2em;
+  position: relative;
+  
+  & > input {
+    position: absolute;
+    top: 0.3em;
+    left: 0.5em;
+  }
+
+  label {
+    margin-top: 0.5em;
+  }
+}
+
+.form-check--inline {
+  margin: 0.5em 0;
+
+  label {
+    margin: 0;
+    display: inline;
+  }
+
+  .form-hint {
+    display: inline;
+
+    &:before {
+      content: "\2013";
+      margin: 0 0.3em 0 0.1em;
+    }
+  }
+}
+
 .required-text {
   position: absolute;
   #{$right}: 0;
@@ -375,12 +419,43 @@ select.form-control {
           margin: 0 0 0.5em 0;
         }
     }
+
+    small {
+        margin: 0.5em auto;
+        display: block;
+        text-align: center;
+        font-style: normal;
+        width: 75%;
+    }
 }
 
 // Purposefully *not* wrapped in `html.js` because the margin-top helps
 // separate the social login buttons from the .description_tips list.
 .form-section-preview--next {
     margin-top: 1.5em;
+}
+
+/* On a reporting page MyW/anon */
+small#or {
+    margin: 1em auto;
+    width: 100%;
+}
+small#or:before, small#or:after {
+    background-color: #fff;
+    content: "";
+    display: inline-block;
+    height: 2px;
+    position: relative;
+    vertical-align: middle;
+    width: 50%;
+}
+small#or:before {
+    right: 1em;
+    margin-left: -50%;
+}
+small#or:after {
+    left: 1em;
+    margin-right: -50%;
 }
 
 // grey background, full width box
@@ -407,7 +482,7 @@ select.form-control {
     margin: 0 0 0.5em;
   }
 
-  h5 {
+  h3 {
     margin: 0 0 1em;
     font-size: 1.125em;
     font-weight: normal;
@@ -421,7 +496,7 @@ select.form-control {
 
 .change_location {
     color: #666;
-    margin: 0;
+    margin: 0 0 1em;
 
     // No need for this element on mobile, where they can't click the map,
     // and there's already a "Report" button in the header that leads to
@@ -454,20 +529,23 @@ select.form-control {
 
 .form-txt-submit-box {
   @include clearfix();
+  @include flex-container();
+  @include flex-wrap(wrap);
   input[type=password],
   input[type=tel],
   input[type=number],
   input[type=text],
-  input[type=email] {
-    width: 65%;
-    float: $left;
+  input[type=email],
+  select {
+    width: auto;
+    max-width: none;
+    @include flex(72 0 auto);
   }
   input[type=submit] {
-    float: $right;
-    width:28%;
-    margin-#{$right}: 0.25em;
-    padding-top:0.6em;
-    padding-bottom:0.5em;
+    @include flex(28 0 auto);
+    margin: 0 0.25em 0.5em;
+    padding-top: 0.6em;
+    padding-bottom: 0.5em;
   }
 }
 
@@ -580,6 +658,19 @@ ul.error {
 }
 
 /*** LAYOUT ***/
+
+.dev-site-notice {
+    font-size: 1.5em;
+    color: #fff;
+    background-color: #f00;
+    position: absolute;
+    padding: 1em 5em;
+    top: 1em;
+    left: -5em;
+    transform: rotate(-45deg);
+    z-index: 2;
+    pointer-events: none;
+}
 
 // Padding creates page margins on mobile
 .container {
@@ -719,7 +810,6 @@ ul.error {
     background-repeat: no-repeat;
     color: #333 !important;
     padding: 1em;
-    text-transform: uppercase;
     font-size: 0.6875em;
     font-family: $meta-font;
     font-weight: normal;
@@ -1399,6 +1489,12 @@ input.final-submit {
   }
 }
 
+.item-list__item .duplicate-map {
+  padding: 1em;
+  clear: both;
+  text-align: center;
+}
+
 .problem-header .update-img,
 .item-list .update-img {
     float: $right;
@@ -1592,6 +1688,12 @@ input.final-submit {
     height: 100%;
     // Needs to be position:absolute for the mobile banners to show on top
     position: absolute;
+
+    &.heatmap-active {
+      .olLayerGrid, .olBackBuffer {
+        filter: grayscale(0.75);
+      }
+    }
   }
 }
 
@@ -1602,15 +1704,18 @@ html.js #map .noscript {
   display: none;
 }
 
-// OpenLayers fix for navigation being top right
-// Left and right so that zoom can be left, pan right.
 #fms_pan_zoom {
-  top: 0.5em; // This will be overridden in JS if there's a full screen map with banner
-  #{$left}: 0.5em;
+  top: 0.5em;
   #{$right}: 0.5em;
 }
 
-// Openlayers map controls (overrides)
+#fms_pan_zoom_panup,
+#fms_pan_zoom_pandown,
+#fms_pan_zoom_panleft,
+#fms_pan_zoom_panright {
+    display: none;
+}
+
 #fms_pan_zoom_panup,
 #fms_pan_zoom_pandown,
 #fms_pan_zoom_panleft,
@@ -1658,13 +1763,13 @@ html.js #map .noscript {
 #fms_pan_zoom_zoomin {
   background-position: -84px 0;
   padding-top: 44px;
-  #{$left}: 0;
+  #{$right}: 0;
   top: 0;
 }
 #fms_pan_zoom_zoomout {
   background-position: -120px 100%;
   padding-top: 44px;
-  #{$left}: 0;
+  #{$right}: 0;
   top: 44px;
 }
 
@@ -1675,7 +1780,7 @@ html.js #map .noscript {
     height: 12px;
     margin-#{$left}: 8px;
     vertical-align: -0.1em;
-    background-size: 96px 12px;
+    background-size: 108px 12px;
     @include svg-background-image('/cobrands/fixmystreet/images/map-tools');
 }
 
@@ -1711,9 +1816,14 @@ html.js #map .noscript {
         }
     }
 
+    #problems_nearby,
     #try_again,
     #mob_ok {
         width: 50%;
+    }
+
+    #try_again {
+        display: none;
     }
 
     .feed:after {
@@ -1724,11 +1834,6 @@ html.js #map .noscript {
     #hide_pins_link:after {
         @extend %sub-map-link-icon;
         background-position: -24px 0;
-    }
-
-    #map_permalink:after {
-        @extend %sub-map-link-icon;
-        background-position: -48px 0;
     }
 
     #fms_shortlist_all:after {
@@ -1745,6 +1850,11 @@ html.js #map .noscript {
         @extend %sub-map-link-icon;
         background-position: -84px 0;
     }
+
+    #map_filter:after {
+        @extend %sub-map-link-icon;
+        background-position: -96px 0;
+    }
 }
 
 // Want some visual consistency between the top and bottom bars on mobile.
@@ -1753,6 +1863,11 @@ html.js #map .noscript {
     background-color: #333;
     background-color: rgba(#000, 0.7);
     color: #fff;
+}
+
+// "Selected" styling for the report-list-filter toggle when selected.
+.mobile-filters-active #map_filter {
+    background: #000;
 }
 
 // On mobile, once #mob_ok has been pressed, the new report form is shown,
@@ -1765,6 +1880,10 @@ html.js #map .noscript {
     // "Fade out" the map.
     top: 30px;
     background-color: rgba(#000, 0.3);
+
+    #problems_nearby {
+        display: none;
+    }
 
     #try_again,
     #mob_ok {
@@ -1825,7 +1944,6 @@ html.js #map .noscript {
   .map-fullscreen & {
     display: block;
   }
-  text-transform: uppercase;
   text-align: center;
   font-family: $heading-font;
   line-height: 1em;
@@ -1838,10 +1956,8 @@ html.js #map .noscript {
   padding:0.75em 30px;
   a {
     @include button-reset(#333, #1a1a1a, #1a1a1a, #fff, #333, #1a1a1a, #1a1a1a, #fff);
-    font: {
-      weight:normal;
-      size:0.875em;
-    }
+    font-weight: normal;
+    font-size: 0.875em;
     line-height:1;
     padding:0.5em 0.75em;
     position:absolute;
@@ -1859,10 +1975,6 @@ html.js #map .noscript {
 }
 .olControlAttribution img {
     vertical-align: bottom;
-}
-.olControlPermalink {
-    bottom: 3px !important;
-    #{$right}: 3px;
 }
 .olControlDragFeatureFMSOver {
     cursor: move;
@@ -1975,10 +2087,9 @@ img.pin {
   background-color: #333;
   border-radius: 0.25em;
   padding: 0.25em;
-  // Offset from top same as fms_pan_zoom, from left so as not
-  // to appear on top of zoom buttons (0.5em, 36px, 0.5em)
+  // Offset from top and left same as fms_pan_zoom
   top: 0.5em;
-  #{$left}: 3.25em;
+  #{$left}: 0.5em;
   .map-reporting & {
     // Same as fms_pan_zoom above, leaving space for the top bar when reporting
     top: 2.75em;
@@ -1993,7 +2104,9 @@ label .muted {
 }
 
 .form-hint {
+  display: block;
   color: #666;
+  margin-bottom: 0.5em;
 
   // Reduce space between labels and their form-hints
   label + & {
@@ -2038,10 +2151,8 @@ label .muted {
   display: inline-block;
 }
 
-#problem_form {
-  & > label:first-child {
+#form_category_row > label:first-child {
     margin-top: 0;
-  }
 }
 
 .box-warning,
@@ -2089,6 +2200,14 @@ label .muted {
             }
         }
     }
+}
+
+.category_meta_message.btn {
+  display: block;
+}
+
+.js-hide-if-public-category {
+  display: none;
 }
 
 .asset-spot:before {
@@ -2208,11 +2327,9 @@ label .muted {
   text-align:center;
   margin: 1em;
   h2 {
-    font: {
-      style:italic;
-      family: $meta-font;
-      size:1.1875em;
-    }
+    font-style: italic;
+    font-family: $meta-font;
+    font-size: 1.1875em;
     color:#4d4d4d;
   }
   p {
@@ -2231,31 +2348,26 @@ label .muted {
       margin-bottom: 0.5em;
     }
     div {
-      display:table;
-      width:100%;
+      @include flex-container;
+      @include flex-wrap(wrap);
+      width: 100%;
       background:#fff;
       border:1px solid $primary_b;
       input#pc {
-        display:table-cell;
-        margin:0;
-        padding:0.25em 2%;
-        width:86%;
+        @include flex(86 0 auto);
+        width: 50%;
         border:none;
         background:none;
         line-height:1.5em;
       }
       input#sub {
-        display:table-cell;
         border:none;
-        padding:0;
-        margin:0;
-        width:14%;
-        height:35px;
+        padding: 0.5em;
+        @include flex(14 0 auto);
         background:#000;
         color:#fff;
-        text-transform:uppercase;
         @include border-radius(0);
-        &:hover {
+        &:hover, &:focus {
           background:#333;
         }
       }
@@ -2267,10 +2379,8 @@ label .muted {
     background:#1a1a1a;
     color:#C8C8C8;
     padding:0.5em;
-    font: {
-      family: $meta-font;
-      size:0.8125em;
-    }
+    font-family: $meta-font;
+    font-size: 0.8125em;
     @include border-radius(0 0 0.25em 0.25em);
     &:hover {
       text-decoration:none;
@@ -2303,10 +2413,8 @@ a#geolocate_link.loading, .btn--geolocate.loading {
     text-align:center;
     padding:1em;
     line-height:1.25em;
-    font: {
-      size:0.8125em;
-      weight:bold;
-    }
+    font-size: 0.8125em;
+    font-weight: bold;
   }
   big {
     display:block;
@@ -2336,11 +2444,17 @@ a#geolocate_link.loading, .btn--geolocate.loading {
     .a {
         background: #f6f6f6;
     }
-    img[width="16"] {
-        margin-top: 4px;
-        margin-#{$left}: 0.5em;
-        float: $right;
-    }
+}
+
+.alerts-rss-link {
+  position: relative;
+  z-index: 1; // stack in front of the position:relative .label-containing-checkbox
+
+  img {
+    margin-top: 4px;
+    margin-#{$left}: 0.5em;
+    float: $right;
+  }
 }
 
 .alerts__nearby-activity {
@@ -2383,7 +2497,7 @@ a#geolocate_link.loading, .btn--geolocate.loading {
     padding-#{$left}: 24px;
 
     // Close up space between this and #rss_local
-    margin-top: -1em;
+    margin-top: -0.5em;
 }
 
 .confirmation-header {

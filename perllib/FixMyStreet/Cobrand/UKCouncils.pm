@@ -5,6 +5,7 @@ use strict;
 use warnings;
 
 use Carp;
+use List::Util qw(min max);
 use URI::Escape;
 use LWP::Simple;
 use URI;
@@ -13,6 +14,11 @@ use JSON::MaybeXS;
 
 sub is_council {
     1;
+}
+
+sub suggest_duplicates {
+    my $self = shift;
+    return $self->feature('suggest_duplicates');
 }
 
 sub path_to_web_templates {
@@ -43,17 +49,39 @@ sub restriction {
 }
 
 # UK cobrands assume that each MapIt area ID maps both ways with one
-# body. Except TfL.
+# body. Except TfL and Highways England.
 sub body {
     my $self = shift;
-    my $body = FixMyStreet::DB->resultset('Body')->for_areas($self->council_area_id)->search({ name => { '!=', 'TfL' } })->first;
+    my $body = FixMyStreet::DB->resultset('Body')->for_areas($self->council_area_id)->search({ name => { 'not_in', ['TfL', 'Highways England'] } })->first;
     return $body;
 }
+
+sub cut_off_date { '' }
 
 sub problems_restriction {
     my ($self, $rs) = @_;
     return $rs if FixMyStreet->staging_flag('skip_checks');
-    return $rs->to_body($self->body);
+    $rs = $rs->to_body($self->body);
+    if (my $date = $self->cut_off_date) {
+        my $table = ref $rs eq 'FixMyStreet::DB::ResultSet::Nearby' ? 'problem' : 'me';
+        $rs = $rs->search({
+            "$table.confirmed" => { '>=', $date }
+        });
+    }
+    return $rs;
+}
+
+sub problems_sql_restriction {
+    my ($self, $item_table) = @_;
+    my $q = '';
+    if (!$self->is_two_tier && $item_table ne 'comment') {
+        my $body_id = $self->body->id;
+        $q .= "AND regexp_split_to_array(bodies_str, ',') && ARRAY['$body_id']";
+    }
+    if (my $date = $self->cut_off_date) {
+        $q .= " AND confirmed >= '$date'";
+    }
+    return $q;
 }
 
 sub problems_on_map_restriction {
@@ -96,22 +124,37 @@ sub users_restriction {
         'me.id' => [ { -in => $problem_user_ids }, { -in => $update_user_ids } ],
     ];
     if ($self->can('admin_user_domain')) {
-        my $domain = $self->admin_user_domain;
-        push @$or_query, email => { ilike => "%\@$domain" };
+        my @domains = $self->admin_user_domain;
+        @domains = map { { ilike => "%\@$_" } } @domains;
+        @domains = [ @domains ] if @domains > 1;
+        push @$or_query, email => @domains;
     }
 
-    return $rs->search($or_query);
+    my $query = {
+        is_superuser => 0,
+        -or => $or_query
+    };
+    return $rs->search($query);
 }
 
 sub base_url {
     my $self = shift;
-    my $base_url = FixMyStreet->config('BASE_URL');
+
+    my $base_url = $self->feature('base_url');
+    return $base_url if $base_url;
+
+    $base_url = FixMyStreet->config('BASE_URL');
     my $u = $self->council_url;
     if ( $base_url !~ /$u/ ) {
         $base_url =~ s{(https?://)(?!www\.)}{$1$u.}g;
         $base_url =~ s{(https?://)www\.}{$1$u.}g;
     }
     return $base_url;
+}
+
+sub example_places {
+    my $self = shift;
+    return $self->feature('example_places') || $self->next::method();
 }
 
 sub enter_postcode_text {
@@ -129,6 +172,12 @@ sub area_check {
     if ($council_match) {
         return 1;
     }
+    return ( 0, $self->area_check_error_message($params, $context) );
+}
+
+sub area_check_error_message {
+    my ( $self, $params, $context ) = @_;
+
     my $url = 'https://www.fixmystreet.com/';
     if ($context eq 'alert') {
         $url .= 'alert';
@@ -140,9 +189,8 @@ sub area_check {
     $url .= '?latitude=' . URI::Escape::uri_escape( $self->{c}->get_param('latitude') )
          .  '&amp;longitude=' . URI::Escape::uri_escape( $self->{c}->get_param('longitude') )
       if $self->{c}->get_param('latitude');
-    my $error_msg = "That location is not covered by " . $self->council_name . ".
+    return "That location is not covered by " . $self->council_name . ".
 Please visit <a href=\"$url\">the main FixMyStreet site</a>.";
-    return ( 0, $error_msg );
 }
 
 # All reports page only has the one council.
@@ -154,8 +202,19 @@ sub all_reports_single_body {
 sub reports_body_check {
     my ( $self, $c, $code ) = @_;
 
+    # Deal with Bexley/Greenwich name not starting with short name
+    if ($code =~ /bexley|greenwich/i) {
+        my $body = $c->model('DB::Body')->search( { name => { -like => "%$code%" } } )->single;
+        $c->stash->{body} = $body;
+        return $body;
+    }
+
     # We want to make sure we're only on our page.
-    unless ( $self->council_name =~ /^\Q$code\E/ ) {
+    my $council_name = $self->council_name;
+    if (my $override = $self->all_reports_single_body) {
+        $council_name = $override->{name};
+    }
+    unless ( $council_name =~ /^\Q$code\E/ ) {
         $c->res->redirect( 'https://www.fixmystreet.com' . $c->req->uri->path_query, 301 );
         $c->detach();
     }
@@ -180,8 +239,8 @@ sub owns_problem {
     } else { # Object
         @bodies = values %{$report->bodies};
     }
-    # Want to ignore the TfL body that covers London councils
-    my %areas = map { %{$_->areas} } grep { $_->name ne 'TfL' } @bodies;
+    # Want to ignore the TfL body that covers London councils, and HE that is all England
+    my %areas = map { %{$_->areas} } grep { $_->name !~ /TfL|Highways England/ } @bodies;
     return $areas{$self->council_area_id} ? 1 : undef;
 }
 
@@ -206,15 +265,21 @@ sub base_url_for_report {
 
 sub relative_url_for_report {
     my ( $self, $report ) = @_;
-    return $self->owns_problem($report) ? "" : FixMyStreet->config('BASE_URL');
+    return "" if $self->owns_problem($report);
+    return FixMyStreet::Cobrand::TfL->base_url if $report->cobrand eq 'tfl';
+    return FixMyStreet->config('BASE_URL');
 }
 
 sub admin_allow_user {
     my ( $self, $user ) = @_;
     return 1 if $user->is_superuser;
     return undef unless defined $user->from_body;
+    # Make sure TfL staff can't access other London cobrand admins
+    return undef if $user->from_body->name eq 'TfL';
     return $user->from_body->areas->{$self->council_area_id};
 }
+
+sub admin_show_creation_graph { 0 }
 
 sub available_permissions {
     my $self = shift;
@@ -231,6 +296,39 @@ sub available_permissions {
 sub prefill_report_fields_for_inspector { 1 }
 
 sub social_auth_disabled { 1 }
+
+sub munge_report_new_bodies {
+    my ($self, $bodies) = @_;
+
+    my %bodies = map { $_->name => 1 } values %$bodies;
+    if ( $bodies{'TfL'} ) {
+        # Presented categories vary if we're on/off a red route
+        my $tfl = FixMyStreet::Cobrand::TfL->new({ c => $self->{c} });
+        $tfl->munge_surrounding_london($bodies);
+    }
+
+    if ( $bodies{'Highways England'} ) {
+        my $c = $self->{c};
+        my $he = FixMyStreet::Cobrand::HighwaysEngland->new({ c => $c });
+        my $on_he_road = $c->stash->{on_he_road} = $he->report_new_is_on_he_road;
+
+        if (!$on_he_road) {
+            %$bodies = map { $_->id => $_ } grep { $_->name ne 'Highways England' } values %$bodies;
+        }
+    }
+}
+
+sub munge_report_new_contacts {
+    my ($self, $contacts) = @_;
+
+    my %bodies = map { $_->body->name => $_->body } @$contacts;
+    if ( $bodies{'TfL'} ) {
+        # Presented categories vary if we're on/off a red route
+        my $tfl = FixMyStreet::Cobrand->get_class_for_moniker( 'tfl' )->new({ c => $self->{c} });
+        $tfl->munge_red_route_categories($contacts);
+    }
+}
+
 
 =head2 lookup_site_code
 
@@ -249,13 +347,43 @@ see Buckinghamshire or Lincolnshire for an example.
 sub lookup_site_code {
     my $self = shift;
     my $row = shift;
-    my $buffer = shift;
+    my $field = shift;
 
-    my $cfg = $self->lookup_site_code_config;
-
-    $buffer ||= $cfg->{buffer}; # metres
+    my $cfg = $self->lookup_site_code_config($field);
     my ($x, $y) = $row->local_coords;
-    my ($w, $s, $e, $n) = ($x-$buffer, $y-$buffer, $x+$buffer, $y+$buffer);
+
+    my $features = $self->_fetch_features($cfg, $x, $y);
+    return $self->_nearest_feature($cfg, $x, $y, $features);
+}
+
+sub _fetch_features {
+    my ($self, $cfg, $x, $y) = @_;
+
+    # default to a buffered bounding box around the given point unless
+    # a custom filter parameter has been specified.
+    unless ( $cfg->{filter} ) {
+        my $buffer = $cfg->{buffer};
+        my ($w, $s, $e, $n) = ($x-$buffer, $y-$buffer, $x+$buffer, $y+$buffer);
+        $cfg->{bbox} = "$w,$s,$e,$n";
+    }
+
+    my $uri = $self->_fetch_features_url($cfg);
+    my $response = get($uri) or return;
+
+    my $j = JSON->new->utf8->allow_nonref;
+    try {
+        $j = $j->decode($response);
+    } catch {
+        # There was either no asset found, or an error with the WFS
+        # call - in either case let's just proceed without the USRN.
+        return;
+    };
+
+    return $j->{features};
+}
+
+sub _fetch_features_url {
+    my ($self, $cfg) = @_;
 
     my $uri = URI->new($cfg->{url});
     $uri->query_form(
@@ -265,50 +393,90 @@ sub lookup_site_code {
         TYPENAME => $cfg->{typename},
         VERSION => "1.1.0",
         outputformat => "geojson",
-        BBOX => "$w,$s,$e,$n"
+        $cfg->{filter} ? ( Filter => $cfg->{filter} ) : ( BBOX => $cfg->{bbox} ),
     );
 
-    my $response = get($uri);
+    return $uri;
+}
 
-    my $j = JSON->new->utf8->allow_nonref;
-    try {
-        $j = $j->decode($response);
-    } catch {
-        # There was either no asset found, or an error with the WFS
-        # call - in either case let's just proceed without the USRN.
-        return '';
-    };
+
+sub _nearest_feature {
+    my ($self, $cfg, $x, $y, $features) = @_;
 
     # We have a list of features, and we want to find the one closest to the
     # report location.
     my $site_code = '';
     my $nearest;
 
-    for my $feature ( @{ $j->{features} } ) {
+    # We shouldn't receive anything aside from these geometry types, but belt and braces.
+    my $accept_types = $cfg->{accept_types} || {
+        LineString => 1,
+        MultiLineString => 1
+    };
+
+    for my $feature ( @{$features || []} ) {
         next unless $cfg->{accept_feature}($feature);
+        next unless $accept_types->{$feature->{geometry}->{type}};
 
-        # We shouldn't receive anything aside from these two geometry types, but belt and braces.
-        next unless $feature->{geometry}->{type} eq 'MultiLineString' || $feature->{geometry}->{type} eq 'LineString';
-
-        my @coordinates = @{ $feature->{geometry}->{coordinates} };
-        if ( $feature->{geometry}->{type} eq 'MultiLineString') {
-            # The coordinates are stored as a list of lists, so flatten 'em out
-            @coordinates = map { @{ $_ } } @coordinates;
+        my @linestrings = @{ $feature->{geometry}->{coordinates} };
+        if ( $feature->{geometry}->{type} eq 'LineString' ) {
+            @linestrings = ([ @linestrings ]);
+        }
+        # If it is a point, upgrade it to a one-segment zero-length
+        # MultiLineString so it can be compared by the distance function.
+        if ( $feature->{geometry}->{type} eq 'Point') {
+            @linestrings = ([ [ @linestrings ], [ @linestrings ] ]);
         }
 
-        # If any of this feature's points are closer than those we've seen so
-        # far then use the site_code from this feature.
-        for my $coords ( @coordinates ) {
-            my ($fx, $fy) = @$coords;
-            my $distance = $self->_distance($x, $y, $fx, $fy);
-            if ( !defined $nearest || $distance < $nearest ) {
-                $site_code = $feature->{properties}->{$cfg->{property}};
-                $nearest = $distance;
+        foreach my $coordinates (@linestrings) {
+            for (my $i=0; $i<@$coordinates-1; $i++) {
+                my $distance = $self->_distanceToLine($x, $y, $coordinates->[$i], $coordinates->[$i+1]);
+                if ( !defined $nearest || $distance < $nearest ) {
+                    $site_code = $feature->{properties}->{$cfg->{property}};
+                    $nearest = $distance;
+                }
             }
         }
     }
 
     return $site_code;
+}
+
+sub contact_name {
+    my $self = shift;
+    return $self->feature('contact_name') || $self->next::method();
+}
+
+sub contact_email {
+    my $self = shift;
+    return $self->feature('contact_email') || $self->next::method();
+}
+
+# Allow cobrands to disallow updates on some things.
+# Note this only ever locks down more than the default.
+sub updates_disallowed {
+    my $self = shift;
+    my ($problem) = @_;
+    my $c = $self->{c};
+
+    my $cfg = $self->feature('updates_allowed') || '';
+    if ($cfg eq 'none') {
+        return 1;
+    } elsif ($cfg eq 'staff') {
+        # Only staff and superusers can leave updates
+        my $staff = $c->user_exists && $c->user->from_body && $c->user->from_body->name eq $self->council_name;
+        my $superuser = $c->user_exists && $c->user->is_superuser;
+        return 1 unless $staff || $superuser;
+    }
+
+    if ($cfg =~ /reporter/) {
+        return 1 if !$c->user_exists || $c->user->id != $problem->user->id;
+    }
+    if ($cfg =~ /open/) {
+        return 1 if $problem->is_fixed || $problem->is_closed;
+    }
+
+    return $self->next::method(@_);
 }
 
 sub extra_contact_validation {
@@ -332,18 +500,24 @@ sub extra_contact_validation {
 }
 
 
-=head2 _distance
+=head2 _distanceToLine
 
-Returns the cartesian distance between two coordinates.
+Returns the cartesian distance of a point from a line.
 This is not a general-purpose distance function, it's intended for use with
 fairly nearby coordinates in EPSG:27700 where a spheroid doesn't need to be
 taken into account.
 
 =cut
-sub _distance {
-    my ($self, $ax, $ay, $bx, $by) = @_;
-    return sqrt( (($ax - $bx) ** 2) + (($ay - $by) ** 2) );
-}
 
+sub _distanceToLine {
+    my ($self, $x, $y, $start, $end) = @_;
+    my $dx = $end->[0] - $start->[0];
+    my $dy = $end->[1] - $start->[1];
+    my $along = ($dx == 0 && $dy == 0) ? 0 : (($dx * ($x - $start->[0])) + ($dy * ($y - $start->[1]))) / ($dx**2 + $dy**2);
+    $along = max(0, min(1, $along));
+    my $fx = $start->[0] + $along * $dx;
+    my $fy = $start->[1] + $along * $dy;
+    return sqrt( (($x - $fx) ** 2) + (($y - $fy) ** 2) );
+}
 
 1;

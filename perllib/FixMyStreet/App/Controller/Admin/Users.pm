@@ -27,36 +27,68 @@ Admin pages for editing users
 sub index :Path : Args(0) {
     my ( $self, $c ) = @_;
 
-    $c->detach('add') if $c->req->method eq 'POST'; # Add a user
-
-    if (my $search = $c->get_param('search')) {
-        $search = $self->trim($search);
-        $search =~ s/^<(.*)>$/$1/; # In case email wrapped in <...>
-        $c->stash->{searched} = $search;
-
-        my $isearch = '%' . $search . '%';
-        my $search_n = 0;
-        $search_n = int($search) if $search =~ /^\d+$/;
-
-        my $users = $c->cobrand->users->search(
-            {
-                -or => [
-                    email => { ilike => $isearch },
-                    phone => { ilike => $isearch },
-                    name => { ilike => $isearch },
-                    from_body => $search_n,
-                ]
+    if ($c->req->method eq 'POST') {
+        my @uids = $c->get_param_list('uid');
+        my @role_ids = $c->get_param_list('roles');
+        my $user_rs = FixMyStreet::DB->resultset("User")->search({ id => \@uids });
+        foreach my $user ($user_rs->all) {
+            $user->admin_user_body_permissions->delete;
+            $user->user_roles->search({
+                role_id => { -not_in => \@role_ids },
+            })->delete;
+            foreach my $role (@role_ids) {
+                $user->user_roles->find_or_create({
+                    role_id => $role,
+                });
             }
-        );
+        }
+        $c->stash->{status_message} = _('Updated!');
+    }
+
+    my $search = $c->get_param('search');
+    my $role = $c->get_param('role');
+    if ($search || $role) {
+        my $users = $c->cobrand->users;
+        my $isearch;
+        if ($search) {
+            $search = $self->trim($search);
+            $search =~ s/^<(.*)>$/$1/; # In case email wrapped in <...>
+            $c->stash->{searched} = $search;
+
+            $isearch = '%' . $search . '%';
+            my $search_n = 0;
+            $search_n = int($search) if $search =~ /^\d+$/;
+
+            $users = $users->search(
+                {
+                    -or => [
+                        email => { ilike => $isearch },
+                        phone => { ilike => $isearch },
+                        name => { ilike => $isearch },
+                        from_body => $search_n,
+                    ]
+                }
+            );
+        }
+        if ($role) {
+            $c->stash->{role_selected} = $role;
+            $users = $users->search({
+                role_id => $role,
+            }, {
+                join => 'user_roles',
+            });
+        }
+
         my @users = $users->all;
         $c->stash->{users} = [ @users ];
-        $c->forward('/admin/add_flags', [ { email => { ilike => $isearch } } ]);
+        if ($search) {
+            $c->forward('/admin/add_flags', [ { email => { ilike => $isearch } } ]);
+        }
 
     } else {
         $c->forward('/auth/get_csrf_token');
         $c->forward('/admin/fetch_all_bodies');
         $c->cobrand->call_hook('admin_user_edit_extra_data');
-
 
         # Admin users by default
         my $users = $c->cobrand->users->search(
@@ -66,6 +98,14 @@ sub index :Path : Args(0) {
         my @users = $users->all;
         $c->stash->{users} = \@users;
     }
+
+    my $rs;
+    if ($c->user->is_superuser) {
+        $rs = $c->model('DB::Role')->search_rs({}, { join => 'body', order_by => ['body.name', 'me.name'] });
+    } elsif ($c->user->from_body) {
+        $rs = $c->user->from_body->roles->search_rs({}, { order_by => 'name' });
+    }
+    $c->stash->{roles} = [ $rs->all ];
 
     return 1;
 }
@@ -113,9 +153,7 @@ sub add : Local : Args(0) {
         $c->stash->{field_errors}->{username} = _('User already exists');
     }
 
-    return if %{$c->stash->{field_errors}};
-
-    my $user = $c->model('DB::User')->create( {
+    my $user = $c->model('DB::User')->new( {
         name => $c->get_param('name'),
         email => $email ? $email : undef,
         email_verified => $email && $email_v ? 1 : 0,
@@ -127,28 +165,48 @@ sub add : Local : Args(0) {
         is_superuser => ( $c->user->is_superuser && $c->get_param('is_superuser') ) || 0,
     } );
     $c->stash->{user} = $user;
-    $c->forward('user_cobrand_extra_fields');
-    $user->update;
 
-    $c->forward( '/admin/log_edit', [ $user->id, 'user', 'edit' ] );
+    return if %{$c->stash->{field_errors}};
+
+    $c->forward('user_cobrand_extra_fields');
+    $user->insert;
+
+    $c->forward( '/admin/log_edit', [ $user->id, 'user', 'add' ] );
 
     $c->flash->{status_message} = _("Updated!");
-    $c->res->redirect( $c->uri_for_action( 'admin/users/edit', $user->id ) );
+    $c->detach('post_edit_redirect', [ $user ]);
 }
 
-sub edit : Path : Args(1) {
-    my ( $self, $c, $id ) = @_;
+sub fetch_body_roles : Private {
+    my ($self, $c, $body ) = @_;
 
-    $c->forward('/auth/get_csrf_token');
+    my $roles = $body->roles->search(undef, { order_by => 'name' });
+    unless ($roles) {
+        delete $c->stash->{roles}; # Body doesn't have any roles
+        return;
+    }
+
+    $c->stash->{roles} = [ $roles->all ];
+}
+
+sub user : Chained('/') PathPart('admin/users') : CaptureArgs(1) {
+    my ( $self, $c, $id ) = @_;
 
     my $user = $c->cobrand->users->find( { id => $id } );
     $c->detach( '/page_error_404_not_found', [] ) unless $user;
+    $c->stash->{user} = $user;
 
     unless ( $c->user->has_body_permission_to('user_edit') || $c->cobrand->moniker eq 'zurich' ) {
         $c->detach('/page_error_403_access_denied', []);
     }
+}
 
-    $c->stash->{user} = $user;
+sub edit : Chained('user') : PathPart('') : Args(0) {
+    my ( $self, $c ) = @_;
+
+    $c->forward('/auth/get_csrf_token');
+
+    my $user = $c->stash->{user};
     $c->forward( '/admin/check_username_for_abuse', [ $user ] );
 
     if ( $user->from_body && $c->user->has_permission_to('user_manage_permissions', $user->from_body->id) ) {
@@ -157,11 +215,11 @@ sub edit : Path : Args(1) {
 
     $c->forward('/admin/fetch_all_bodies');
     $c->forward('/admin/fetch_body_areas', [ $user->from_body ]) if $user->from_body;
+    $c->forward('fetch_body_roles', [ $user->from_body ]) if $user->from_body;
     $c->cobrand->call_hook('admin_user_edit_extra_data');
 
     if ( defined $c->flash->{status_message} ) {
-        $c->stash->{status_message} =
-            '<p><em>' . $c->flash->{status_message} . '</em></p>';
+        $c->stash->{status_message} = $c->flash->{status_message};
     }
 
     $c->forward('/auth/check_csrf_token') if $c->get_param('submit');
@@ -179,13 +237,11 @@ sub edit : Path : Args(1) {
     } elsif ( $c->get_param('submit') and $c->get_param('send_login_email') ) {
         my $email = lc $c->get_param('email');
         my %args = ( email => $email );
-        $args{user_id} = $id if $user->email ne $email || !$user->email_verified;
+        $args{user_id} = $user->id if $user->email ne $email || !$user->email_verified;
         $c->forward('send_login_email', [ \%args ]);
     } elsif ( $c->get_param('update_alerts') ) {
         $c->forward('update_alerts');
     } elsif ( $c->get_param('submit') ) {
-
-        my $edited = 0;
 
         my $name = $c->get_param('name');
         my $email = lc $c->get_param('email');
@@ -228,19 +284,10 @@ sub edit : Path : Args(1) {
 
         return if %{$c->stash->{field_errors}};
 
-        if ( ($user->email || "") ne $email ||
-            $user->name ne $name ||
-            ($user->phone || "") ne $phone ||
-            ($user->from_body && $c->get_param('body') && $user->from_body->id ne $c->get_param('body')) ||
-            (!$user->from_body && $c->get_param('body'))
-        ) {
-                $edited = 1;
-        }
-
         if ($existing_user_cobrand) {
             $existing_user->adopt($user);
-            $c->forward( '/admin/log_edit', [ $id, 'user', 'merge' ] );
-            return $c->res->redirect( $c->uri_for_action( 'admin/users/edit', $existing_user->id ) );
+            $c->forward( '/admin/log_edit', [ $user->id, 'user', 'merge' ] );
+            return $c->res->redirect( $c->uri_for_action( 'admin/users/edit', [ $existing_user->id ] ) );
         }
 
         $user->email($email) if !$existing_email;
@@ -270,26 +317,45 @@ sub edit : Path : Args(1) {
         # If so, we need to re-fetch areas so the UI is up to date.
         if ( $user->from_body && $user->from_body->id ne $c->stash->{fetched_areas_body_id} ) {
             $c->forward('/admin/fetch_body_areas', [ $user->from_body ]);
+            $c->forward('fetch_body_roles', [ $user->from_body ]);
         }
 
         if (!$user->from_body) {
             # Non-staff users aren't allowed any permissions or to be in an area
             $user->admin_user_body_permissions->delete;
+            $user->user_roles->delete;
             $user->area_ids(undef);
             delete $c->stash->{areas};
+            delete $c->stash->{roles};
             delete $c->stash->{fetched_areas_body_id};
         } elsif ($c->stash->{available_permissions}) {
-            my @all_permissions = map { keys %$_ } values %{ $c->stash->{available_permissions} };
-            my @user_permissions = grep { $c->get_param("permissions[$_]") ? 1 : undef } @all_permissions;
-            $user->admin_user_body_permissions->search({
-                body_id => $user->from_body->id,
-                permission_type => { '!=' => \@user_permissions },
-            })->delete;
-            foreach my $permission_type (@user_permissions) {
-                $user->user_body_permissions->find_or_create({
+            my %valid_roles = map { $_->id => 1 } @{$c->stash->{roles}};
+            my @role_ids = grep { $valid_roles{$_} } $c->get_param_list('roles');
+            if (@role_ids) {
+                # Roles take precedence over permissions
+                $user->admin_user_body_permissions->delete;
+                $user->user_roles->search({
+                    role_id => { -not_in => \@role_ids },
+                })->delete;
+                foreach my $role (@role_ids) {
+                    $user->user_roles->find_or_create({
+                        role_id => $role,
+                    });
+                }
+            } else {
+                $user->user_roles->delete;
+                my @all_permissions = map { keys %$_ } values %{ $c->stash->{available_permissions} };
+                my @user_permissions = grep { $c->get_param("permissions[$_]") ? 1 : undef } @all_permissions;
+                $user->admin_user_body_permissions->search({
                     body_id => $user->from_body->id,
-                    permission_type => $permission_type,
-                });
+                    permission_type => { -not_in => \@user_permissions },
+                })->delete;
+                foreach my $permission_type (@user_permissions) {
+                    $user->user_body_permissions->find_or_create({
+                        body_id => $user->from_body->id,
+                        permission_type => $permission_type,
+                    });
+                }
             }
         }
 
@@ -297,35 +363,6 @@ sub edit : Path : Args(1) {
             my %valid_areas = map { $_->{id} => 1 } @{ $c->stash->{areas} };
             my @area_ids = grep { $valid_areas{$_} } $c->get_param_list('area_ids');
             $user->area_ids( @area_ids ? \@area_ids : undef );
-        }
-
-        # Handle 'trusted' flag(s)
-        my @trusted_bodies = $c->get_param_list('trusted_bodies');
-        if ( $c->user->is_superuser ) {
-            $user->user_body_permissions->search({
-                body_id => { '!=' => \@trusted_bodies },
-                permission_type => 'trusted',
-            })->delete;
-            foreach my $body_id (@trusted_bodies) {
-                $user->user_body_permissions->find_or_create({
-                    body_id => $body_id,
-                    permission_type => 'trusted',
-                });
-            }
-        } elsif ( $c->user->from_body ) {
-            my %trusted = map { $_ => 1 } @trusted_bodies;
-            my $body_id = $c->user->from_body->id;
-            if ( $trusted{$body_id} ) {
-                $user->user_body_permissions->find_or_create({
-                    body_id => $body_id,
-                    permission_type => 'trusted',
-                });
-            } else {
-                $user->user_body_permissions->search({
-                    body_id => $body_id,
-                    permission_type => 'trusted',
-                })->delete;
-            }
         }
 
         # Update the categories this user operates in
@@ -336,14 +373,15 @@ sub edit : Path : Args(1) {
             my @live_contact_ids = map { $_->id } @live_contacts;
             my @new_contact_ids = grep { $c->get_param("contacts[$_]") } @live_contact_ids;
             $user->set_extra_metadata('categories', \@new_contact_ids);
+        } else {
+            $user->unset_extra_metadata('categories');
         }
 
         $user->update;
-        if ($edited) {
-            $c->forward( '/admin/log_edit', [ $id, 'user', 'edit' ] );
-        }
+        $c->forward( '/admin/log_edit', [ $user->id, 'user', 'edit' ] );
         $c->flash->{status_message} = _("Updated!");
-        return $c->res->redirect( $c->uri_for_action( 'admin/users/edit', $user->id ) );
+
+        $c->detach('post_edit_redirect', [ $user ]);
     }
 
     if ( $user->from_body ) {
@@ -358,8 +396,10 @@ sub edit : Path : Args(1) {
             id => $_->id,
             category => $_->category,
             active => $active_contacts{$_->id},
+            group => $_->get_extra_metadata('group') // '',
         } } @live_contacts;
         $c->stash->{contacts} = \@all_contacts;
+        $c->forward('/report/stash_category_groups', [ \@all_contacts, 1 ]) if $c->cobrand->enable_category_groups;
     }
 
     # this goes after in case we've delete any alerts
@@ -368,6 +408,50 @@ sub edit : Path : Args(1) {
     }
 
     return 1;
+}
+
+sub log : Chained('user') : PathPart('log') : Args(0) {
+    my ($self, $c) = @_;
+
+    my $user = $c->stash->{user};
+
+    my $after = $c->get_param('after');
+
+    my %time;
+    foreach ($user->admin_logs->all) {
+        push @{$time{$_->whenedited->epoch}}, { type => 'log', date => $_->whenedited, log => $_ };
+    }
+    foreach ($c->cobrand->problems->search({ extra => { like => '%contributed_by%' . $user->id . '%' } })->all) {
+        next unless $_->get_extra_metadata('contributed_by') == $user->id;
+        push @{$time{$_->created->epoch}}, { type => 'problemContributedBy', date => $_->created, obj => $_ };
+    }
+
+    foreach ($user->user_planned_reports->all) {
+        push @{$time{$_->added->epoch}}, { type => 'shortlistAdded', date => $_->added, obj => $_->report };
+        push @{$time{$_->removed->epoch}}, { type => 'shortlistRemoved', date => $_->removed, obj => $_->report } if $_->removed;
+    }
+
+    foreach ($user->problems->all) {
+        push @{$time{$_->created->epoch}}, { type => 'problem', date => $_->created, obj => $_ };
+    }
+
+    foreach ($user->comments->all) {
+        push @{$time{$_->created->epoch}}, { type => 'update', date => $_->created, obj => $_};
+    }
+
+    $c->stash->{time} = \%time;
+}
+
+sub post_edit_redirect : Private {
+    my ( $self, $c, $user ) = @_;
+
+    # User may not be visible on this cobrand, e.g. if their from_body
+    # wasn't set.
+    if ( $c->cobrand->users->find( { id => $user->id } ) ) {
+        return $c->res->redirect( $c->uri_for_action( 'admin/users/edit', [ $user->id ] ) );
+    } else {
+        return $c->res->redirect( $c->uri_for_action( 'admin/users/index' ) );
+    }
 }
 
 sub import :Local {
@@ -387,11 +471,9 @@ sub import :Local {
 
     my $csv = Text::CSV->new({ binary => 1});
     my $fh = $c->req->upload('csvfile')->fh;
-    $csv->getline($fh); # discard the header
-    while (my $row = $csv->getline($fh)) {
-        my ($name, $email, $from_body, $permissions) = @$row;
-        $email = lc Utils::trim_text($email);
-        my @permissions = split(/:/, $permissions);
+    $csv->header($fh);
+    while (my $row = $csv->getline_hr($fh)) {
+        my $email = lc Utils::trim_text($row->{email});
 
         my $user = FixMyStreet::DB->resultset("User")->find_or_new({ email => $email, email_verified => 1 });
         if ($user->in_storage) {
@@ -399,16 +481,29 @@ sub import :Local {
             next;
         }
 
-        $user->name($name);
-        $user->from_body($from_body || undef);
-        $user->update_or_insert;
+        $user->name($row->{name});
+        $user->from_body($row->{from_body} || undef);
+        $user->password($row->{passwordhash}, 1) if $row->{passwordhash};
+        $user->insert;
 
-        my @user_permissions = grep { $available_permissions{$_} } @permissions;
-        foreach my $permission_type (@user_permissions) {
-            $user->user_body_permissions->find_or_create({
-                body_id => $user->from_body->id,
-                permission_type => $permission_type,
-            });
+        if ($row->{roles}) {
+            my @roles = split(/:/, $row->{roles});
+            foreach my $role (@roles) {
+                $role = FixMyStreet::DB->resultset("Role")->find({
+                    body_id => $user->from_body->id,
+                    name => $role,
+                }) or next;
+                $user->add_to_roles($role);
+            }
+        } else {
+            my @permissions = split(/:/, $row->{permissions});
+            my @user_permissions = grep { $available_permissions{$_} } @permissions;
+            foreach my $permission_type (@user_permissions) {
+                $user->user_body_permissions->find_or_create({
+                    body_id => $user->from_body->id,
+                    permission_type => $permission_type,
+                });
+            }
         }
 
         push @{$c->stash->{new_users}}, $user;
@@ -497,7 +592,7 @@ sub user_hide_everywhere : Private {
     my ( $self, $c, $user ) = @_;
     my $problems = $user->problems->search({ state => { '!=' => 'hidden' } });
     while (my $problem = $problems->next) {
-        $problem->get_photoset->delete_cached;
+        $problem->get_photoset->delete_cached(plus_updates => 1);
         $problem->update({ state => 'hidden' });
     }
     my $updates = $user->comments->search({ state => { '!=' => 'hidden' } });
@@ -538,6 +633,7 @@ sub user_remove_account : Private {
     my ( $self, $c, $user ) = @_;
     $c->forward('user_logout_everywhere', [ $user ]);
     $user->anonymize_account;
+    $c->forward( '/admin/log_edit', [ $user->id, 'user', 'edit' ] );
     $c->stash->{status_message} = _('That user’s personal details have been removed.');
 }
 
@@ -565,6 +661,7 @@ sub ban : Private {
             $c->stash->{status_message} = _('User already in abuse list');
         } else {
             $abuse->insert;
+            $c->forward( '/admin/log_edit', [ $user->id, 'user', 'edit' ] );
             $c->stash->{status_message} = _('User added to abuse list');
         }
         $c->stash->{username_in_abuse} = 1;
@@ -575,6 +672,7 @@ sub ban : Private {
             $c->stash->{status_message} = _('User already in abuse list');
         } else {
             $abuse->insert;
+            $c->forward( '/admin/log_edit', [ $user->id, 'user', 'edit' ] );
             $c->stash->{status_message} = _('User added to abuse list');
         }
         $c->stash->{username_in_abuse} = 1;
@@ -596,6 +694,7 @@ sub unban : Private {
         my $abuse = $c->model('DB::Abuse')->search({ email => \@username });
         if ( $abuse ) {
             $abuse->delete;
+            $c->forward( '/admin/log_edit', [ $user->id, 'user', 'edit' ] );
             $c->stash->{status_message} = _('user removed from abuse list');
         } else {
             $c->stash->{status_message} = _('user not in abuse list');
@@ -625,6 +724,7 @@ sub flag : Private {
     } else {
         $user->flagged(1);
         $user->update;
+        $c->forward( '/admin/log_edit', [ $user->id, 'user', 'edit' ] );
         $c->stash->{status_message} = _('User flagged');
     }
 
@@ -654,6 +754,7 @@ sub flag_remove : Private {
     } else {
         $user->flagged(0);
         $user->update;
+        $c->forward( '/admin/log_edit', [ $user->id, 'user', 'edit' ] );
         $c->stash->{status_message} = _('User flag removed');
     }
 

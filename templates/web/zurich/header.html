@@ -9,6 +9,7 @@
         <meta name="HandHeldFriendly" content="true">
         <meta name="mobileoptimized" content="0">
 
+        [% INCLUDE 'header_opengraph.html' %]
         [% INCLUDE 'header/css.html' %]
         <link rel="stylesheet" href="//ajax.googleapis.com/ajax/libs/jqueryui/1.9.2/themes/redmond/jquery-ui.css">
 
@@ -18,6 +19,8 @@
 
     </head>
     <body class="[% bodyclass | html IF bodyclass %]">
+
+    [% INCLUDE 'debug_header.html' %]
 
     <div class="wrapper">
         <div class="table-cell clearfix">
@@ -78,6 +81,4 @@
                   [% INCLUDE 'nav_over_content.html' %]
                 [% END %]
 
-                [% pre_container_extra %]
-
-        <!-- [% INCLUDE 'debug_header.html' %] -->
+                [% pre_container_extra | safe %]

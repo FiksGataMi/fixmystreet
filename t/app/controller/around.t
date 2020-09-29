@@ -100,6 +100,16 @@ subtest 'check lookup by reference' => sub {
     is $mech->uri->path, "/report/$id", "redirected to report page";
 };
 
+subtest 'check lookup by reference does not show non_public reports' => sub {
+    $edinburgh_problems[0]->update({
+        non_public => 1
+    });
+    my $id = $edinburgh_problems[0]->id;
+    $mech->get_ok('/');
+    $mech->submit_form_ok( { with_fields => { pc => "ref:$id" } }, 'non_public ref');
+    $mech->content_contains('Searching found no reports');
+};
+
 subtest 'check non public reports are not displayed on around page' => sub {
     $mech->get_ok('/');
     FixMyStreet::override_config {
@@ -125,6 +135,18 @@ subtest 'check non public reports are not displayed on around page' => sub {
     };
     $mech->content_lacks( "Around page Test 3 for $body_edin_id",
         'problem marked non public is not visible' );
+};
+
+subtest 'check missing body message not shown when it does not need to be' => sub {
+    $mech->get_ok('/');
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => 'fixmystreet',
+        MAPIT_URL => 'http://mapit.uk/',
+    }, sub {
+        $mech->submit_form_ok( { with_fields => { pc => 'EH1 1BB' } },
+            "good location" );
+    };
+    $mech->content_lacks('yet have details for the other councils that cover this location');
 };
 
 for my $permission ( qw/ report_inspect report_mark_private/ ) {
@@ -210,7 +232,11 @@ subtest 'check category, status and extra filtering works on /around' => sub {
 
     # Create one open and one fixed report in each category
     foreach my $category ( @$categories ) {
-        $mech->create_contact_ok( category => $category, body_id => $body->id, email => "$category\@example.org" );
+        my $contact = $mech->create_contact_ok( category => $category, body_id => $body->id, email => "$category\@example.org" );
+        if ($category ne 'Pothole') {
+            $contact->set_extra_metadata(group => ['Environment']);
+            $contact->update;
+        }
         foreach my $state ( 'confirmed', 'fixed - user', 'fixed - council' ) {
             my %report_params = (
                 %$params,
@@ -230,9 +256,14 @@ subtest 'check category, status and extra filtering works on /around' => sub {
     FixMyStreet::override_config {
         ALLOWED_COBRANDS => 'fixmystreet',
         MAPIT_URL => 'http://mapit.uk/',
+        COBRAND_FEATURES => { category_groups => { fixmystreet => 1 } },
     }, sub {
         $mech->get_ok( '/around?filter_category=Pothole&bbox=' . $bbox );
         $mech->content_contains('<option value="Pothole" selected>');
+        $mech->content_contains('<optgroup label="Environment">');
+
+        $mech->get_ok( '/around?filter_group=Environment&bbox=' . $bbox );
+        $mech->content_contains('<option value="Flytipping" selected>');
     };
 
     $json = $mech->get_ok_json( '/around?ajax=1&filter_category=Pothole&bbox=' . $bbox );
@@ -268,7 +299,7 @@ subtest 'check old problems not shown by default on around page' => sub {
     my $pins = $json->{pins};
     is scalar @$pins, 9, 'correct number of reports when no age';
 
-    my $problems = FixMyStreet::App->model('DB::Problem')->to_body( $body->id );
+    my $problems = FixMyStreet::DB->resultset('Problem')->to_body( $body->id );
     $problems->first->update( { confirmed => \"current_timestamp-'7 months'::interval" } );
 
     $json = $mech->get_ok_json( '/around?ajax=1&bbox=' . $bbox );
@@ -282,7 +313,7 @@ subtest 'check old problems not shown by default on around page' => sub {
     $problems->update( { confirmed => \"current_timestamp" } );
 };
 
-subtest 'check sorting by update uses lastupdate to determine age' => sub {
+subtest 'check sorting' => sub {
     my $params = {
         postcode  => 'OX20 1SZ',
         latitude  => 51.754926,
@@ -291,19 +322,31 @@ subtest 'check sorting by update uses lastupdate to determine age' => sub {
     my $bbox = ($params->{longitude} - 0.01) . ',' .  ($params->{latitude} - 0.01)
                 . ',' . ($params->{longitude} + 0.01) . ',' .  ($params->{latitude} + 0.01);
 
-    my $problems = FixMyStreet::App->model('DB::Problem')->to_body( $body->id );
-    $problems->first->update( { confirmed => \"current_timestamp-'7 months'::interval" } );
+    subtest 'by update uses lastupdate to determine age' => sub {
+        my $problems = FixMyStreet::DB->resultset('Problem')->to_body( $body->id );
+        $problems->first->update( { confirmed => \"current_timestamp-'7 months'::interval" } );
 
-    my $json = $mech->get_ok_json( '/around?ajax=1&bbox=' . $bbox );
-    my $pins = $json->{pins};
-    is scalar @$pins, 8, 'correct number of reports with default sorting';
+        my $json = $mech->get_ok_json( '/around?ajax=1&bbox=' . $bbox );
+        my $pins = $json->{pins};
+        is scalar @$pins, 8, 'correct number of reports with default sorting';
 
+        $json = $mech->get_ok_json( '/around?ajax=1&sort=updated-desc&bbox=' . $bbox );
+        $pins = $json->{pins};
+        is scalar @$pins, 9, 'correct number of reports with updated sort';
 
-    $json = $mech->get_ok_json( '/around?ajax=1&sort=updated-desc&bbox=' . $bbox );
-    $pins = $json->{pins};
-    is scalar @$pins, 9, 'correct number of reports with updated sort';
+        $problems->update( { confirmed => \"current_timestamp" } );
+    };
 
-    $problems->update( { confirmed => \"current_timestamp" } );
+    subtest 'by comment count' => sub {
+        my @problems = FixMyStreet::DB->resultset('Problem')->to_body( $body->id )->all;
+        $mech->create_comment_for_problem($problems[3], $problems[0]->user, 'Name', 'Text', 'f', 'confirmed', 'confirmed');
+        $mech->create_comment_for_problem($problems[3], $problems[0]->user, 'Name', 'Text', 'f', 'confirmed', 'confirmed');
+        $mech->create_comment_for_problem($problems[6], $problems[0]->user, 'Name', 'Text', 'f', 'confirmed', 'confirmed');
+        my $json = $mech->get_ok_json( '/around?ajax=1&sort=comments-desc&bbox=' . $bbox );
+        my $pins = $json->{pins};
+        is $pins->[0][3], $problems[3]->id, 'Report with two updates first';
+        is $pins->[1][3], $problems[6]->id, 'Report with one update second';
+    };
 };
 
 subtest 'check show old reports checkbox shown on around page' => sub {
@@ -314,7 +357,7 @@ subtest 'check show old reports checkbox shown on around page' => sub {
         $mech->get_ok( '/around?pc=OX20+1SZ' );
         $mech->content_contains('id="show_old_reports_wrapper" class="report-list-filters hidden"');
 
-        my $problems = FixMyStreet::App->model('DB::Problem')->to_body( $body->id );
+        my $problems = FixMyStreet::DB->resultset('Problem')->to_body( $body->id );
         $problems->first->update( { confirmed => \"current_timestamp-'7 months'::interval" } );
 
         $mech->get_ok( '/around?pc=OX20+1SZ&status=all' );
@@ -366,7 +409,36 @@ subtest 'check map zoom level customisation' => sub {
 subtest 'check nearby lookup' => sub {
     my $p = FixMyStreet::DB->resultset("Problem")->search({ external_body => "Pothole-confirmed" })->first;
     $mech->get_ok('/around/nearby?latitude=51.754926&longitude=-1.256179&filter_category=Pothole');
-    $mech->content_contains('["51.754926","-1.256179","yellow",' . $p->id . ',"Around page Test 1 for ' . $body->id . '","small",false]');
+    $mech->content_contains('[51.754926,-1.256179,"yellow",' . $p->id . ',"Around page Test 1 for ' . $body->id . '","small",false]');
+};
+
+my $he = Test::MockModule->new('HighwaysEngland');
+$he->mock('_lookup_db', sub {
+    my ($road, $table, $thing, $thing_name) = @_;
+
+    if ($road eq 'M6' && $thing eq '11') {
+        return { latitude => 52.65866, longitude => -2.06447 };
+    } elsif ($road eq 'M5' && $thing eq '132.5') {
+        return { latitude => 51.5457, longitude => 2.57136 };
+    }
+});
+
+subtest 'junction lookup' => sub {
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => 'fixmystreet',
+        MAPIT_URL => 'http://mapit.uk',
+        MAPIT_TYPES => ['EUR'],
+    }, sub {
+        $mech->log_out_ok;
+
+        $mech->get_ok('/');
+        $mech->submit_form_ok({ with_fields => { pc => 'M6, Junction 11' } });
+        $mech->content_contains('52.65866');
+
+        $mech->get_ok('/');
+        $mech->submit_form_ok({ with_fields => { pc => 'M5 132.5' } });
+        $mech->content_contains('51.5457');
+    };
 };
 
 done_testing();

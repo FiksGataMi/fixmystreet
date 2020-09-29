@@ -24,21 +24,29 @@ __PACKAGE__->add_columns(
   },
   "email",
   { data_type => "text", is_nullable => 1 },
-  "email_verified",
-  { data_type => "boolean", default_value => \"false", is_nullable => 0 },
   "name",
   { data_type => "text", is_nullable => 1 },
   "phone",
   { data_type => "text", is_nullable => 1 },
-  "phone_verified",
-  { data_type => "boolean", default_value => \"false", is_nullable => 0 },
   "password",
   { data_type => "text", default_value => "", is_nullable => 0 },
-  "from_body",
-  { data_type => "integer", is_foreign_key => 1, is_nullable => 1 },
   "flagged",
   { data_type => "boolean", default_value => \"false", is_nullable => 0 },
+  "from_body",
+  { data_type => "integer", is_foreign_key => 1, is_nullable => 1 },
+  "title",
+  { data_type => "text", is_nullable => 1 },
+  "facebook_id",
+  { data_type => "bigint", is_nullable => 1 },
+  "twitter_id",
+  { data_type => "bigint", is_nullable => 1 },
   "is_superuser",
+  { data_type => "boolean", default_value => \"false", is_nullable => 0 },
+  "extra",
+  { data_type => "text", is_nullable => 1 },
+  "email_verified",
+  { data_type => "boolean", default_value => \"false", is_nullable => 0 },
+  "phone_verified",
   { data_type => "boolean", default_value => \"false", is_nullable => 0 },
   "created",
   {
@@ -54,16 +62,10 @@ __PACKAGE__->add_columns(
     is_nullable   => 0,
     original      => { default_value => \"now()" },
   },
-  "title",
-  { data_type => "text", is_nullable => 1 },
-  "twitter_id",
-  { data_type => "bigint", is_nullable => 1 },
-  "facebook_id",
-  { data_type => "bigint", is_nullable => 1 },
-  "extra",
-  { data_type => "text", is_nullable => 1 },
   "area_ids",
   { data_type => "integer[]", is_nullable => 1 },
+  "oidc_ids",
+  { data_type => "text[]", is_nullable => 1 },
 );
 __PACKAGE__->set_primary_key("id");
 __PACKAGE__->add_unique_constraint("users_facebook_id_key", ["facebook_id"]);
@@ -121,10 +123,16 @@ __PACKAGE__->has_many(
   { "foreign.user_id" => "self.id" },
   { cascade_copy => 0, cascade_delete => 0 },
 );
+__PACKAGE__->has_many(
+  "user_roles",
+  "FixMyStreet::DB::Result::UserRole",
+  { "foreign.user_id" => "self.id" },
+  { cascade_copy => 0, cascade_delete => 0 },
+);
 
 
-# Created by DBIx::Class::Schema::Loader v0.07035 @ 2019-04-25 12:06:39
-# DO NOT MODIFY THIS OR ANYTHING ABOVE! md5sum:BCCqv3JCec8psuRk/SdCJQ
+# Created by DBIx::Class::Schema::Loader v0.07035 @ 2019-06-20 16:31:44
+# DO NOT MODIFY THIS OR ANYTHING ABOVE! md5sum:Ryb6giJm/7N7svg/d+2GeA
 
 # These are not fully unique constraints (they only are when the *_verified
 # is true), but this is managed in ResultSet::User's find() wrapper.
@@ -136,6 +144,7 @@ __PACKAGE__->rabx_column('extra');
 
 use Moo;
 use Text::CSV;
+use List::MoreUtils 'uniq';
 use FixMyStreet::SMS;
 use mySociety::EmailUtil;
 use namespace::clean -except => [ 'meta' ];
@@ -143,6 +152,7 @@ use namespace::clean -except => [ 'meta' ];
 with 'FixMyStreet::Roles::Extra';
 
 __PACKAGE__->many_to_many( planned_reports => 'user_planned_reports', 'report' );
+__PACKAGE__->many_to_many( roles => 'user_roles', 'role' );
 
 sub cost {
     FixMyStreet->test_mode ? 1 : 12;
@@ -153,9 +163,29 @@ __PACKAGE__->add_columns(
         encode_column => 1,
         encode_class => 'Crypt::Eksblowfish::Bcrypt',
         encode_args => { cost => cost() },
-        encode_check_method => 'check_password',
+        encode_check_method => '_check_password',
     },
 );
+
+sub check_password {
+    my $self = shift;
+    my $cobrand = $self->result_source->schema->cobrand;
+    if ($cobrand->moniker eq 'tfl') {
+        my $col_v = $self->get_extra_metadata('tfl_password');
+        return unless defined $col_v;
+        $self->_column_encoders->{password}->($_[0], $col_v) eq $col_v;
+    } else {
+        $self->_check_password(@_);
+    }
+}
+
+around password => sub {
+    my ($orig, $self) = (shift, shift);
+    if (@_) {
+        $self->set_extra_metadata(last_password_change => time());
+    }
+    $self->$orig(@_);
+};
 
 =head2 username
 
@@ -186,6 +216,15 @@ sub latest_anonymity {
     my $c_created = $c ? $c->created->epoch : 0;
     my $obj = $p_created >= $c_created ? $p : $c;
     return $obj ? $obj->anonymous : 0;
+}
+
+sub latest_visible_problem {
+    my $self = shift;
+    return $self->problems->search({
+        state => [ FixMyStreet::DB::Result::Problem->visible_states() ]
+    }, {
+        order_by => { -desc => 'id' }
+    })->single;
 }
 
 =head2 check_for_errors
@@ -298,7 +337,11 @@ sub body {
 
 sub moderating_user_name {
     my $self = shift;
-    return $self->body || _('an administrator');
+    my $body = $self->body;
+    if ( $body && $body eq 'Isle of Wight Council' ) {
+        $body = 'Island Roads';
+    }
+    return $body || _('an administrator');
 }
 
 =head2 belongs_to_body
@@ -375,7 +418,18 @@ has body_permissions => (
     lazy => 1,
     default => sub {
         my $self = shift;
-        return [ $self->user_body_permissions->all ];
+        my $perms = [];
+        foreach my $role ($self->roles->all) {
+            push @$perms, map { {
+                body_id => $role->body_id,
+                permission => $_,
+            } } @{$role->permissions};
+        }
+        push @$perms, map { {
+            body_id => $_->body_id,
+            permission => $_->permission_type,
+        } } $self->user_body_permissions->all;
+        return $perms;
     },
 );
 
@@ -392,8 +446,8 @@ sub permissions {
 
     return unless $self->belongs_to_body($body_id);
 
-    my @permissions = grep { $_->body_id == $self->from_body->id } @{$self->body_permissions};
-    return { map { $_->permission_type => 1 } @permissions };
+    my @permissions = grep { $_->{body_id} == $self->from_body->id } @{$self->body_permissions};
+    return { map { $_->{permission} => 1 } @permissions };
 }
 
 sub has_permission_to {
@@ -404,18 +458,15 @@ sub has_permission_to {
     my $cobrand = $self->result_source->schema->cobrand;
     my $cobrand_perms = $cobrand->available_permissions;
     my %available = map { %$_ } values %$cobrand_perms;
-    # The 'trusted' permission is never set in the cobrand's
-    # available_permissions (see note there in Default.pm) so include it here.
-    $available{trusted} = 1;
     return 0 unless $available{$permission_type};
 
     return 1 if $self->is_superuser;
-    return 0 if !$body_ids || (ref $body_ids && !@$body_ids);
-    $body_ids = [ $body_ids ] unless ref $body_ids;
+    return 0 if !$body_ids || (ref $body_ids eq 'ARRAY' && !@$body_ids);
+    $body_ids = [ $body_ids ] unless ref $body_ids eq 'ARRAY';
     my %body_ids = map { $_ => 1 } @$body_ids;
 
     foreach (@{$self->body_permissions}) {
-        return 1 if $_->permission_type eq $permission_type && $body_ids{$_->body_id};
+        return 1 if $_->{permission} eq $permission_type && $body_ids{$_->{body_id}};
     }
     return 0;
 }
@@ -464,7 +515,7 @@ sub admin_user_body_permissions {
 
 sub has_2fa {
     my $self = shift;
-    return $self->is_superuser && $self->get_extra_metadata('2fa_secret');
+    return $self->get_extra_metadata('2fa_secret');
 }
 
 sub contributing_as {
@@ -516,6 +567,7 @@ sub anonymize_account {
         title => undef,
         twitter_id => undef,
         facebook_id => undef,
+        oidc_ids => undef,
     });
 }
 
@@ -565,14 +617,6 @@ sub is_planned_report {
     return scalar grep { $_->report_id == $id } @{$self->active_user_planned_reports};
 }
 
-sub update_reputation {
-    my ( $self, $change ) = @_;
-
-    my $reputation = $self->get_extra_metadata('reputation') || 0;
-    $self->set_extra_metadata( reputation => $reputation + $change);
-    $self->update;
-}
-
 has categories => (
     is => 'ro',
     lazy => 1,
@@ -619,6 +663,37 @@ has areas_hash => (
 sub in_area {
     my ($self, $area) = @_;
     return $self->areas_hash->{$area};
+}
+
+has roles_hash => (
+    is => 'ro',
+    lazy => 1,
+    default => sub {
+        my $self = shift;
+        my %ids = map { $_->role_id => 1 } $self->user_roles->all;
+        return \%ids;
+    },
+);
+
+sub in_role {
+    my ($self, $role) = @_;
+    return $self->roles_hash->{$role};
+}
+
+sub add_oidc_id {
+    my ($self, $oidc_id) = @_;
+
+    my $oidc_ids = $self->oidc_ids || [];
+    my @oidc_ids = uniq ( $oidc_id, @$oidc_ids );
+    $self->oidc_ids(\@oidc_ids);
+}
+
+sub remove_oidc_id {
+    my ($self, $oidc_id) = @_;
+
+    my $oidc_ids = $self->oidc_ids || [];
+    my @oidc_ids = grep { $_ ne $oidc_id } @$oidc_ids;
+    $self->oidc_ids(scalar @oidc_ids ? \@oidc_ids : undef);
 }
 
 1;

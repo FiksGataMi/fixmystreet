@@ -6,10 +6,16 @@ use JSON::MaybeXS;
 use mySociety::MaPit;
 use mySociety::VotingArea;
 use Utils;
+use HighwaysEngland;
 
 sub country             { return 'GB'; }
 sub area_types          { [ 'DIS', 'LBO', 'MTD', 'UTA', 'CTY', 'COI', 'LGD' ] }
 sub area_types_children { $mySociety::VotingArea::council_child_types }
+
+sub csp_config {
+    my $self = shift;
+    return $self->feature('content_security_policy');
+}
 
 sub enter_postcode_text {
     my ( $self ) = @_;
@@ -84,17 +90,10 @@ sub geocode_postcode {
             latitude  => $location->{wgs84_lat},
             longitude => $location->{wgs84_lon},
         };
+    } elsif (my $junction_location = HighwaysEngland::junction_lookup($s)) {
+        return $junction_location;
     }
     return {};
-}
-
-sub remove_redundant_areas {
-  my $self = shift;
-  my $all_areas = shift;
-
-  # Norwich is responsible for everything in its areas, not Norfolk
-  delete $all_areas->{2233}    #
-    if $all_areas->{2391};
 }
 
 sub short_name {
@@ -107,6 +106,7 @@ sub short_name {
     return 'Durham+County' if $name eq 'Durham County Council';
     return 'Durham+City' if $name eq 'Durham City Council';
 
+    $name =~ s/^(Royal|London) Borough of //;
     $name =~ s/ (Borough|City|District|County) Council$//;
     $name =~ s/ Council$//;
     $name =~ s/ & / and /;
@@ -138,6 +138,13 @@ sub find_closest {
 
 sub reports_body_check {
     my ( $self, $c, $code ) = @_;
+
+    # Deal with Bexley and Greenwich name not starting with short name
+    if ($code =~ /bexley|greenwich/i) {
+        my $body = $c->model('DB::Body')->search( { name => { -like => "%$code%" } } )->single;
+        $c->stash->{body} = $body;
+        return $body;
+    }
 
     # Manual misspelling redirect
     if ($code =~ /^rhondda cynon taff$/i) {
@@ -354,8 +361,14 @@ cobrand class is returned, otherwise the default FixMyStreet cobrand is used.
 sub get_body_handler_for_problem {
     my ($self, $row) = @_;
 
+    if ($row->to_body_named('TfL')) {
+        return FixMyStreet::Cobrand::TfL->new;
+    }
+    # Do not do anything for Highways England here, as we don't want it to
+    # treat this as a cobrand for e.g. submit report emails made on .com
+
     my @bodies = values %{$row->bodies};
-    my %areas = map { %{$_->areas} } grep { $_->name ne 'TfL' } @bodies;
+    my %areas = map { %{$_->areas} } grep { $_->name !~ /TfL|Highways England/ } @bodies;
 
     my $cobrand = FixMyStreet::Cobrand->body_handler(\%areas);
     return $cobrand if $cobrand;
@@ -398,6 +411,15 @@ sub category_extra_hidden {
     my ($self, $meta) = @_;
     return 1 if $meta->{code} eq 'usrn' || $meta->{code} eq 'asset_id';
     return $self->SUPER::category_extra_hidden($meta);
+}
+
+sub report_new_munge_before_insert {
+    my ($self, $report) = @_;
+
+    if ($report->to_body_named('TfL')) {
+        my $tfl = FixMyStreet::Cobrand->get_class_for_moniker('tfl')->new();
+        $tfl->report_new_munge_before_insert($report);
+    }
 }
 
 1;

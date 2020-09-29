@@ -1,5 +1,9 @@
 use Test::MockTime ':all';
 
+package FixMyStreet::Cobrand::No2FA;
+use parent 'FixMyStreet::Cobrand::FixMyStreet';
+sub must_have_2fa { 0 }
+
 package FixMyStreet::Cobrand::Tester;
 use parent 'FixMyStreet::Cobrand::Default';
 # Allow access if CSV export for a body, otherwise deny
@@ -26,7 +30,11 @@ my $other_body = $mech->create_body_ok(1234, 'Some Other Council');
 my $body = $mech->create_body_ok(2651, 'City of Edinburgh Council');
 my @cats = ('Litter', 'Other', 'Potholes', 'Traffic lights');
 for my $contact ( @cats ) {
-    $mech->create_contact_ok(body_id => $body->id, category => $contact, email => "$contact\@example.org");
+    my $c = $mech->create_contact_ok(body_id => $body->id, category => $contact, email => "$contact\@example.org");
+    if ($contact eq 'Potholes') {
+        $c->set_extra_metadata(group => ['Road']);
+        $c->update;
+    }
 }
 
 my $superuser = $mech->create_user_ok('superuser@example.com', name => 'Super User', is_superuser => 1);
@@ -38,17 +46,21 @@ my $area_id = '60705';
 my $alt_area_id = '62883';
 
 my $last_month = DateTime->now->subtract(months => 2);
-$mech->create_problems_for_body(2, $body->id, 'Title', { areas => ",$area_id,2651,", category => 'Potholes', cobrand => 'fixmystreet' });
-$mech->create_problems_for_body(3, $body->id, 'Title', { areas => ",$area_id,2651,", category => 'Traffic lights', cobrand => 'fixmystreet', dt => $last_month });
-$mech->create_problems_for_body(1, $body->id, 'Title', { areas => ",$alt_area_id,2651,", category => 'Litter', cobrand => 'fixmystreet' });
+$mech->create_problems_for_body(2, $body->id, 'Title', { areas => ",$area_id,2651,", category => 'Potholes', cobrand => 'no2fat' });
+$mech->create_problems_for_body(3, $body->id, 'Title', { areas => ",$area_id,2651,", category => 'Traffic lights', cobrand => 'no2fa', dt => $last_month });
+$mech->create_problems_for_body(1, $body->id, 'Title', { areas => ",$alt_area_id,2651,", category => 'Litter', cobrand => 'no2fa' });
 
-my @scheduled_problems = $mech->create_problems_for_body(7, $body->id, 'Title', { areas => ",$area_id,2651,", category => 'Traffic lights', cobrand => 'fixmystreet' });
-my @fixed_problems = $mech->create_problems_for_body(4, $body->id, 'Title', { areas => ",$area_id,2651,", category => 'Potholes', cobrand => 'fixmystreet' });
-my @closed_problems = $mech->create_problems_for_body(3, $body->id, 'Title', { areas => ",$area_id,2651,", category => 'Traffic lights', cobrand => 'fixmystreet' });
+my @scheduled_problems = $mech->create_problems_for_body(7, $body->id, 'Title', { areas => ",$area_id,2651,", category => 'Traffic lights', cobrand => 'no2fa' });
+my @fixed_problems = $mech->create_problems_for_body(4, $body->id, 'Title', { areas => ",$area_id,2651,", category => 'Potholes', cobrand => 'no2fa' });
+my @closed_problems = $mech->create_problems_for_body(3, $body->id, 'Title', { areas => ",$area_id,2651,", category => 'Traffic lights', cobrand => 'no2fa' });
 
+my $first_problem_id;
+my $first_update_id;
 foreach my $problem (@scheduled_problems) {
     $problem->update({ state => 'action scheduled' });
-    $mech->create_comment_for_problem($problem, $counciluser, 'Title', 'text', 0, 'confirmed', 'action scheduled');
+    my ($update) = $mech->create_comment_for_problem($problem, $counciluser, 'Title', 'text', 0, 'confirmed', 'action scheduled');
+    $first_problem_id = $problem->id unless $first_problem_id;
+    $first_update_id = $update->id unless $first_update_id;
 }
 
 foreach my $problem (@fixed_problems) {
@@ -56,24 +68,20 @@ foreach my $problem (@fixed_problems) {
     $mech->create_comment_for_problem($problem, $counciluser, 'Title', 'text', 0, 'confirmed', 'fixed');
 }
 
-my $first_problem_id;
-my $first_update_id;
 foreach my $problem (@closed_problems) {
     $problem->update({ state => 'closed' });
-    my ($update) = $mech->create_comment_for_problem($problem, $counciluser, 'Title', 'text', 0, 'confirmed', 'closed', { confirmed => \'current_timestamp' });
-    $first_problem_id = $problem->id unless $first_problem_id;
-    $first_update_id = $update->id unless $first_update_id;
+    $mech->create_comment_for_problem($problem, $counciluser, 'Title', 'text', 0, 'confirmed', 'closed');
 }
 
 my $categories = scraper {
-    process "select[name=category] > option", 'cats[]' => 'TEXT',
+    process "select[name=category] option", 'cats[]' => 'TEXT',
     process "table[id=overview] > tr", 'rows[]' => scraper {
         process 'td', 'cols[]' => 'TEXT'
     },
 };
 
 FixMyStreet::override_config {
-    ALLOWED_COBRANDS => [ { fixmystreet => '.' } ],
+    ALLOWED_COBRANDS => 'no2fa',
     MAPIT_URL => 'http://mapit.uk/',
 }, sub {
 
@@ -131,8 +139,9 @@ FixMyStreet::override_config {
 
     subtest 'The correct categories and totals shown by default' => sub {
         $mech->get_ok("/dashboard");
-        my $expected_cats = [ 'All', @cats ];
+        my $expected_cats = [ 'All', 'Litter', 'Other', 'Traffic lights', 'Potholes' ];
         my $res = $categories->scrape( $mech->content );
+        $mech->content_contains('<optgroup label="Road">');
         is_deeply( $res->{cats}, $expected_cats, 'correct list of categories' );
         # Three missing as more than a month ago
         test_table($mech->content, 1, 0, 0, 1, 0, 0, 0, 0, 2, 0, 4, 6, 7, 3, 0, 10, 10, 3, 4, 17);
@@ -218,7 +227,7 @@ FixMyStreet::override_config {
         is $rows[1]->[0], $first_problem_id, 'Correct report ID';
         is $rows[1]->[1], $first_update_id, 'Correct update ID';
         is $rows[1]->[3], 'confirmed', 'Correct state';
-        is $rows[1]->[4], 'closed', 'Correct problem state';
+        is $rows[1]->[4], 'action scheduled', 'Correct problem state';
         is $rows[1]->[5], 'text', 'Correct text';
         is $rows[1]->[6], 'Title', 'Correct name';
     };

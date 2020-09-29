@@ -4,21 +4,38 @@ use FixMyStreet::Script::Reports;
 
 my $mech = FixMyStreet::TestMech->new;
 
-my $body = $mech->create_body_ok(2217, 'Buckinghamshire', {
-    send_method => 'Open311', api_key => 'key', endpoint => 'endpoint', jurisdiction => 'fms' });
-my $counciluser = $mech->create_user_ok('counciluser@example.com', name => 'Council User', from_body => $body);
+# disable info logs for this test run
+FixMyStreet::App->log->disable('info');
+END { FixMyStreet::App->log->enable('info'); }
 
-$mech->create_contact_ok(body_id => $body->id, category => 'Flytipping', email => "FLY");
+my $body = $mech->create_body_ok(2217, 'Buckinghamshire', {
+    send_method => 'Open311', api_key => 'key', endpoint => 'endpoint', jurisdiction => 'fms', can_be_devolved => 1 });
+my $counciluser = $mech->create_user_ok('counciluser@example.com', name => 'Council User', from_body => $body);
+my $publicuser = $mech->create_user_ok('fmsuser@example.org', name => 'Simon Neil');
+
+my $contact = $mech->create_contact_ok(body_id => $body->id, category => 'Flytipping', email => "FLY");
+$contact->set_extra_fields({
+    code => 'road-placement',
+    datatype => 'singlevaluelist',
+    description => 'Is the fly-tip located on',
+    order => 100,
+    required => 'true',
+    variable => 'true',
+    values => [
+        { key => 'road', name => 'The road' },
+        { key => 'off-road', name => 'Off the road/on a verge' },
+    ],
+});
+$contact->update;
 $mech->create_contact_ok(body_id => $body->id, category => 'Potholes', email => "POT");
 $mech->create_contact_ok(body_id => $body->id, category => 'Blocked drain', email => "DRA");
-
-my $district = $mech->create_body_ok(2257, 'Chiltern');
-$mech->create_contact_ok(body_id => $district->id, category => 'Flytipping', email => "flytipping\@chiltern");
-$mech->create_contact_ok(body_id => $district->id, category => 'Graffiti', email => "graffiti\@chiltern");
+$mech->create_contact_ok(body_id => $body->id, category => 'Car Parks', email => "car\@chiltern", send_method => 'Email');
+$mech->create_contact_ok(body_id => $body->id, category => 'Graffiti', email => "graffiti\@chiltern", send_method => 'Email');
+$mech->create_contact_ok(body_id => $body->id, category => 'Flytipping (off-road)', email => "districts_flytipping", send_method => 'Email');
 
 my $cobrand = Test::MockModule->new('FixMyStreet::Cobrand::Buckinghamshire');
 $cobrand->mock('lookup_site_code', sub {
-    my ($self, $row, $buffer) = @_;
+    my ($self, $row) = @_;
     return "Road ID" if $row->latitude == 51.812244;
 });
 
@@ -26,6 +43,21 @@ FixMyStreet::override_config {
     ALLOWED_COBRANDS => [ 'buckinghamshire', 'fixmystreet' ],
     MAPIT_URL => 'http://mapit.uk/',
     STAGING_FLAGS => { send_reports => 1, skip_checks => 0 },
+    COBRAND_FEATURES => {
+        open311_email => {
+            buckinghamshire => {
+                flytipping => 'flytipping@example.org',
+                flood => 'floods@example.org',
+            }
+        },
+        borough_email_addresses => {
+            buckinghamshire => {
+                districts_flytipping => [
+                    { email => "flytipping\@chiltern", areas => [ 2257 ] },
+                ]
+            }
+        }
+    }
 }, sub {
 
 subtest 'cobrand displays council name' => sub {
@@ -36,24 +68,26 @@ subtest 'cobrand displays council name' => sub {
 
 subtest 'cobrand displays correct categories' => sub {
     my $json = $mech->get_ok_json('/report/new/ajax?latitude=51.615559&longitude=-0.556903');
-    is @{$json->{bodies}}, 2, 'Both Chiltern and Bucks returned';
+    is @{$json->{bodies}}, 1, 'Bucks returned';
+    like $json->{category}, qr/Car Parks/, 'Car Parks displayed';
     like $json->{category}, qr/Flytipping/, 'Flytipping displayed';
     like $json->{category}, qr/Blocked drain/, 'Blocked drain displayed';
-    unlike $json->{category}, qr/Graffiti/, 'Graffiti not displayed';
+    like $json->{category}, qr/Graffiti/, 'Graffiti displayed';
+    unlike $json->{category}, qr/Flytipping \(off-road\)/, 'Flytipping (off-road) not displayed';
     $json = $mech->get_ok_json('/report/new/category_extras?latitude=51.615559&longitude=-0.556903');
-    is @{$json->{bodies}}, 2, 'Still both Chiltern and Bucks returned';
+    is @{$json->{bodies}}, 1, 'Still Bucks returned';
 };
 
 my ($report) = $mech->create_problems_for_body(1, $body->id, 'On Road', {
     category => 'Flytipping', cobrand => 'fixmystreet',
     latitude => 51.812244, longitude => -0.827363,
+    dt => DateTime->now()->subtract(minutes => 10),
 });
 
 subtest 'flytipping on road sent to extra email' => sub {
     FixMyStreet::Script::Reports::send();
     my @email = $mech->get_email;
-    my $tfb = join('', 'illegaldumpingcosts', '@', 'buckscc.gov.uk');
-    is $email[0]->header('To'), '"TfB" <' . $tfb . '>';
+    is $email[0]->header('To'), 'TfB <flytipping@example.org>';
     like $mech->get_text_body_from_email($email[1]), qr/report's reference number/;
     $report->discard_changes;
     is $report->external_id, 248, 'Report has right external ID';
@@ -66,6 +100,7 @@ subtest 'flytipping on road sent to extra email' => sub {
         contributed_as => 'another_user',
         contributed_by => $counciluser->id,
     },
+    dt => DateTime->now()->subtract(minutes => 9),
 });
 
 subtest 'pothole on road not sent to extra email, only confirm sent' => sub {
@@ -77,57 +112,49 @@ subtest 'pothole on road not sent to extra email, only confirm sent' => sub {
     is $report->external_id, 248, 'Report has right external ID';
 };
 
-($report) = $mech->create_problems_for_body(1, $district->id, 'Off Road', {
-    category => 'Flytipping', cobrand => 'buckinghamshire',
-    latitude => 51.813173, longitude => -0.826741,
-});
-subtest 'flytipping off road sent to extra email' => sub {
+
+# report made in Flytipping category off road should get moved to other category
+subtest 'Flytipping not on a road gets recategorised' => sub {
+    $mech->log_in_ok($publicuser->email);
+    $mech->get_ok('/report/new?latitude=51.615559&longitude=-0.556903&category=Flytipping');
+    $mech->submit_form_ok({
+        with_fields => {
+            title => "Test Report",
+            detail => 'Test report details.',
+            category => 'Flytipping',
+            'road-placement' => 'off-road',
+        }
+    }, "submit details");
+    $mech->content_contains('Your issue is on its way to the council.');
+    my $report = FixMyStreet::DB->resultset("Problem")->search(undef, { order_by => { -desc => 'id' } })->first;
+    ok $report, "Found the report";
+    is $report->category, "Flytipping (off-road)", 'Report was recategorised correctly';
+
+    $mech->log_out_ok;
+};
+
+subtest 'Ex-district reports are sent to correct emails' => sub {
     FixMyStreet::Script::Reports::send();
+    $mech->email_count_is(2); # one for council, one confirmation for user
     my @email = $mech->get_email;
-    is $email[0]->header('To'), '"Chiltern" <flytipping@chiltern>';
-    like $mech->get_text_body_from_email($email[1]), qr/Please note that Buckinghamshire County Council is not responsible/;
-    $report->discard_changes;
-    is $report->external_id, undef, 'Report has right external ID';
+    is $email[0]->header('To'), 'Buckinghamshire <flytipping@chiltern>';
 };
 
 my ($report2) = $mech->create_problems_for_body(1, $body->id, 'Drainage problem', {
     category => 'Blocked drain', cobrand => 'fixmystreet',
     latitude => 51.812244, longitude => -0.827363,
+    dt => DateTime->now()->subtract(minutes => 8),
 });
 
 subtest 'blocked drain sent to extra email' => sub {
     $mech->clear_emails_ok;
     FixMyStreet::Script::Reports::send();
     my @email = $mech->get_email;
-    my $e = join('@', 'floodmanagement', 'buckscc.gov.uk');
-    is $email[0]->header('To'), '"Flood Management" <' . $e . '>';
+    is $email[0]->header('To'), '"Flood Management" <floods@example.org>';
     like $mech->get_text_body_from_email($email[1]), qr/report's reference number/;
 };
 
 $cobrand = FixMyStreet::Cobrand::Buckinghamshire->new();
-
-subtest 'Flytipping extra question used if necessary' => sub {
-    my $errors = { 'road-placement' => 'This field is required' };
-
-    $report->update({ bodies_str => $body->id });
-    $cobrand->flytipping_body_fix($report, 'road', $errors);
-    is $errors->{'road-placement'}, 'This field is required', 'Error stays if sent to county';
-
-    $report->update({ bodies_str => $district->id });
-    $report->discard_changes; # As e.g. ->bodies has been remembered.
-    $cobrand->flytipping_body_fix($report, 'road', $errors);
-    is $errors->{'road-placement'}, undef, 'Error removed if sent to district';
-
-    $report->update({ bodies_str => $body->id . ',' . $district->id });
-    $report->discard_changes; # As e.g. ->bodies has been remembered.
-    $cobrand->flytipping_body_fix($report, 'road', $errors);
-    is $report->bodies_str, $body->id, 'Sent to both becomes sent to county on-road';
-
-    $report->update({ bodies_str => $district->id . ',' . $body->id });
-    $report->discard_changes; # As e.g. ->bodies has been remembered.
-    $cobrand->flytipping_body_fix($report, 'off-road', $errors);
-    is $report->bodies_str, $district->id, 'Sent to both becomes sent to district off-road';
-};
 
 for my $test (
     {

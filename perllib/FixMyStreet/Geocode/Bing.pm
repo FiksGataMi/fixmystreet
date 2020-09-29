@@ -11,13 +11,19 @@ use strict;
 use FixMyStreet::Geocode;
 use Utils;
 
+sub setup {
+    my $cls = shift;
+    return 1 if FixMyStreet->config('BING_MAPS_API_KEY');
+    return 0;
+}
+
 # string STRING CONTEXT
 # Looks up on Bing Maps API, and caches, a user-inputted location.
 # Returns array of (LAT, LON, ERROR), where ERROR is either undef, a string, or
 # an array of matches if there are more than one. The information in the query
 # may be used to disambiguate the location in cobranded versions of the site.
 sub string {
-    my ( $s, $c ) = @_;
+    my ( $cls, $s, $c ) = @_;
 
     my $params = $c->cobrand->disambiguate_location($s);
     # Allow cobrand to fixup the user input
@@ -32,6 +38,7 @@ sub string {
     $url .= '&userLocation=' . $params->{centre} if $params->{centre};
     $url .= '&c=' . $params->{bing_culture} if $params->{bing_culture};
 
+    $c->stash->{geocoder_url} = $url;
     my $js = FixMyStreet::Geocode::cache('bing', $url, 'key=' . FixMyStreet->config('BING_MAPS_API_KEY'));
     if (!$js) {
         return { error => _('Sorry, we could not parse that location. Please try again.') };

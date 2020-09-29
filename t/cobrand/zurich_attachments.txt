@@ -3,7 +3,7 @@ Subject: =?iso-8859-1?Q?Z=FCri?= wie neu: Weitergeleitete Meldung #REPORT_ID
 Content-Type: multipart/mixed; boundary="BOUNDARY"
 To: "External Body" <external_body@example.net>
 Content-Transfer-Encoding: 7bit
-From: "FixMyStreet" <division@example.org>
+From: FixMyStreet <division@example.org>
 
 
 --BOUNDARY
@@ -12,7 +12,7 @@ Content-Transfer-Encoding: quoted-printable
 
 Gr=C3=BCezi External Body,
 
-=C3=96ffentliche URL: http://www.example.org/report/REPORT_ID
+=C3=96ffentliche URL: https://www.zurich/report/REPORT_ID
 
 Bei Fragen zu "Z=C3=BCri wie neu" wenden Sie sich bitte an =
 gis-zentrum@zuerich.ch.=

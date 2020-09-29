@@ -1,7 +1,12 @@
+use utf8;
 use FixMyStreet::Script::UpdateAllReports;
 
+use Test::MockModule;
 use FixMyStreet::TestMech;
 my $mech = FixMyStreet::TestMech->new;
+
+my $resolver = Test::MockModule->new('Email::Valid');
+$resolver->mock('address', sub { $_[1] });
 
 my $body = $mech->create_body_ok( 2514, 'Birmingham' );
 
@@ -53,7 +58,7 @@ FixMyStreet::override_config {
 
     subtest 'check marketing dashboard csv' => sub {
         $mech->log_in_ok('someone@birmingham.gov.uk');
-        $mech->create_problems_for_body(105, $body->id, 'Title', {
+        $mech->create_problems_for_body(105, $body->id, 'Titlē', {
             detail => "this report\nis split across\nseveral lines",
             areas => ",2514,",
         });
@@ -80,7 +85,7 @@ FixMyStreet::override_config {
             'Column headers look correct';
 
         my $body_id = $body->id;
-        like $rows[1]->[1], qr/Title Test \d+ for $body_id/, 'problem title correct';
+        like $rows[1]->[1], qr/Titlē Test \d+ for $body_id/, 'problem title correct';
     };
 
     subtest 'check marketing dashboard contact listings' => sub {
@@ -106,6 +111,22 @@ FixMyStreet::override_config {
     };
 };
 
-END {
-    done_testing();
-}
+FixMyStreet::override_config {
+    ALLOWED_COBRANDS => 'fixmystreet',
+}, sub {
+    subtest 'test enforced 2FA for superusers' => sub {
+        my $test_email = 'test@example.com';
+        my $user = FixMyStreet::DB->resultset('User')->find_or_create({ email => $test_email });
+        $user->password('password');
+        $user->is_superuser(1);
+        $user->update;
+
+        $mech->get_ok('/auth');
+        $mech->submit_form_ok(
+            { with_fields => { username => $test_email, password_sign_in => 'password' } },
+            "sign in using form" );
+        $mech->content_contains('requires two-factor');
+    };
+};
+
+done_testing();

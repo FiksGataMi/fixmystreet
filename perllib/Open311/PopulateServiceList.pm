@@ -1,6 +1,7 @@
 package Open311::PopulateServiceList;
 
 use Moo;
+use File::Basename;
 use Open311;
 
 has bodies => ( is => 'ro' );
@@ -128,10 +129,21 @@ sub process_service {
     }
 }
 
+sub _action_params {
+    my ( $self, $action ) = @_;
+
+    return {
+        editor => basename($0),
+        whenedited => \'current_timestamp',
+        note => "$action automatically by script",
+    };
+}
+
 sub _handle_existing_contact {
     my ( $self, $contact ) = @_;
 
     my $service_name = $self->_normalize_service_name;
+    my $protected = $contact->get_extra_metadata("open311_protect");
 
     print $self->_current_body->id . " already has a contact for service code " . $self->_current_service->{service_code} . "\n" if $self->verbose >= 2;
 
@@ -139,12 +151,10 @@ sub _handle_existing_contact {
         eval {
             $contact->update(
                 {
-                    category => $service_name,
+                    $protected ? () : (category => $service_name),
                     email => $self->_current_service->{service_code},
                     state => 'confirmed',
-                    editor => $0,
-                    whenedited => \'current_timestamp',
-                    note => 'automatically undeleted by script',
+                    %{ $self->_action_params("undeleted") },
                 }
             );
         };
@@ -160,11 +170,17 @@ sub _handle_existing_contact {
     if ( $contact and lc($metadata) eq 'true' ) {
         $self->_add_meta_to_contact( $contact );
     } elsif ( $contact and $contact->extra and lc($metadata) eq 'false' ) {
-        $contact->set_extra_fields();
+        # check if there are any protected fields that we should not delete
+        my @meta = (
+            grep { ($_->{protected} || '') eq 'true' }
+            @{ $contact->get_extra_fields }
+        );
+        $contact->set_extra_fields(@meta);
         $contact->update;
     }
 
-    $self->_set_contact_group($contact);
+    $self->_set_contact_group($contact) unless $protected;
+    $self->_set_contact_non_public($contact);
 
     push @{ $self->found_contacts }, $self->_current_service->{service_code};
 }
@@ -182,9 +198,7 @@ sub _create_contact {
                 body_id => $self->_current_body->id,
                 category => $service_name,
                 state => 'confirmed',
-                editor => $0,
-                whenedited => \'current_timestamp',
-                note => 'created automatically by script',
+                %{ $self->_action_params("created") },
             }
         );
     };
@@ -201,6 +215,7 @@ sub _create_contact {
     }
 
     $self->_set_contact_group($contact);
+    $self->_set_contact_non_public($contact);
 
     if ( $contact ) {
         push @{ $self->found_contacts }, $self->_current_service->{service_code};
@@ -223,13 +238,32 @@ sub _add_meta_to_contact {
         return;
     }
 
-    # turn the data into something a bit more friendly to use
+    # check if there are any protected fields that we should not overwrite
+    my $protected = {
+        map { $_->{code} => $_ }
+        grep { ($_->{protected} || '') eq 'true' }
+        @{ $contact->get_extra_fields }
+    };
     my @meta =
-        # remove trailing colon as we add this when we display so we don't want 2
-        map { $_->{description} =~ s/:\s*//; $_ }
-        # there is a display order and we only want to sort once
-        sort { $a->{order} <=> $b->{order} }
+        map { $protected->{$_->{code}} ? delete $protected->{$_->{code}} : $_ }
         @{ $meta_data->{attributes} };
+
+    # and then add back in any protected fields that we don't fetch
+    push @meta, values %$protected;
+
+    # turn the data into something a bit more friendly to use
+    @meta =
+        # remove trailing colon as we add this when we display so we don't want 2
+        map {
+            if ($_->{description}) {
+                $_->{description} =~ s/:\s*$//;
+                $_->{description} = FixMyStreet::Template::sanitize($_->{description});
+            }
+            $_
+        }
+        # there is a display order and we only want to sort once
+        sort { ($a->{order} || 0) <=> ($b->{order} || 0) }
+        @meta;
 
     # Some Open311 endpoints, such as Bromley and Warwickshire send <metadata>
     # for attributes which we *don't* want to display to the user (e.g. as
@@ -260,27 +294,49 @@ sub _normalize_service_name {
 sub _set_contact_group {
     my ($self, $contact) = @_;
 
-    my $groups_enabled = $self->_current_body_cobrand && $self->_current_body_cobrand->call_hook('enable_category_groups');
-    my $old_group = $contact->get_extra_metadata('group') || '';
-    my $new_group = $groups_enabled ? $self->_current_service->{group} || '' : '';
+    my $old_group = $contact->groups;
+    my $new_group = $self->_get_new_groups;
 
-    if ($old_group ne $new_group) {
-        if ($new_group) {
-            $contact->set_extra_metadata(group => $new_group);
-            $contact->update({
-                editor => $0,
-                whenedited => \'current_timestamp',
-                note => 'group updated automatically by script',
-            });
+    if ($self->_groups_different($old_group, $new_group)) {
+        if (@$new_group) {
+            $contact->set_extra_metadata(group => @$new_group == 1 ? $new_group->[0] : $new_group);
+            $contact->update( $self->_action_params("group updated") );
         } else {
             $contact->unset_extra_metadata('group');
-            $contact->update({
-                editor => $0,
-                whenedited => \'current_timestamp',
-                note => 'group removed automatically by script',
-            });
+            $contact->update( $self->_action_params("group removed") );
         }
     }
+}
+
+sub _set_contact_non_public {
+    my ($self, $contact) = @_;
+
+    # We never want to make a private category unprivate.
+    return if $contact->non_public;
+
+    my %keywords = map { $_ => 1 } split /,/, ( $self->_current_service->{keywords} || '' );
+    $contact->update({
+        non_public => 1,
+        %{ $self->_action_params("marked private") },
+    }) if $keywords{private};
+}
+
+sub _get_new_groups {
+    my $self = shift;
+    return [] unless $self->_current_body_cobrand && $self->_current_body_cobrand->enable_category_groups;
+
+    my $groups = $self->_current_service->{groups} || [];
+    return $groups if @$groups;
+
+    my $group = $self->_current_service->{group} || [];
+    $group = [] if @$group == 1 && !$group->[0]; # <group></group> becomes [undef]...
+    return $group;
+}
+
+sub _groups_different {
+    my ($self, $old, $new) = @_;
+
+    return join( ',', sort(@$old) ) ne join( ',', sort(@$new) );
 }
 
 sub _delete_contacts_not_in_service_list {
@@ -306,9 +362,7 @@ sub _delete_contacts_not_in_service_list {
     $found_contacts->update(
         {
             state => 'deleted',
-            editor  => $0,
-            whenedited => \'current_timestamp',
-            note => 'automatically marked as deleted by script'
+            %{ $self->_action_params("marked as deleted") },
         }
     );
 }

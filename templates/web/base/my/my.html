@@ -6,7 +6,7 @@
 %]
 
 [% IF problems.size %]
-    [% map_html %]
+    [% map_html | safe %]
     </div>
     <div id="map_sidebar">
         <div id="side">
@@ -34,7 +34,7 @@ li .my-account-buttons a {
 <ul>
 <li>[% loc('Name:') %] [% c.user.name %]
 <li>[% loc('Email:') %] [% c.user.email OR '-' %]
-    <p class="my-account-buttons">
+    <p class="my-account-buttons my-account-buttons--email">
       [% IF NOT c.user.email %]
         <a href="/auth/change_email">[% loc('Add') %]</a>
       [% ELSIF c.user.email_verified %]
@@ -60,13 +60,17 @@ li .my-account-buttons a {
 </ul>
 
 <p class="my-account-buttons">
-    <a href="/auth/change_password">
-  [%~ IF c.user.password ~%]
-    [% loc('Change password') %]
-  [%~ ELSE ~%]
-    [% loc('Set password') %]
-  [%~ END ~%]
+  [% IF c.session.oauth.change_password_uri %]
+    <a class="change-password" href="[% c.session.oauth.change_password_uri | html %]">[% loc('Change password') %]</a>
+  [% ELSE %]
+    <a class="change-password" href="/auth/change_password">
+    [%~ IF c.user.password ~%]
+      [% loc('Change password') %]
+    [%~ ELSE ~%]
+      [% loc('Set password') %]
+    [%~ END ~%]
     </a>
+  [% END %]
   [% IF c.user AND (c.user.from_body OR c.user.is_superuser) %]
   <a href="/auth/generate_token">[% loc('Security') %]</a>
   [% END %]

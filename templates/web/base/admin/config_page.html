@@ -51,7 +51,12 @@ running version <strong>[% git_version || 'unknown' %]</strong>.
 [% INCLUDE just_value value="ALLOWED_COBRANDS" conf = allowed_conf %]
 <tr>
 <td>Web templates</td>
-<td colspan=2>[% c.cobrand.path_to_web_templates.join('<br>') %]</td>
+<td colspan=2>
+    [% FOR path IN c.cobrand.path_to_web_templates %]
+        [% path %]
+        [% IF NOT loop.last %]<br>[% END %]
+    [% END %]
+</td>
 </tr>
 [% INCLUDE with_cobrand value="MAP_TYPE" cob=c.cobrand.map_type %]
 [% INCLUDE with_cobrand value="EXAMPLE_PLACES"
@@ -117,7 +122,7 @@ running version <strong>[% git_version || 'unknown' %]</strong>.
 [% INCLUDE just_value value="EMAIL_DOMAIN" %]
 [% INCLUDE with_cobrand value="CONTACT_NAME" cob=c.cobrand.contact_name %]
 [% INCLUDE with_cobrand value="CONTACT_EMAIL" cob=c.cobrand.contact_email %]
-[% INCLUDE just_value value="DO_NOT_REPLY_EMAIL" %]
+[% INCLUDE with_cobrand value="DO_NOT_REPLY_EMAIL" cob=c.cobrand.do_not_reply_email %]
 
 [% INCLUDE subsection heading="Development" %]
 [% INCLUDE just_value value="STAGING_SITE" %]

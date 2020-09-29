@@ -17,6 +17,9 @@ my $contact = $mech->create_contact_ok( body_id => $body->id, category => 'Sidew
 my $body2 = $mech->create_body_ok(2217, 'Buckinghamshire');
 my $contact2 = $mech->create_contact_ok( body_id => $body2->id, category => 'Sidewalk and Curb Issues', email => 'sidewalks' );
 
+my $hounslow = $mech->create_body_ok(2483, 'Hounslow');
+my $hounslowcontact = $mech->create_contact_ok( body_id => $hounslow->id, category => 'Sidewalk and Curb Issues', email => 'sidewalks' );
+
 my $dtf = DateTime::Format::W3CDTF->new;
 
 my $requests_xml = qq{<?xml version="1.0" encoding="utf-8"?>
@@ -199,48 +202,6 @@ for my $test (
 }
 
 my $date = DateTime->new(
-    year => 2010,
-    month => 4,
-    day => 14,
-    hour => 6,
-    minute => 37
-);
-
-for my $test (
-  {
-      start_date => '1',
-      end_date => '',
-      desc => 'do not process if only a start_date',
-      subs => {},
-  },
-  {
-      start_date => '',
-      end_date => '1',
-      desc => 'do not process if only an end_date',
-      subs => {},
-  },
-) {
-    subtest $test->{desc} => sub {
-        my $xml = prepare_xml( $test->{subs} );
-        my $o = Open311->new(
-            jurisdiction => 'mysociety',
-            endpoint => 'http://example.com',
-            test_mode => 1,
-            test_get_returns => { 'requests.xml' => $xml}
-        );
-
-        my $update = Open311::GetServiceRequests->new(
-            start_date => $test->{start_date},
-            end_date => $test->{end_date},
-            system_user => $user,
-        );
-        my $ret = $update->create_problems( $o, $body );
-
-        is $ret, 0, 'failed correctly'
-    };
-}
-
-$date = DateTime->new(
     year => 2010,
     month => 4,
     day => 14,
@@ -468,6 +429,110 @@ for my $test (
         $p->delete;
     };
 }
+
+my $hounslow_non_public_xml = qq[<?xml version="1.0" encoding="utf-8"?>
+<service_requests>
+<request>
+<service_request_id>123456</service_request_id>
+<status>open</status>
+<status_notes></status_notes>
+<service_name>Sidewalk and Curb Issues</service_name>
+<service_code>sidewalks</service_code>
+<description>this is a problem</description>
+<agency_responsible></agency_responsible>
+<service_notice></service_notice>
+<requested_datetime>2010-04-14T06:37:38-08:00</requested_datetime>
+<updated_datetime>2010-04-14T06:37:38-08:00</updated_datetime>
+<expected_datetime>2010-04-15T06:37:38-08:00</expected_datetime>
+<lat>51.482286</lat>
+<long>-0.328163</long>
+<non_public>1</non_public>
+</request>
+</service_requests>
+];
+
+for my $test (
+  {
+      desc => 'Hounslow non_public reports not created',
+      non_public => 1,
+      count => 0,
+  },
+  {
+      desc => 'Hounslow public reports are created',
+      non_public => 0,
+      count => 1,
+  },
+) {
+    subtest $test->{desc} => sub {
+        (my $xml = $hounslow_non_public_xml) =~ s/non_public>1/non_public>$test->{non_public}/;
+
+        my $o = Open311->new(
+            jurisdiction => 'mysociety',
+            endpoint => 'http://example.com',
+            test_mode => 1,
+            test_get_returns => { 'requests.xml' => $xml}
+        );
+
+        my $update = Open311::GetServiceRequests->new(
+            system_user => $user,
+            start_date => $start_date,
+            end_date => $end_date
+        );
+
+        FixMyStreet::override_config {
+            MAPIT_URL => 'http://mapit.uk/',
+            ALLOWED_COBRANDS => [ 'hounslow' ],
+        }, sub {
+            $update->create_problems( $o, $hounslow );
+        };
+
+        my $q = FixMyStreet::DB->resultset('Problem')->search(
+            { external_id => 123456 }
+        );
+
+        is $q->count, $test->{count}, 'problem count is correct';
+
+        $q->first->delete if $test->{count};
+    };
+}
+
+subtest "non_public contacts result in non_public reports" => sub {
+
+    $contact->update({
+        non_public => 1
+    });
+    my $o = Open311->new(
+        jurisdiction => 'mysociety',
+        endpoint => 'http://example.com',
+        test_mode => 1,
+        test_get_returns => { 'requests.xml' => prepare_xml( {} ) }
+    );
+
+    my $update = Open311::GetServiceRequests->new(
+        system_user => $user,
+        start_date => $start_date,
+        end_date => $end_date
+    );
+
+    FixMyStreet::override_config {
+        MAPIT_URL => 'http://mapit.uk/',
+    }, sub {
+        $update->create_problems( $o, $body );
+    };
+
+    my $p = FixMyStreet::DB->resultset('Problem')->search(
+        { external_id => 123456 }
+    )->first;
+
+    ok $p, 'problem created';
+    is $p->non_public, 1, "report non_public is set correctly";
+
+    $p->delete;
+    $contact->update({
+        non_public => 0
+    });
+
+};
 
 for my $test (
   {

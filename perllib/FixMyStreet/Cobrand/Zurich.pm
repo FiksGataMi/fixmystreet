@@ -9,6 +9,8 @@ use Scalar::Util 'blessed';
 use DateTime::Format::Pg;
 use Try::Tiny;
 
+use FixMyStreet::Geocode::Zurich;
+
 use strict;
 use warnings;
 use utf8;
@@ -78,7 +80,7 @@ sub find_closest {
 
 sub enter_postcode_text {
     my ( $self ) = @_;
-    return _('Enter a Z&uuml;rich street name');
+    return _('Enter a Zürich street name');
 }
 
 sub example_places {
@@ -141,7 +143,7 @@ sub problem_as_hashref {
         $hashref->{title} = _('This report is awaiting moderation.');
         $hashref->{banner_id} = 'closed';
     } else {
-        if ( $problem->state eq 'confirmed' || $problem->state eq 'external' ) {
+        if ( $problem->state eq 'confirmed' ) {
             $hashref->{banner_id} = 'closed';
         } elsif ( $problem->is_fixed || $problem->is_closed ) {
             $hashref->{banner_id} = 'fixed';
@@ -152,7 +154,7 @@ sub problem_as_hashref {
         if ( $problem->state eq 'confirmed' ) {
             $hashref->{state} = 'open';
             $hashref->{state_t} = _('Open');
-        } elsif ( $problem->state eq 'wish' ) {
+        } elsif ( $problem->state eq 'wish' || $problem->state eq 'external' ) {
             $hashref->{state_t} = _('Closed');
         } elsif ( $problem->is_fixed ) {
             $hashref->{state} = 'closed';
@@ -322,12 +324,20 @@ sub report_page_data {
 
     $c->stash->{page} = 'reports';
     $c->forward( 'stash_report_filter_status' );
+    $c->forward('stash_report_sort', [ $c->cobrand->reports_ordering ]);
     $c->forward( 'load_and_group_problems' );
     $c->stash->{body} = { id => 0 }; # So template can fetch the list
 
     if ($c->get_param('ajax')) {
         $c->detach('ajax', [ 'reports/_problem-list.html' ]);
     }
+
+    my @categories = $c->model('DB::Contact')->not_deleted->search(undef, {
+        columns => [ 'category', 'extra' ],
+        distinct => 1
+    })->all_sorted;
+    $c->stash->{filter_categories} = \@categories;
+    $c->stash->{filter_category} = { map { $_ => 1 } $c->get_param_list('filter_category', 1) };
 
     my $pins = $c->stash->{pins};
     FixMyStreet::Map::display_map(
@@ -354,7 +364,7 @@ sub set_problem_state {
     my ($self, $c, $problem, $new_state) = @_;
     return $self->update_admin_log($c, $problem) if $new_state eq $problem->state;
     $problem->state( $new_state );
-    $c->forward( 'log_edit', [ $problem->id, 'problem', "state change to $new_state" ] );
+    $c->forward( '/admin/log_edit', [ $problem->id, 'problem', "state change to $new_state" ] );
 }
 
 =head1 C<update_admin_log>
@@ -378,7 +388,7 @@ sub update_admin_log {
         $text = "Logging time_spent";
     }
 
-    $c->forward( 'log_edit', [ $problem->id, 'problem', $text, $time_spent ] );
+    $c->forward( '/admin/log_edit', [ $problem->id, 'problem', $text, $time_spent ] );
 }
 
 # Any user with from_body set can view admin
@@ -460,7 +470,7 @@ sub admin {
         my $dir = defined $c->get_param('d') ? $c->get_param('d') : 1;
         $c->stash->{order} = $order;
         $c->stash->{dir} = $dir;
-        $order .= ' desc' if $dir;
+        $order = { -desc => $order } if $dir;
 
         # XXX No multiples or missing bodies
         $c->stash->{submitted} = $c->cobrand->problems->search({
@@ -494,7 +504,7 @@ sub admin {
         my $dir = defined $c->get_param('d') ? $c->get_param('d') : 1;
         $c->stash->{order} = $order;
         $c->stash->{dir} = $dir;
-        $order .= ' desc' if $dir;
+        $order = { -desc => $order } if $dir;
 
         # XXX No multiples or missing bodies
         $c->stash->{reports_new} = $c->cobrand->problems->search( {
@@ -522,12 +532,16 @@ sub admin {
 }
 
 sub category_options {
-    my ($self, $c) = @_;
+    my $self = shift;
+    my $c = $self->{c};
     my @categories = $c->model('DB::Contact')->not_deleted->all;
-    $c->stash->{category_options} = [ map { {
-        category => $_->category, category_display => $_->category,
+    @categories = map { {
+        category => $_->category,
+        category_display => $_->get_extra_metadata('admin_label') || $_->category,
         abbreviation => $_->get_extra_metadata('abbreviation'),
-    } } @categories ];
+    } } @categories;
+    @categories = sort { $a->{category_display} cmp $b->{category_display} } @categories;
+    $c->stash->{category_options} = \@categories;
 }
 
 sub admin_report_edit {
@@ -553,21 +567,39 @@ sub admin_report_edit {
         $c->stash->{bodies} = \@bodies;
 
         # Can change category to any other
-        $self->category_options($c);
+        $self->category_options;
 
     } elsif ($type eq 'dm') {
 
         # Can assign to:
         my @bodies = $c->model('DB::Body')->search( [
-            { 'me.parent' => $body->parent->id }, # Other DMs on the same level
             { 'me.parent' => $body->id }, # Their subdivisions
             { 'me.parent' => undef, 'bodies.id' => undef }, # External bodies
-        ], { join => 'bodies', distinct => 1 } );
-        @bodies = sort { strcoll($a->name, $b->name) } @bodies;
+        ], { join => 'bodies', distinct => 1 } )->all;
+        @bodies = grep {
+            my $cat = $_->get_extra_metadata('category');
+            if ($cat) {
+                $cat = $c->model('DB::Contact')->not_deleted->search({ category => $cat })->first;
+            }
+            !$cat || $cat->body_id == $body->id;
+        } @bodies;
+        @bodies = sort {
+            my $a_cat = $a->get_extra_metadata('category');
+            my $b_cat = $b->get_extra_metadata('category');
+            if ($a_cat && $b_cat) {
+                strcoll($a->name, $b->name)
+            } elsif ($a_cat) {
+                -1;
+            } elsif ($b_cat) {
+                1;
+            } else {
+                strcoll($a->name, $b->name)
+            }
+        } @bodies;
         $c->stash->{bodies} = \@bodies;
 
         # Can change category to any other
-        $self->category_options($c);
+        $self->category_options;
 
     }
 
@@ -866,7 +898,7 @@ sub admin_report_edit {
                 $self->set_problem_state($c, $problem, 'confirmed');
             }
             $problem->update;
-            $c->forward( 'log_edit', [ $problem->id, 'problem', 
+            $c->forward( '/admin/log_edit', [ $problem->id, 'problem',
                 $not_contactable ?
                     _('Customer not contactable')
                     : _('Sent report back') ] );
@@ -925,6 +957,11 @@ sub admin_report_edit {
     $self->stash_states($problem);
     return 0;
 
+}
+
+sub admin_district_lookup {
+    my ($self, $row) = @_;
+    FixMyStreet::Geocode::Zurich::admin_district($row->local_coords);
 }
 
 sub stash_states {
@@ -1116,7 +1153,7 @@ sub admin_stats {
     if ($y && $m) {
         $c->stash->{start_date} = DateTime->new( year => $y, month => $m, day => 1 );
         $c->stash->{end_date} = $c->stash->{start_date} + DateTime::Duration->new( months => 1 );
-        $optional_params{created} = {
+        $optional_params{'me.created'} = {
             '>=', DateTime::Format::Pg->format_datetime($c->stash->{start_date}), 
             '<',  DateTime::Format::Pg->format_datetime($c->stash->{end_date}),
         };
@@ -1135,7 +1172,7 @@ sub admin_stats {
     }
 
     # Can change category to any other
-    $self->category_options($c);
+    $self->category_options;
 
     # Total reports (non-hidden)
     my $total = $c->model('DB::Problem')->search( \%params )->count;
@@ -1202,100 +1239,94 @@ sub admin_stats {
 
 sub export_as_csv {
     my ($self, $c, $params) = @_;
-    try {
-        $c->model('DB')->schema->storage->sql_maker->quote_char('"');
-        my $csv = $c->stash->{csv} = {
-            objects => $c->model('DB::Problem')->search_rs(
-                $params,
-                {
-                    join => ['admin_log_entries', 'user'],
-                    distinct => 1,
-                    columns => [
-                        'id',       'created',
-                        'latitude', 'longitude',
-                        'cobrand',  'category',
-                        'state',    'user_id',
-                        'external_body',
-                        'title', 'detail',
-                        'photo',
-                        'whensent', 'lastupdate',
-                        'service',
-                        'extra',
-                        { sum_time_spent => { sum => 'admin_log_entries.time_spent' } },
-                        'name', 'user.id', 'user.email', 'user.phone', 'user.name',
-                    ]
-                }
-            ),
-            headers => [
-                'Report ID', 'Created', 'Sent to Agency', 'Last Updated',
-                'E', 'N', 'Category', 'Status', 'Closure Status',
-                'UserID', 'User email', 'User phone', 'User name',
-                'External Body', 'Time Spent', 'Title', 'Detail',
-                'Media URL', 'Interface Used', 'Council Response',
-                'Strasse', 'Mast-Nr.', 'Haus-Nr.', 'Hydranten-Nr.',
-            ],
-            columns => [
-                'id', 'created', 'whensent',' lastupdate', 'local_coords_x',
-                'local_coords_y', 'category', 'state', 'closure_status',
-                'user_id', 'user_email', 'user_phone', 'user_name',
-                'body_name', 'sum_time_spent', 'title', 'detail',
-                'media_url', 'service', 'public_response',
-                'strasse', 'mast_nr',' haus_nr', 'hydranten_nr',
-            ],
-            extra_data => sub {
-                my $report = shift;
 
-                my $body_name = "";
-                if ( my $external_body = $report->body($c) ) {
-                    $body_name = $external_body->name || '[Unknown body]';
-                }
+    my $csv = $c->stash->{csv} = {
+        objects => $c->model('DB::Problem')->search_rs(
+            $params,
+            {
+                join => ['admin_log_entries', 'user'],
+                distinct => 1,
+                columns => [
+                    'id',       'created',
+                    'latitude', 'longitude',
+                    'cobrand',  'category',
+                    'state',    'user_id',
+                    'external_body',
+                    'title', 'detail',
+                    'photo',
+                    'whensent', 'lastupdate',
+                    'service',
+                    'extra',
+                    { sum_time_spent => { sum => 'admin_log_entries.time_spent' } },
+                    'name', 'user.id', 'user.email', 'user.phone', 'user.name',
+                ]
+            }
+        ),
+        headers => [
+            'Report ID', 'Created', 'Sent to Agency', 'Last Updated',
+            'E', 'N', 'Category', 'Status', 'Closure Status',
+            'UserID', 'User email', 'User phone', 'User name',
+            'External Body', 'Time Spent', 'Title', 'Detail',
+            'Media URL', 'Interface Used', 'Council Response',
+            'Strasse', 'Mast-Nr.', 'Haus-Nr.', 'Hydranten-Nr.',
+        ],
+        columns => [
+            'id', 'created', 'whensent',' lastupdate', 'local_coords_x',
+            'local_coords_y', 'category', 'state', 'closure_status',
+            'user_id', 'user_email', 'user_phone', 'user_name',
+            'body_name', 'sum_time_spent', 'title', 'detail',
+            'media_url', 'service', 'public_response',
+            'strasse', 'mast_nr',' haus_nr', 'hydranten_nr',
+        ],
+        extra_data => sub {
+            my $report = shift;
 
-                my $detail = $report->detail;
-                my $public_response = $report->get_extra_metadata('public_response') || '';
-                my $metas = $report->get_extra_fields();
-                my %extras;
-                foreach my $field (@$metas) {
-                    $extras{$field->{name}} = $field->{value};
-                }
+            my $body_name = "";
+            if ( my $external_body = $report->body($c) ) {
+                $body_name = $external_body->name || '[Unknown body]';
+            }
 
-                # replace newlines with HTML <br/> element
-                $detail =~ s{\r?\n}{ <br/> }g;
-                $public_response =~ s{\r?\n}{ <br/> }g if $public_response;
+            my $detail = $report->detail;
+            my $public_response = $report->get_extra_metadata('public_response') || '';
+            my $metas = $report->get_extra_fields();
+            my %extras;
+            foreach my $field (@$metas) {
+                $extras{$field->{name}} = $field->{value};
+            }
 
-                # Assemble photo URL, if report has a photo
-                my $photo_to_display = $c->cobrand->allow_photo_display($report);
-                my $media_url = (@{$report->photos} && $photo_to_display)
-                    ? $c->cobrand->base_url . $report->photos->[$photo_to_display-1]->{url}
-                    : '';
+            # replace newlines with HTML <br/> element
+            $detail =~ s{\r?\n}{ <br/> }g;
+            $public_response =~ s{\r?\n}{ <br/> }g if $public_response;
 
-                return {
-                    whensent => $report->whensent,
-                    lastupdate => $report->lastupdate,
-                    user_id => $report->user_id,
-                    user_email => $report->user->email || '',
-                    user_phone => $report->user->phone || '',
-                    user_name => $report->name,
-                    closure_status => $report->get_extra_metadata('closure_status') || '',
-                    body_name => $body_name,
-                    sum_time_spent => $report->get_column('sum_time_spent') || 0,
-                    detail => $detail,
-                    media_url => $media_url,
-                    service => $report->service || 'Web interface',
-                    public_response => $public_response,
-                    strasse => $extras{'strasse'} || '',
-                    mast_nr => $extras{'mast_nr'} || '',
-                    haus_nr => $extras{'haus_nr'} || '',
-                    hydranten_nr => $extras{'hydranten_nr'} || ''
-                };
-            },
-            filename => 'stats',
-        };
-        $c->forward('/dashboard/generate_csv');
-    } catch {
-        die $_;
-    } finally {
-        $c->model('DB')->schema->storage->sql_maker->quote_char('');
+            # Assemble photo URL, if report has a photo
+            my $photo_to_display = $c->cobrand->allow_photo_display($report);
+            my $media_url = (@{$report->photos} && $photo_to_display)
+                ? $c->cobrand->base_url . $report->photos->[$photo_to_display-1]->{url}
+                : '';
+
+            return {
+                whensent => $report->whensent,
+                lastupdate => $report->lastupdate,
+                user_id => $report->user_id,
+                user_email => $report->user->email || '',
+                user_phone => $report->user->phone || '',
+                user_name => $report->name,
+                closure_status => $report->get_extra_metadata('closure_status') || '',
+                body_name => $body_name,
+                sum_time_spent => $report->get_column('sum_time_spent') || 0,
+                detail => $detail,
+                media_url => $media_url,
+                service => $report->service || 'Web interface',
+                public_response => $public_response,
+                strasse => $extras{'strasse'} || '',
+                mast_nr => $extras{'mast_nr'} || '',
+                haus_nr => $extras{'haus_nr'} || '',
+                hydranten_nr => $extras{'hydranten_nr'} || ''
+            };
+        },
+        filename => 'stats',
     };
+    $c->forward('/dashboard/generate_csv');
 }
 
 sub problem_confirm_email_extras {
@@ -1311,7 +1342,9 @@ sub reports_per_page { return 20; }
 
 sub singleton_bodies_str { 1 }
 
-sub contact_extra_fields { [ 'abbreviation' ] };
+sub body_extra_fields { [ 'category' ] };
+
+sub contact_extra_fields { [ 'abbreviation', 'admin_label' ] };
 
 sub default_problem_state { 'submitted' }
 
@@ -1347,6 +1380,13 @@ sub db_state_migration {
     for ('action scheduled', 'duplicate', 'not responsible', 'internal referral', 'planned', 'investigating', 'unable to fix') {
         $rs->find({ label => $_ })->delete;
     }
+}
+
+sub hook_report_filter_status {
+    my ($self, $status) = @_;
+    @$status = map {
+        $_ eq 'closed' ? ('closed', 'fixed') : $_
+    } @$status;
 }
 
 1;

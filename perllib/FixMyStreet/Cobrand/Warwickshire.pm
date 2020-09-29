@@ -1,5 +1,5 @@
 package FixMyStreet::Cobrand::Warwickshire;
-use base 'FixMyStreet::Cobrand::UKCouncils';
+use base 'FixMyStreet::Cobrand::Whitelabel';
 
 use strict;
 use warnings;
@@ -21,16 +21,6 @@ sub disambiguate_location {
         bounds => [ 51.955394, -1.962007, 52.687244, -1.172140 ],
     };
 }
-
-sub example_places {
-    return [ 'CV34 4RL', 'Stratford Rd' ];
-}
-
-sub contact_email {
-    my $self = shift;
-    return join( '@', 'fmstest', 'warwickshire.gov.uk' );
-}
-sub contact_name { 'Warwickshire County Council (do not reply)'; }
 
 sub send_questionnaires { 0 }
 

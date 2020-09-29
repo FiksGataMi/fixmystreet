@@ -1,3 +1,4 @@
+use utf8;
 use open ':std', ':locale';
 use FixMyStreet::TestMech;
 use FixMyStreet::App;
@@ -97,7 +98,7 @@ $report->geocode(
                                 'estimatedTotal' => 1
                               }
                             ],
-          'copyright' => "Copyright \x{a9} 2011 Microsoft and its suppliers. All rights reserved. This API cannot be accessed and the content and any results may not be used, reproduced or transmitted in any manner without express written permission from Microsoft Corporation.",
+          'copyright' => "Copyright © 2011 Microsoft and its suppliers. All rights reserved. This API cannot be accessed and the content and any results may not be used, reproduced or transmitted in any manner without express written permission from Microsoft Corporation.",
           'statusCode' => 200,
           'authenticationResultCode' => 'ValidCredentials'
         }
@@ -148,6 +149,23 @@ subtest "check RSS feeds on cobrand have correct URLs for non-cobrand reports" =
 
     $mech->content_contains($expected1, 'non cobrand area report point to fixmystreet.com');
     $mech->content_contains($expected2, 'cobrand area report point to cobrand url');
+};
+
+subtest 'Check XSL' => sub {
+    $mech->host('www.fixmystreet.com');
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => 'fixmystreet',
+    }, sub {
+        $mech->get_ok('/rss/xsl');
+    };
+    $mech->content_contains('/cobrands/fixmystreet.com/images/email-logo.gif');
+    $mech->content_contains('FixMyStreet');
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => 'bexley',
+    }, sub {
+        $mech->get_ok('/rss/xsl');
+    };
+    $mech->content_contains('/cobrands/bexley/images/logo.png');
 };
 
 done_testing();

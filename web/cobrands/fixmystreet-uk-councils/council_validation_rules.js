@@ -13,19 +13,21 @@ confirm_validation_rules = {
 };
 
 body_validation_rules = {
-    'Buckinghamshire County Council': confirm_validation_rules,
-    'Lincolnshire County Council': confirm_validation_rules,
     'Bath and North East Somerset Council': confirm_validation_rules,
-    'Rutland County Council': {
-        name: {
-          required: true,
-          maxlength: 40
-        }
-    },
     'Bromley Council': {
         detail: {
           required: true,
           maxlength: 1750
+        }
+    },
+    'Buckinghamshire Council': confirm_validation_rules,
+    'Cheshire East Council': confirm_validation_rules,
+    'Hounslow Borough Council': confirm_validation_rules,
+    'Lincolnshire County Council': confirm_validation_rules,
+    'Northamptonshire County Council': {
+        title: {
+          required: true,
+          maxlength: 120
         }
     },
     'Oxfordshire County Council': {
@@ -44,10 +46,20 @@ body_validation_rules = {
           maxlength: 50
         }
     },
-    'Northamptonshire County Council': {
+    'Peterborough City Council': $.extend({
         title: {
           required: true,
-          maxlength: 120
+          maxlength: 50
+        }
+    }, confirm_validation_rules),
+    'Rutland County Council': {
+        title: {
+          required: true,
+          maxlength: 254
+        },
+        name: {
+          required: true,
+          maxlength: 40
         }
     }
 };

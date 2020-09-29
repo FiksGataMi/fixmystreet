@@ -12,23 +12,20 @@ sub build_recipient_list {
     my $all_confirmed = 1;
     foreach my $body ( @{ $self->bodies } ) {
 
-        my $contact = $row->result_source->schema->resultset("Contact")->not_deleted->find( {
-            body_id => $body->id,
-            category => $row->category
-        } );
+        my $contact = $self->fetch_category($body, $row) or next;
 
         my ($body_email, $state, $note) = ( $contact->email, $contact->state, $contact->note );
 
         $body_email = swandt_contact($row->latitude, $row->longitude)
-            if ($body->areas->{2427} || $body->areas->{2429}) && $body_email eq 'SPECIAL';
+            if $body->name eq 'Somerset West and Taunton Council' && $body_email eq 'SPECIAL';
 
         unless ($state eq 'confirmed') {
             $all_confirmed = 0;
             $note = 'Body ' . $row->bodies_str . ' deleted'
                 unless $note;
             $body_email = 'N/A' unless $body_email;
-            $self->unconfirmed_counts->{$body_email}{$row->category}++;
-            $self->unconfirmed_notes->{$body_email}{$row->category} = $note;
+            $self->unconfirmed_data->{$body_email}{$row->category}{count}++;
+            $self->unconfirmed_data->{$body_email}{$row->category}{note} = $note;
         }
 
         my @emails;
@@ -54,6 +51,15 @@ sub get_template {
 sub send_from {
     my ( $self, $row ) = @_;
     return [ $row->user->email, $row->name ];
+}
+
+sub envelope_sender {
+    my ($self, $row) = @_;
+
+    if ($row->user->email && $row->user->email_verified) {
+        return FixMyStreet::Email::unique_verp_id('report', $row->id);
+    }
+    return $row->get_cobrand_logged->do_not_reply_email;
 }
 
 sub send {
@@ -85,12 +91,10 @@ sub send {
 
     $params->{Bcc} = $self->bcc if @{$self->bcc};
 
-    my $sender;
+    my $sender = $self->envelope_sender($row);
     if ($row->user->email && $row->user->email_verified) {
-        $sender = FixMyStreet::Email::unique_verp_id('report', $row->id);
         $params->{From} = $self->send_from( $row );
     } else {
-        $sender = FixMyStreet->config('DO_NOT_REPLY_EMAIL');
         my $name = sprintf(_("On behalf of %s"), @{ $self->send_from($row) }[1]);
         $params->{From} = [ $sender, $name ];
     }
@@ -102,16 +106,26 @@ sub send {
     }
 
     my $result = FixMyStreet::Email::send_cron($row->result_source->schema,
-        $self->get_template($row), $h,
+        $self->get_template($row), {
+            %$h,
+            cobrand => $cobrand, # For correct logo that uses cobrand object
+        },
         $params, $sender, $nomail, $cobrand, $row->lang);
 
     unless ($result) {
+        $row->set_extra_metadata('sent_to' => email_list($params->{To}));
         $self->success(1);
     } else {
         $self->error( 'Failed to send email' );
     }
 
     return $result;
+}
+
+sub email_list {
+    my $list = shift;
+    my @list = map { ref $_ ? $_->[0] : $_ } @$list;
+    return \@list;
 }
 
 # SW&T has different contact addresses depending upon the old district
@@ -126,7 +140,7 @@ sub swandt_contact {
 sub _get_district_for_contact {
     my ( $lat, $lon ) = @_;
     my $district =
-      FixMyStreet::MapIt::call( 'point', "4326/$lon,$lat", type => 'DIS' );
+      FixMyStreet::MapIt::call( 'point', "4326/$lon,$lat", type => 'DIS', generation => 34 );
     ($district) = keys %$district;
     return $district;
 }

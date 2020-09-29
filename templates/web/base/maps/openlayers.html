@@ -6,6 +6,9 @@
 
 <input type="hidden" name="zoom" value="[% map.zoom %]">
 <div id="js-map-data"
+[%- IF c.config.STAGING_SITE %]
+    data-staging=1
+[%- END %]
 [%- UNLESS c.cobrand.call_hook('hide_areas_on_reports') %]
     data-area="[% map.area.join(',') %]"
 [%- END %]
@@ -33,9 +36,13 @@
 <div id="map_box" aria-hidden="true">
     [% pre_map %]
     <div id="map">
-      [% INCLUDE 'maps/noscript_map.html' js = 1 %]
+      [% IF noscript_map_template == 'maps/noscript_map_base_wmx.html' %]
+          [% INCLUDE 'maps/noscript_map_base_wmx.html' js = 1 %]
+      [% ELSE %]
+          [% INCLUDE 'maps/noscript_map.html' js = 1 %]
+      [% END %]
     </div>
     [% IF map.copyright %]
-    <div class="olControlAttribution" style="position: absolute;">[% map.copyright %]</div>
+    <div class="olControlAttribution" style="position: absolute;">[% map.copyright | safe %]</div>
     [% END %]
     <img id="loading-indicator" class="hidden" aria-hidden="true" src="/i/loading.svg" alt="Loading...">

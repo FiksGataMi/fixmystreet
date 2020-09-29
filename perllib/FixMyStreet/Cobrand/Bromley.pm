@@ -30,13 +30,10 @@ sub report_validation {
 sub report_new_munge_before_insert {
     my ($self, $report) = @_;
 
-    $report->subcategory($report->get_extra_field_value('service_sub_code'));
-}
+    # Make sure TfL reports are marked safety critical
+    $self->SUPER::report_new_munge_before_insert($report);
 
-sub base_url {
-    my $self = shift;
-    return $self->next::method() if FixMyStreet->config('STAGING_SITE');
-    return 'https://fix.bromley.gov.uk';
+    $report->subcategory($report->get_extra_field_value('service_sub_code'));
 }
 
 sub problems_on_map_restriction {
@@ -87,10 +84,6 @@ sub get_geocoder {
     return 'OSM'; # default of Bing gives poor results, let's try overriding.
 }
 
-sub example_places {
-    return ( 'BR1 3UH', 'Glebe Rd, Bromley' );
-}
-
 sub map_type {
     'Bromley';
 }
@@ -121,12 +114,6 @@ sub process_open311_extras {
     $self->SUPER::process_open311_extras( @_, [ 'first_name', 'last_name' ] );
 }
 
-sub contact_email {
-    my $self = shift;
-    return join( '@', 'info', 'bromley.gov.uk' );
-}
-sub contact_name { 'Bromley Council (do not reply)'; }
-
 sub abuse_reports_only { 1; }
 
 sub reports_per_page { return 20; }
@@ -143,37 +130,33 @@ sub tweak_all_reports_map {
     }
 
     # A place where this can happen
-    return unless $c->stash->{template} && $c->stash->{template} eq 'about/heatmap.html';
+    return unless $c->action eq 'dashboard/heatmap';
 
-    my $children = $c->stash->{body}->first_area_children;
-    foreach (values %$children) {
-        $_->{url} = $c->uri_for( $c->stash->{body_url}
-            . '/' . $c->cobrand->short_name( $_ )
-        );
-    }
-    $c->stash->{children} = $children;
-
+    # Bromley uses an extra attribute question to store 'subcategory',
+    # rather than group/category, but wants this extra question to act
+    # like a subcategory e.g. in the dashboard filter here.
     my %subcats = $self->subcategories;
-    my $filter = $c->stash->{filter_categories};
-    my @new_contacts;
-    foreach (@$filter) {
-        push @new_contacts, $_;
-        foreach (@{$subcats{$_->id}}) {
-            push @new_contacts, {
-                category => $_->{key},
-                category_display => (" " x 4) . $_->{name},
-            };
+    my $groups = $c->stash->{category_groups};
+    foreach (@$groups) {
+        my $filter = $_->{categories};
+        my @new_contacts;
+        foreach (@$filter) {
+            push @new_contacts, $_;
+            foreach (@{$subcats{$_->id}}) {
+                push @new_contacts, {
+                    category => $_->{key},
+                    category_display => (" " x 4) . $_->{name},
+                };
+            }
         }
+        $_->{categories} = \@new_contacts;
     }
-    $c->stash->{filter_categories} = \@new_contacts;
 
     if (!%{$c->stash->{filter_category}}) {
         my $cats = $c->user->categories;
         my $subcats = $c->user->get_extra_metadata('subcategories') || [];
         $c->stash->{filter_category} = { map { $_ => 1 } @$cats, @$subcats } if @$cats || @$subcats;
     }
-
-    $c->stash->{ward_hash} = { map { $_->{id} => 1 } @{$c->stash->{wards}} } if $c->stash->{wards};
 }
 
 sub title_list {
@@ -183,7 +166,14 @@ sub title_list {
 sub open311_config {
     my ($self, $row, $h, $params) = @_;
 
-    my $extra = $row->get_extra_fields;
+    $params->{always_send_latlong} = 0;
+    $params->{send_notpinpointed} = 1;
+    $params->{extended_description} = 0;
+}
+
+sub open311_extra_data {
+    my ($self, $row, $h, $extra) = @_;
+
     my $title = $row->title;
 
     foreach (@$extra) {
@@ -191,9 +181,8 @@ sub open311_config {
         $title .= ' | ID: ' . $_->{value} if $_->{name} eq 'feature_id';
         $title .= ' | PROW ID: ' . $_->{value} if $_->{name} eq 'prow_reference';
     }
-    @$extra = grep { $_->{name} !~ /feature_id|prow_reference/ } @$extra;
 
-    push @$extra,
+    my $open311_only = [
         { name => 'report_url',
           value => $h->{url} },
         { name => 'report_title',
@@ -205,20 +194,20 @@ sub open311_config {
         { name => 'requested_datetime',
           value => DateTime::Format::W3CDTF->format_datetime($row->confirmed->set_nanosecond(0)) },
         { name => 'email',
-          value => $row->user->email };
+          value => $row->user->email }
+    ];
 
     # make sure we have last_name attribute present in row's extra, so
     # it is passed correctly to Bromley as attribute[]
-    if ( $row->cobrand ne 'bromley' ) {
-        my ( $firstname, $lastname ) = ( $row->name =~ /(\w+)\.?\s+(.+)/ );
-        push @$extra, { name => 'last_name', value => $lastname };
+    if (!$row->get_extra_field_value('last_name')) {
+        my ( $firstname, $lastname ) = ( $row->name =~ /(\S+)\.?\s+(.+)/ );
+        push @$open311_only, { name => 'last_name', value => $lastname };
+    }
+    if (!$row->get_extra_field_value('fms_extra_title') && $row->user->title) {
+        push @$open311_only, { name => 'fms_extra_title', value => $row->user->title };
     }
 
-    $row->set_extra_fields(@$extra);
-
-    $params->{always_send_latlong} = 0;
-    $params->{send_notpinpointed} = 1;
-    $params->{extended_description} = 0;
+    return ($open311_only, [ 'feature_id', 'prow_reference' ]);
 }
 
 sub open311_config_updates {
@@ -347,27 +336,14 @@ sub add_admin_subcategories {
     return \@new_contacts;
 }
 
-sub about_hook {
-    my $self = shift;
-    my $c = $self->{c};
-
-    # Display a special custom dashboard page, with heatmap
-    if ($c->stash->{template} eq 'about/heatmap.html') {
-        $c->forward('/dashboard/check_page_allowed');
-        # We want a special sidebar
-        $c->stash->{ajax_template} = "about/heatmap-list.html";
-        $c->set_param('js', 1) unless $c->get_param('ajax'); # Want to load pins client-side
-        $c->forward('/reports/body', [ 'Bromley' ]);
-    }
-}
-
-# On heatmap page, include querying on subcategories, wards, dates, provided
+# On heatmap page, include querying on subcategories
 sub munge_load_and_group_problems {
     my ($self, $where, $filter) = @_;
     my $c = $self->{c};
 
-    return unless $c->stash->{template} && $c->stash->{template} eq 'about/heatmap.html';
+    return unless $c->action eq 'dashboard/heatmap';
 
+    # Bromley subcategory stuff
     if (!$where->{category}) {
         my $cats = $c->user->categories;
         my $subcats = $c->user->get_extra_metadata('subcategories') || [];
@@ -386,61 +362,6 @@ sub munge_load_and_group_problems {
         };
         delete $where->{category};
     }
-
-    # Wards
-    my @areas = @{$c->user->area_ids || []};
-    # Want to get everything if nothing given in an ajax call
-    if (!$c->stash->{wards} && @areas) {
-        $c->stash->{wards} = [ map { { id => $_ } } @areas ];
-        $where->{areas} = [
-            map { { 'like', '%,' . $_ . ',%' } } @areas
-        ];
-    }
-
-    # Date range
-    my $start_default = DateTime->today(time_zone => FixMyStreet->time_zone || FixMyStreet->local_time_zone)->subtract(months => 1);
-    $c->stash->{start_date} = $c->get_param('start_date') || $start_default->strftime('%Y-%m-%d');
-    $c->stash->{end_date} = $c->get_param('end_date');
-
-    my $range = FixMyStreet::DateRange->new(
-        start_date => $c->stash->{start_date},
-        start_default => $start_default,
-        end_date => $c->stash->{end_date},
-        formatter => $c->model('DB')->storage->datetime_parser,
-    );
-    $where->{'me.confirmed'} = $range->sql;
-
-    delete $filter->{rows};
-
-    # Load the relevant stuff for the sidebar as well
-    my $problems = $self->problems->search($where, $filter);
-
-    $c->stash->{five_newest} = [ $problems->search(undef, {
-        rows => 5,
-        order_by => { -desc => 'confirmed' },
-    })->all ];
-
-    $c->stash->{ten_oldest} = [ $problems->search({
-        'me.state' => [ FixMyStreet::DB::Result::Problem->open_states() ],
-    }, {
-        rows => 10,
-        order_by => 'lastupdate',
-    })->all ];
-
-    my $params = { map { my $n = $_; s/me\./problem\./; $_ => $where->{$n} } keys %$where };
-    my @c = $c->model('DB::Comment')->to_body($self->body)->search({
-        %$params,
-        'me.user_id' => { -not_in => [ $c->user->id, $self->body->comment_user_id ] },
-        'me.state' => 'confirmed',
-    }, {
-        columns => 'problem_id',
-        group_by => 'problem_id',
-        order_by => { -desc => \'max(me.confirmed)' },
-        rows => 5,
-    })->all;
-    $c->stash->{five_commented} = [ map { $_->problem } @c ];
-
-    return $problems;
 }
 
 1;

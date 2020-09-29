@@ -10,6 +10,19 @@ if (!Object.keys) {
   };
 }
 
+function debounce(fn, delay) {
+    var timeout;
+    return function() {
+        var that = this, args = arguments;
+        var debounced = function() {
+            timeout = null;
+            fn.apply(that, args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(debounced, delay);
+    };
+}
+
 var fixmystreet = fixmystreet || {};
 
 fixmystreet.utils = fixmystreet.utils || {};
@@ -119,8 +132,8 @@ $.extend(fixmystreet.utils, {
             new OpenLayers.Projection("EPSG:4326")
         );
 
-        var lat = transformedLonlat.lat;
-        var lon = transformedLonlat.lon;
+        var lat = transformedLonlat.lat.toFixed(6);
+        var lon = transformedLonlat.lon.toFixed(6);
 
         document.getElementById('fixmystreet.latitude').value = lat;
         document.getElementById('fixmystreet.longitude').value = lon;
@@ -237,9 +250,11 @@ $.extend(fixmystreet.utils, {
 
       marker_size: function() {
         var zoom = fixmystreet.map.getZoom() + fixmystreet.zoomOffset;
-        if (zoom >= 15) {
+        var size_normal = fixmystreet.maps.zoom_for_normal_size || 15;
+        var size_small = fixmystreet.maps.zoom_for_small_size || 13;
+        if (zoom >= size_normal) {
             return window.selected_problem_id ? 'small' : 'normal';
-        } else if (zoom >= 13) {
+        } else if (zoom >= size_small) {
             return window.selected_problem_id ? 'mini' : 'small';
         } else {
             return 'mini';
@@ -248,9 +263,11 @@ $.extend(fixmystreet.utils, {
 
       selected_marker_size: function() {
         var zoom = fixmystreet.map.getZoom() + fixmystreet.zoomOffset;
-        if (zoom >= 15) {
+        var size_normal = fixmystreet.maps.zoom_for_normal_size || 15;
+        var size_small = fixmystreet.maps.zoom_for_small_size || 13;
+        if (zoom >= size_normal) {
             return 'big';
-        } else if (zoom >= 13) {
+        } else if (zoom >= size_small) {
             return 'normal';
         } else {
             return 'small';
@@ -304,6 +321,9 @@ $.extend(fixmystreet.utils, {
       // fixmystreet.select_feature).
 
       markers_highlight: function(problem_id) {
+          if (!fixmystreet.markers) {
+              return;
+          }
           for (var i = 0; i < fixmystreet.markers.features.length; i++) {
               if (typeof problem_id == 'undefined') {
                   // There is no highlighted marker, so unfade this marker
@@ -359,6 +379,96 @@ $.extend(fixmystreet.utils, {
               new OpenLayers.LonLat( state.lon, state.lat ),
               state.zoom
           );
+      },
+
+      setup_geolocation: function() {
+          if (!OpenLayers.Control.Geolocate || !fixmystreet.map ||
+              !fixmystreet.utils || !fixmystreet.utils.parse_query_string ||
+              fixmystreet.utils.parse_query_string().geolocate !== '1'
+          ) {
+              return;
+          }
+
+          var layer;
+
+          function createCircleOfUncertainty(e) {
+              var loc = new OpenLayers.Geometry.Point(e.point.x, e.point.y);
+              return new OpenLayers.Feature.Vector(
+                  OpenLayers.Geometry.Polygon.createRegularPolygon(
+                      loc,
+                      e.position.coords.accuracy,
+                      40,
+                      0
+                  ),
+                  {},
+                  {
+                      fillColor: '#0074FF',
+                      fillOpacity: 0.3,
+                      strokeWidth: 0
+                  }
+              );
+          }
+          function addGeolocationLayer(e) {
+            layer = new OpenLayers.Layer.Vector('Geolocation');
+            fixmystreet.map.addLayer(layer);
+            layer.setZIndex(fixmystreet.map.getLayersByName("Pins")[0].getZIndex() - 1);
+            var marker = new OpenLayers.Feature.Vector(
+                new OpenLayers.Geometry.Point(e.point.x, e.point.y),
+                {
+                    marker: true
+                },
+                {
+                    graphicName: 'circle',
+                    strokeColor: '#fff',
+                    strokeWidth: 4,
+                    fillColor: '#0074FF',
+                    fillOpacity: 1,
+                    pointRadius: 10
+                }
+            );
+            layer.addFeatures([ createCircleOfUncertainty(e), marker ]);
+          }
+
+          function updateGeolocationMarker(e) {
+              if (!layer) {
+                  addGeolocationLayer(e);
+              } else {
+                  // Reuse the existing circle marker so its DOM element (and
+                  // hopefully CSS animation) is preserved.
+                  var marker = layer.getFeaturesByAttribute('marker', true)[0];
+                  // Can't reuse the background circle feature as there seems to
+                  // be no easy way to replace its geometry with a new
+                  // circle sized according to this location update's accuracy.
+                  // Instead recreate the feature from scratch.
+                  var uncertainty = createCircleOfUncertainty(e);
+                  // Because we're replacing the accuracy circle, it needs to be
+                  // rendered underneath the location marker. In order to do this
+                  // we have to remove all features and re-add, as simply removing
+                  // and re-adding one feature will always render it on top of others.
+                  layer.removeAllFeatures();
+                  layer.addFeatures([ uncertainty, marker ]);
+
+                  // NB The above still breaks CSS animation because the marker
+                  // was removed from the DOM and re-added. We could leave the
+                  // marker alone and just remove the uncertainty circle
+                  // feature, re-add it as a new feature and then manually shift
+                  // its position in the DOM by getting its element's ID from
+                  // uncertainty.geometry.id and moving it before the <circle>
+                  // element.
+
+                  // Don't forget to update the position of the GPS marker.
+                  marker.move(new OpenLayers.LonLat(e.point.x, e.point.y));
+              }
+          }
+
+          var control = new OpenLayers.Control.Geolocate({
+              bind: false, // Don't want the map to pan to each location
+              watch: true,
+              enableHighAccuracy: true
+          });
+          control.events.register("locationupdated", null, updateGeolocationMarker);
+          fixmystreet.map.addControl(control);
+          control.activate();
       }
     });
 
@@ -425,10 +535,10 @@ $.extend(fixmystreet.utils, {
         }
     }
 
-    function categories_or_status_changed() {
+    var categories_or_status_changed = debounce(function() {
         // If the category or status has changed we need to re-fetch map markers
         fixmystreet.markers.refresh({force: true});
-    }
+    }, 1000);
 
     function replace_query_parameter(qs, id, key) {
         var value,
@@ -559,6 +669,9 @@ $.extend(fixmystreet.utils, {
                 } else {
                     $.extend(style.defaultStyle, { fillColor: 'black', strokeColor: 'black' });
                 }
+                if (!this.features.length) {
+                    return;
+                }
                 var geometry = this.features[0].geometry;
                 if (geometry.CLASS_NAME == 'OpenLayers.Geometry.Collection' ||
                     geometry.CLASS_NAME == 'OpenLayers.Geometry.MultiPolygon') {
@@ -670,7 +783,7 @@ $.extend(fixmystreet.utils, {
             styleMap: pin_layer_style_map
         };
         if (fixmystreet.page == 'around') {
-            fixmystreet.bbox_strategy = fixmystreet.bbox_strategy || new OpenLayers.Strategy.FixMyStreet();
+            fixmystreet.bbox_strategy = fixmystreet.map_bbox_strategy || new OpenLayers.Strategy.FixMyStreet();
             pin_layer_options.strategies = [ fixmystreet.bbox_strategy ];
         }
         if (fixmystreet.page == 'reports') {
@@ -768,6 +881,10 @@ $.extend(fixmystreet.utils, {
             setup_inspector_marker_drag();
         }
 
+        if (fixmystreet.page == "around" || fixmystreet.page == "new") {
+            fixmystreet.maps.setup_geolocation();
+        }
+
         if ( fixmystreet.zoomToBounds ) {
             zoomToBounds( fixmystreet.markers.getDataExtent() );
         }
@@ -790,6 +907,10 @@ $.extend(fixmystreet.utils, {
     }
 
     $(function(){
+
+        if (!document.getElementById('map')) {
+            return;
+        }
 
         // Set specific map config - some other JS included in the
         // template should define this
@@ -822,10 +943,23 @@ $.extend(fixmystreet.utils, {
                 // This option is thankfully used by them both
                 numZoomLevels: fixmystreet.numZoomLevels
             }, fixmystreet.layer_options[i]);
-            if (fixmystreet.layer_options[i].matrixIds) {
-                layer = new fixmystreet.map_type(fixmystreet.layer_options[i]);
+            var layer_options = fixmystreet.layer_options[i];
+            if (layer_options.wms_version) {
+                var options = {
+                  layers: layer_options.layer_names[0],
+                  size: layer_options.tile_size,
+                  format: layer_options.format
+                };
+                layer = new fixmystreet.map_type(
+                  layer_options.name,
+                  layer_options.url,
+                  options,
+                  layer_options
+                );
+            } else if (layer_options.matrixIds) {
+                layer = new fixmystreet.map_type(layer_options);
             } else {
-                layer = new fixmystreet.map_type(fixmystreet.layer_name, fixmystreet.layer_options[i]);
+                layer = new fixmystreet.map_type(fixmystreet.layer_name, layer_options);
             }
             fixmystreet.map.addLayer(layer);
         }
@@ -928,51 +1062,61 @@ OpenLayers.Control.ArgParserFMS = OpenLayers.Class(OpenLayers.Control.ArgParser,
     CLASS_NAME: "OpenLayers.Control.ArgParserFMS"
 });
 
-/* Overriding Permalink so that it can pass the correct zoom to OSM */
-OpenLayers.Control.PermalinkFMS = OpenLayers.Class(OpenLayers.Control.Permalink, {
-    _updateLink: function(alter_zoom) {
-        // this.base was originally set in initialize(), but the window's href
-        // may have changed since then if e.g. the map filters have been updated.
-        // NB this won't change the base of the 'problems nearby' permalink on
-        // /report, as this would result in it pointing at the wrong page.
-        if (this.base !== '/around' && fixmystreet.page !== 'report') {
-            this.base = window.location.href;
-        }
+/* Replacing Permalink so that it can do things a bit differently */
+OpenLayers.Control.PermalinkFMS = OpenLayers.Class(OpenLayers.Control, {
+    element: null,
+    base: '',
 
-        var separator = this.anchor ? '#' : '?';
+    initialize: function(element, base, options) {
+        OpenLayers.Control.prototype.initialize.apply(this, [options]);
+        this.element = OpenLayers.Util.getElement(element);
+        this.base = base || document.location.href;
+    },
+
+    destroy: function()  {
+        if (this.map) {
+            this.map.events.unregister('moveend', this, this.updateLink);
+        }
+        OpenLayers.Control.prototype.destroy.apply(this, arguments);
+    },
+
+    draw: function() {
+        OpenLayers.Control.prototype.draw.apply(this, arguments);
+
+        // We do not need to listen to change layer events, no layers in our permalinks
+        this.map.events.on({
+            'moveend': this.updateLink,
+            scope: this
+        });
+
+        // Make it so there is at least a link even though the map may not have
+        // moved yet.
+        this.updateLink();
+
+        return this.div;
+    },
+
+    updateLink: function() {
+        // The window's href may have changed if e.g. the map filters have been
+        // updated. NB this won't change the base of the 'problems nearby'
+        // permalink on /report, as this would result in it pointing at the
+        // wrong page.
         var href = this.base;
-        if (href.indexOf(separator) != -1) {
-            href = href.substring( 0, href.indexOf(separator) );
+        if (this.base !== '/around' && fixmystreet.page !== 'report') {
+            href = window.location.href;
         }
+        var params = this.createParams(href);
 
-        var center = this.map.getCenter();
-
-        var zoom = this.map.getZoom();
-        if ( alter_zoom ) {
-            zoom += fixmystreet.zoomOffset;
+        if (href.indexOf('?') != -1) {
+            href = href.substring( 0, href.indexOf('?') );
         }
-
-        var params = this.createParams(center, zoom);
-
-        // Strip out the ugly OpenLayers layers state string
-        delete params.layers;
-        if (params.lat && params.lon) {
-            // No need for the postcode string either, if we have a latlon
-            delete params.pc;
-        }
-
-        href += separator + OpenLayers.Util.getParameterString(params);
+        href += '?' + OpenLayers.Util.getParameterString(params);
         // Could use mlat/mlon here as well if we are on a page with a marker
-        if (this.base == '/around') {
+        if (this.base === '/around') {
             href += '&js=1';
         }
 
-        if (this.anchor && !this.element) {
-            window.location.href = href;
-        }
-        else {
-            this.element.href = href;
-        }
+        this.element.href = href;
 
         if ('replaceState' in history) {
             if (fixmystreet.page.match(/around|reports/)) {
@@ -984,9 +1128,37 @@ OpenLayers.Control.PermalinkFMS = OpenLayers.Class(OpenLayers.Control.Permalink,
             }
         }
     },
-    updateLink: function() {
-        this._updateLink(0);
+
+    createParams: function(href) {
+        center = this.map.getCenter();
+
+        var params = OpenLayers.Util.getParameters(href);
+
+        // If there's still no center, map is not initialized yet.
+        // Break out of this function, and simply return the params from the
+        // base link.
+        if (center) {
+
+            params.zoom = this.map.getZoom();
+
+            var mapPosition = OpenLayers.Projection.transform(
+              { x: center.lon, y: center.lat },
+              this.map.getProjectionObject(),
+              this.map.displayProjection );
+            var lon = mapPosition.x;
+            var lat = mapPosition.y;
+            params.lat = Math.round(lat*100000)/100000;
+            params.lon = Math.round(lon*100000)/100000;
+        }
+
+        if (params.lat && params.lon) {
+            // No need for the postcode string either, if we have a latlon
+            delete params.pc;
+        }
+
+        return params;
     },
+
     CLASS_NAME: "OpenLayers.Control.PermalinkFMS"
 });
 
@@ -1178,3 +1350,15 @@ OpenLayers.Renderer.SVGBig = OpenLayers.Class(OpenLayers.Renderer.SVG, {
     CLASS_NAME: "OpenLayers.Renderer.SVGBig"
 
 });
+
+/* Stop sending a needless header so that no preflight CORS request */
+OpenLayers.Request.XMLHttpRequest.prototype.setRequestHeader = function(sName, sValue) {
+    if (sName.toLowerCase() == 'x-requested-with') {
+        return;
+    }
+    if (!this._headers) {
+        this._headers = {};
+    }
+    this._headers[sName] = sValue;
+    return this._object.setRequestHeader(sName, sValue);
+};

@@ -9,10 +9,6 @@ sub council_area { return 'Borsetshire'; }
 sub council_name { return 'Borsetshire County Council'; }
 sub council_url { return 'demo'; }
 
-sub example_places {
-    return ( 'BS36 2NS', 'Coalpit Heath' );
-}
-
 sub pin_colour {
     my ( $self, $p, $context ) = @_;
     return 'grey' if $p->is_closed;
@@ -30,9 +26,5 @@ sub send_questionnaires {
 }
 
 sub bypass_password_checks { 1 }
-
-sub enable_category_groups { 1 }
-
-sub suggest_duplicates { 1 }
 
 1;

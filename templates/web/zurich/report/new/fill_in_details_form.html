@@ -1,4 +1,4 @@
-[% sidebar_html %]
+[% sidebar_html | safe %]
 
 <div id="report-a-problem-main">
     <h1>[% loc('Reporting a problem') %]</h1>
@@ -7,7 +7,7 @@
     <fieldset>
         <div id="problem_form">
 
-            [% INCLUDE 'report/new/form_heading.html' %]
+            [% INCLUDE 'report/new/form_after_heading.html' %]
 
 
             [% IF field_errors.bodies %]

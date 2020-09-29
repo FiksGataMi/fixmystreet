@@ -12,6 +12,10 @@ sub council_url { return 'rutland'; }
 sub report_validation {
     my ($self, $report, $errors) = @_;
 
+    if ( length( $report->title ) > 254 ) {
+        $errors->{title} = sprintf( _('Summaries are limited to %s characters in length. Please shorten your summary'), 254 );
+    }
+
     if ( length( $report->name ) > 40 ) {
         $errors->{name} = sprintf( _('Names are limited to %d characters in length.'), 40 );
     }
@@ -22,21 +26,18 @@ sub report_validation {
 sub open311_config {
     my ($self, $row, $h, $params) = @_;
 
-    my $extra = $row->get_extra_fields;
-    push @$extra, { name => 'external_id', value => $row->id };
-    push @$extra, { name => 'title', value => $row->title };
-    push @$extra, { name => 'description', value => $row->detail };
-
-    if ($h->{closest_address}) {
-        push @$extra, { name => 'closest_address', value => "$h->{closest_address}" }
-    }
-    $row->set_extra_fields( @$extra );
-
     $params->{multi_photos} = 1;
 }
 
-sub example_places {
-    return ( 'LE15 6HP', 'High Street', 'Oakham' );
+sub open311_extra_data {
+    my ($self, $row, $h, $extra) = @_;
+
+    return [
+        { name => 'external_id', value => $row->id },
+        { name => 'title', value => $row->title },
+        { name => 'description', value => $row->detail },
+        $h->{closest_address} ? { name => 'closest_address', value => "$h->{closest_address}" } : (),
+    ];
 }
 
 sub disambiguate_location {
@@ -48,12 +49,6 @@ sub disambiguate_location {
     };
 }
 
-sub pin_colour {
-    my ( $self, $p, $context ) = @_;
-    return 'green' if $p->is_fixed || $p->is_closed;
-    return 'yellow';
-}
-
 sub send_questionnaires {
     return 0;
 }
@@ -61,5 +56,7 @@ sub send_questionnaires {
 sub ask_ever_reported {
     return 0;
 }
+
+sub on_map_default_status { 'open' }
 
 1;

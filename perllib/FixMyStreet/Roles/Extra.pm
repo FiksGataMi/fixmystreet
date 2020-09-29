@@ -135,6 +135,58 @@ sub push_extra_fields {
     $self->extra({ %$extra, $META_FIELD => [ @$existing, @fields ] });
 }
 
+=head2 update_extra_field
+
+    $problem->update_extra_field( { ... } );
+
+Given an extra field, will replace one with the same code in the
+existing list of fields, or add to the end if not present.
+Returns true if it was already present, false if newly added.
+
+=cut
+
+sub update_extra_field {
+    my ($self, $field) = @_;
+
+    # Can operate on list that uses code (Contact) or name (Problem),
+    # but make sure we have one of them
+    my $attr;
+    $attr = 'code' if $field->{code};
+    $attr = 'name' if $field->{name};
+    die unless $attr;
+
+    my $existing = $self->get_extra_fields;
+    my $found;
+    foreach (@$existing) {
+        if ($_->{$attr} eq $field->{$attr}) {
+            $_ = $field;
+            $found = 1;
+        }
+    }
+    if (!$found) {
+        push @$existing, $field;
+    }
+
+    $self->set_extra_fields(@$existing);
+    return $found;
+}
+
+=head2 remove_extra_field
+
+    $problem->remove_extra_field( $code );
+
+Given an extra field code, will remove it from the list of fields.
+
+=cut
+
+sub remove_extra_field {
+    my ($self, $code) = @_;
+
+    my @fields = @{ $self->get_extra_fields() };
+    @fields = grep { ($_->{code} || $_->{name}) ne $code } @fields;
+    $self->set_extra_fields(@fields);
+}
+
 =head1 HELPER METHODS
 
 For internal use mostly.
@@ -189,6 +241,26 @@ sub get_extra_field_value {
 
     my ($field) = grep { $_->{name} eq $name } @fields;
     return $field->{value};
+}
+
+=head2 get_extra_field
+
+    my $field = $problem->get_extra_field(name => 'field_name');
+
+Return a field stored in `_fields` in extra, or undefined if it's not present.
+Can use either `name` or `code` to identify the field.
+
+=cut
+
+sub get_extra_field {
+    my ($self, %opts) = @_;
+
+    my @fields = @{ $self->get_extra_fields() };
+
+    my $comparison = $opts{code} ? 'code' : 'name';
+
+    my ($field) = grep { $_->{$comparison} && $_->{$comparison} eq $opts{$comparison} } @fields;
+    return $field;
 }
 
 1;

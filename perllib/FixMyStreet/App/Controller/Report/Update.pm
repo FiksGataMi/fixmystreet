@@ -4,6 +4,7 @@ use Moose;
 use namespace::autoclean;
 BEGIN { extends 'Catalyst::Controller'; }
 
+use utf8;
 use Path::Class;
 use List::Util 'first';
 use Utils;
@@ -105,6 +106,17 @@ sub process_user : Private {
     # Update form includes two username fields: #form_username_register and #form_username_sign_in
     $params{username} = (first { $_ } $c->get_param_list('username')) || '';
 
+    my $anon_button = $c->cobrand->allow_anonymous_reports eq 'button' && $c->get_param('report_anonymously');
+    if ($anon_button) {
+        my $anon_details = $c->cobrand->anonymous_account;
+        my $user = $c->model('DB::User')->find_or_new({ email => $anon_details->{email} });
+        $user->name($anon_details->{name});
+        $update->user($user);
+        $update->name($user->name);
+        $c->stash->{contributing_as_anonymous_user} = 1;
+        return 1;
+    }
+
     # Extra block to use 'last'
     if ( $c->user_exists ) { {
         my $user = $c->user->obj;
@@ -115,13 +127,16 @@ sub process_user : Private {
         }
 
         $user->name( Utils::trim_text( $params{name} ) ) if $params{name};
+        $update->name($user->name);
         my $title = Utils::trim_text( $params{fms_extra_title} );
         $user->title( $title ) if $title;
         $update->user( $user );
 
         # Just in case, make sure the user will have a name
         if ($c->stash->{contributing_as_body} or $c->stash->{contributing_as_anonymous_user}) {
-            $user->name($user->from_body->name) unless $user->name;
+            my $name = $user->moderating_user_name;
+            $update->name($name);
+            $user->name($name) unless $user->name;
         }
 
         return 1;
@@ -143,7 +158,7 @@ sub process_user : Private {
             oauth_update => { $update->get_inflated_columns }
         };
         unless ( $c->forward( '/auth/sign_in', [ $params{username} ] ) ) {
-            $c->stash->{field_errors}->{password} = _('There was a problem with your login information. If you cannot remember your password, or do not have one, please fill in the &lsquo;No&rsquo; section of the form.');
+            $c->stash->{field_errors}->{password} = _('There was a problem with your login information. If you cannot remember your password, or do not have one, please fill in the ‘No’ section of the form.');
             return 1;
         }
         my $user = $c->user->obj;
@@ -155,6 +170,7 @@ sub process_user : Private {
 
     $update->user->name( Utils::trim_text( $params{name} ) )
         if $params{name};
+    $update->name($update->user->name);
     $update->user->title( Utils::trim_text( $params{fms_extra_title} ) )
         if $params{fms_extra_title};
 
@@ -244,8 +260,7 @@ This makes sure we only proceed to processing if we've had the form submitted
 
 sub check_form_submitted : Private {
     my ( $self, $c ) = @_;
-    return if $c->stash->{problem}->get_extra_metadata('closed_updates');
-    return if $c->cobrand->call_hook(updates_disallowed => $c->stash->{problem});
+    return if $c->cobrand->updates_disallowed($c->stash->{problem});
     return $c->get_param('submit_update') || '';
 }
 
@@ -277,14 +292,21 @@ sub process_update : Private {
 
     $c->stash->{contributing_as_body} = $c->user_exists && $c->user->contributing_as('body', $c, $update->problem->bodies_str_ids);
     $c->stash->{contributing_as_anonymous_user} = $c->user_exists && $c->user->contributing_as('anonymous_user', $c, $update->problem->bodies_str_ids);
+
+    # This is also done in process_user, but is needed here for anonymous() just below
+    my $anon_button = $c->cobrand->allow_anonymous_reports($update->problem->category) eq 'button' && $c->get_param('report_anonymously');
+    if ($anon_button) {
+        $c->stash->{contributing_as_anonymous_user} = 1;
+        $c->stash->{contributing_as_body} = undef;
+        $c->stash->{contributing_as_another_user} = undef;
+    }
+
+
     if ($c->stash->{contributing_as_body}) {
-        $update->name($c->user->from_body->name);
         $update->anonymous(0);
     } elsif ($c->stash->{contributing_as_anonymous_user}) {
-        $update->name($c->user->from_body->name);
         $update->anonymous(1);
     } else {
-        $update->name($name);
         $update->anonymous($c->get_param('may_show_name') ? 0 : 1);
     }
 
@@ -366,7 +388,7 @@ sub check_for_errors : Private {
     );
 
     # if using social login then we don't care about name and email errors
-    $c->stash->{is_social_user} = $c->get_param('facebook_sign_in') || $c->get_param('twitter_sign_in');
+    $c->stash->{is_social_user} = $c->get_param('social_sign_in') ? 1 : 0;
     if ( $c->stash->{is_social_user} ) {
         delete $field_errors{name};
         delete $field_errors{username};
@@ -394,6 +416,13 @@ sub check_for_errors : Private {
     #push @{ $c->stash->{errors} },
     #  _('There were problems with your update. Please see below.');
 
+    if ( $c->cobrand->allow_anonymous_reports ) {
+        my $anon_details = $c->cobrand->anonymous_account;
+        my $update = $c->stash->{update};
+        $update->user->email(undef) if $update->user->email eq $anon_details->{email};
+        $update->name(undef) if $update->name && $update->name eq $anon_details->{name};
+    }
+
     return;
 }
 
@@ -404,10 +433,8 @@ sub tokenize_user : Private {
         name => $update->user->name,
         password => $update->user->password,
     };
-    $c->stash->{token_data}{facebook_id} = $c->session->{oauth}{facebook_id}
-        if $c->get_param('oauth_need_email') && $c->session->{oauth}{facebook_id};
-    $c->stash->{token_data}{twitter_id} = $c->session->{oauth}{twitter_id}
-        if $c->get_param('oauth_need_email') && $c->session->{oauth}{twitter_id};
+    $c->forward('/auth/set_oauth_token_data', [ $c->stash->{token_data} ])
+        if $c->get_param('oauth_need_email');
 }
 
 =head2 save_update
@@ -440,11 +467,7 @@ sub save_update : Private {
         $c->stash->{detach_to} = '/report/update/oauth_callback';
         $c->stash->{detach_args} = [$token->token];
 
-        if ( $c->get_param('facebook_sign_in') ) {
-            $c->detach('/auth/social/facebook_sign_in');
-        } elsif ( $c->get_param('twitter_sign_in') ) {
-            $c->detach('/auth/social/twitter_sign_in');
-        }
+        $c->forward('/auth/social/handle_sign_in') if $c->get_param('social_sign_in');
     }
 
     if ( $c->cobrand->never_confirm_updates ) {
@@ -508,7 +531,7 @@ sub redirect_or_confirm_creation : Private {
         return 1;
     }
 
-    # Superusers using 2FA can not log in by code
+    # People using 2FA can not log in by code
     $c->detach( '/page_error_403_access_denied', [] ) if $update->user->has_2fa;
 
     my $data = $c->stash->{token_data};
@@ -585,8 +608,20 @@ sub process_confirmation : Private {
         for (qw(name facebook_id twitter_id)) {
             $comment->user->$_( $data->{$_} ) if $data->{$_};
         }
+        $comment->user->add_oidc_id($data->{oidc_id}) if $data->{oidc_id};
+        $comment->user->extra({
+            %{ $comment->user->get_extra() },
+            %{ $data->{extra} }
+        }) if $data->{extra};
         $comment->user->password( $data->{password}, 1 ) if $data->{password};
         $comment->user->update;
+        # Make sure extra oauth state is restored, if applicable
+        foreach (qw/logout_redirect_uri change_password_uri/) {
+            if ($data->{$_}) {
+                $c->session->{oauth} ||= ();
+                $c->session->{oauth}{$_} = $data->{$_};
+            }
+        }
     }
 
     if ($comment->user->email_verified) {
@@ -635,6 +670,8 @@ sub signup_for_alerts : Private {
     } elsif ( my $alert = $user->alert_for_problem($problem_id) ) {
         $alert->disable();
     }
+
+    $c->cobrand->call_hook(update_email_shortlisted_user => $update);
 
     return 1;
 }

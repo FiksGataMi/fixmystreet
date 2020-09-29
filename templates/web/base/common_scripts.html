@@ -39,8 +39,14 @@ IF c.user_exists AND (c.user.from_body OR c.user.is_superuser);
         version('/jslib/jquery-1.7.2.min.js'),
         version('/cobrands/fixmystreet/staff.js')
     );
+    IF bodyclass.match('mappage') AND c.cobrand.suggest_duplicates AND NOT login_success AND NOT oauth_need_email;
+        scripts.push(
+            version('/js/duplicates.js')
+        );
+    END;
     IF c.user.has_body_permission_to('planned_reports');
         scripts.push(
+            version('/vendor/idb-keyval-iife.min.js'),
             version('/cobrands/fixmystreet/offline.js'),
         );
     END;
@@ -68,6 +74,7 @@ END;
 IF admin;
     scripts.push(
         version('/cobrands/fixmystreet/admin.js'),
+        version('/vendor/html5sortable.min.js'),
     );
 END;
 

@@ -35,6 +35,7 @@ create table users (
     title           text,
     twitter_id      bigint  unique,
     facebook_id     bigint  unique,
+    oidc_ids        text    ARRAY,
     area_ids        integer ARRAY,
     extra           text
 );
@@ -73,6 +74,22 @@ create unique index body_areas_body_id_area_id_idx on body_areas(body_id, area_i
 ALTER TABLE users ADD CONSTRAINT users_from_body_fkey
     FOREIGN KEY (from_body) REFERENCES body(id);
 
+-- roles table
+create table roles (
+    id              serial  not null primary key,
+    body_id         integer not null references body(id) ON DELETE CASCADE,
+    name            text,
+    permissions     text ARRAY,
+    unique(body_id, name)
+);
+
+-- Record which role(s) each user holds
+create table user_roles (
+    id              serial  not null primary key,
+    role_id         integer not null references roles(id) ON DELETE CASCADE,
+    user_id         integer not null references users(id) ON DELETE CASCADE
+);
+
 -- The contact for a category within a particular body
 create table contacts (
     id serial primary key,
@@ -83,6 +100,7 @@ create table contacts (
         state = 'unconfirmed'
         or state = 'confirmed'
         or state = 'inactive'
+        or state = 'staff'
         or state = 'deleted'
     ),
 
@@ -120,6 +138,7 @@ create table contacts_history (
         state = 'unconfirmed'
         or state = 'confirmed'
         or state = 'inactive'
+        or state = 'staff'
         or state = 'deleted'
     ),
 
@@ -428,6 +447,11 @@ create table admin_log (
       or object_type = 'update'
       or object_type = 'user'
       or object_type = 'moderation'
+      or object_type = 'template'
+      or object_type = 'body'
+      or object_type = 'category'
+      or object_type = 'role'
+      or object_type = 'manifesttheme'
     ),
     object_id integer not null,
     action text not null,
@@ -540,4 +564,14 @@ CREATE TABLE state (
     label text not null unique,
     type text not null check (type = 'open' OR type = 'closed' OR type = 'fixed'),
     name text not null unique
+);
+
+CREATE TABLE manifest_theme (
+    id serial not null primary key,
+    cobrand text not null unique,
+    name text not null,
+    short_name text not null,
+    background_colour text,
+    theme_colour text,
+    images text ARRAY
 );

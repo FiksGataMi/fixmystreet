@@ -56,6 +56,7 @@ The following are all the configuration settings that you can change in `conf/ge
 
 * <code><a href="#base_url">BASE_URL</a></code>
 * <code><a href="#secure_proxy_ssl_header">SECURE_PROXY_SSL_HEADER</a></code>
+* <code><a href="#content_security_policy">CONTENT_SECURITY_POLICY</a></code>
 * <code><a href="#geo_cache">GEO_CACHE</a></code>
 * <code><a href="#admin_base_url">ADMIN_BASE_URL</a></code>
 
@@ -202,6 +203,33 @@ The following are all the configuration settings that you can change in `conf/ge
   </dd>
 
   <dt>
+    <a name="content_security_policy"><code>CONTENT_SECURITY_POLICY</code></a>
+  </dt>
+  <dd>
+    A Content-Security-Policy header can prevent cross-site scripting,
+    clickjacking and other code injection attacks (see
+    <a href="https://en.wikipedia.org/wiki/Content_Security_Policy">Wikipedia</a>
+    for more). To have FixMyStreet output such a header, set this setting to 1.
+    If you load third-party JavaScript on your site, you will need to set this
+    setting to a space-separated list of domains; whatever is here, if not 1,
+    will be included in the header output.
+    <div class="more-info">
+      <p>Example:</p>
+      <ul class="examples">
+        <li>
+          <code>CONTENT_SECURITY_POLICY: 1</code>
+        </li>
+        <li>
+          <code>CONTENT_SECURITY_POLICY: 'www.example.org other.example.org'</code>
+        </li>
+        <li>
+          <code>CONTENT_SECURITY_POLICY: [ 'www.example.org', 'other.example.org' ]</code>
+        </li>
+      </ul>
+    </div>
+  </dd>
+
+  <dt>
     <a name="email_domain"><code>EMAIL_DOMAIN</code></a>, 
     <a name="contact_email"><code>CONTACT_EMAIL</code></a> &amp;
     <a name="contact_name"><code>CONTACT_NAME</code></a>
@@ -283,12 +311,23 @@ The following are all the configuration settings that you can change in `conf/ge
     <p>
       A variety of flags that change the behaviour of a site when
       <code><a href="#staging_site">STAGING_SITE</a></code> is <code>1</code>.
-      <code>send_reports</code> being set to 0 will
+    </p>
+    <p>
+      Setting <code>send_reports</code> to <code>0</code> will
       <a href="{{ "/customising/send_reports" | relative_url }}">send
       reports</a> to the reporter <em>instead of</em> the relevant body's
-      contact address; <code>skip_checks</code> will stop cobrands from
+      contact address.
+    </p>
+    <p>
+      Setting <code>skip_checks</code> to <code>1</code> will stop cobrands from
       performing some checks such as the map pin location being within their
-      covered area, which makes testing multiple cobrands much easier;
+      covered area, which makes testing multiple cobrands much easier.
+    </p>
+    <p>
+      Setting <code>hide_staging_banner</code> to <code>1</code> will hide the
+      red “Staging site” banner in the top left corner of the site.
+    </p>
+    <p>
       <code>enable_appcache</code> lets you say whether the appcache should be
       active or not.
     </p>
@@ -308,13 +347,13 @@ The following are all the configuration settings that you can change in `conf/ge
 STAGING_FLAGS:
   send_reports: 0
   skip_checks: 1
-  enable_appcache: 0
+  hide_staging_banner: 1
 </pre>
     </div>
           <p>
             Any reports created will now be sent to the email of the reporter
-            and <em>not</em> the body's; any location checks are skipped, and
-            we won't ever use appcache. Great for testing!
+            and <em>not</em> the body's; and any location checks are skipped.
+            Great for testing!
           </p>
   </dd>
 

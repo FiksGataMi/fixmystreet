@@ -56,6 +56,26 @@ sub logged_in_ok {
         "logged in" );
 }
 
+=head2 uniquify_email
+
+Given an email address, will add the caller to it so that it can be unique per
+file. You can pass a caller file in yourself if e.g. you're another function in
+this file.
+
+=cut
+
+sub uniquify_email {
+    my ($self, $email, $file) = @_;
+
+    $file = (caller)[1] unless $file;
+    (my $pkg = $file) =~ s{[/\.]}{}g;
+
+    if ($email =~ /@/ && $email !~ /^pkg-/) {
+        $email = "pkg-$pkg-$email";
+    }
+    return $email;
+}
+
 =head2 create_user_ok
 
     $user = $mech->create_user_ok( $email );
@@ -68,8 +88,9 @@ sub create_user_ok {
     my $self = shift;
     my ( $username, %extra ) = @_;
 
+    $username = $self->uniquify_email($username, (caller)[1]);
     my $params = { %extra };
-    $username =~ /@/ ? $params->{email} = $username : $params->{phone} = $username;
+    $username =~ /@/ ? ($params->{email} = $username) : ($params->{phone} = $username);
     my $user = FixMyStreet::DB->resultset('User')->find_or_create($params);
     ok $user, "found/created user for $username";
 
@@ -88,6 +109,9 @@ sub log_in_ok {
     my $mech  = shift;
     my $username = shift;
 
+    $mech->get_ok('/auth'); # Doing this here so schema cobrand set appropriately (for e.g. TfL password setting)
+
+    $username = $mech->uniquify_email($username, (caller)[1]);
     my $user = $mech->create_user_ok($username);
 
     # remember the old password and then change it to a known one
@@ -95,7 +119,6 @@ sub log_in_ok {
     $user->update( { password => 'secret' } );
 
     # log in
-    $mech->get_ok('/auth');
     $mech->submit_form_ok(
         { with_fields => { username => $username, password_sign_in => 'secret' } },
         "sign in using form" );
@@ -103,12 +126,7 @@ sub log_in_ok {
 
     # restore the password (if there was one)
     if ($old_password) {
-
-        # Use store_column and then make_column_dirty to bypass the filters that
-        # would hash the password, otherwise the password required ito log in
-        # would be the hash of the previous one.
-        $user->store_column("password", $old_password);
-        $user->make_column_dirty("password");
+        $user->password($old_password, 1);
         $user->update();
 
         # Belt and braces, check that the password has been correctly saved.
@@ -229,6 +247,17 @@ sub get_email {
     return $emails[0];
 }
 
+sub get_email_envelope {
+    my $mech   = shift;
+    my @emails = FixMyStreet::Email::Sender->default_transport->deliveries;
+    @emails = map { $_->{envelope} } @emails;
+
+    return @emails if wantarray;
+
+    $mech->email_count_is(1) || return undef;
+    return $emails[0];
+}
+
 sub get_text_body_from_email {
     my ($mech, $email, $obj) = @_;
     unless ($email) {
@@ -241,7 +270,7 @@ sub get_text_body_from_email {
         my $part = shift;
         return if $part->subparts;
         return if $part->content_type !~ m{text/plain};
-        $body = $obj ? $part : $part->body;
+        $body = $obj ? $part : $part->body_str;
         ok $body, "Found text body";
     });
     return $body;
@@ -556,7 +585,7 @@ sub get_ok_json {
 
     # check that the content-type of response is correct
     croak "Response was not JSON"
-      unless $res->header('Content-Type') =~ m{^application/json\b};
+      unless $res->header('Content-Type') =~ m{^application/(?:[a-z]+\+)?json\b};
 
     return decode_json( $res->content );
 }
@@ -652,8 +681,9 @@ sub create_problems_for_body {
 
     my $dt = $params->{dt} || DateTime->now();
 
+    my $email = $mech->uniquify_email('test@example.com', (caller)[1]);
     my $user = $params->{user} ||
-      FixMyStreet::DB->resultset('User')->find_or_create( { email => 'test@example.com', name => 'Test User' } );
+      FixMyStreet::DB->resultset('User')->find_or_create( { email => $email, name => 'Test User' } );
 
     delete $params->{user};
     delete $params->{dt};
@@ -707,6 +737,7 @@ sub create_comment_for_problem {
     $params->{problem_state} = $problem_state;
     $params->{state} = $state;
     $params->{mark_fixed} = $problem_state && FixMyStreet::DB::Result::Problem->fixed_states()->{$problem_state} ? 1 : 0;
+    $params->{confirmed} = \'current_timestamp' unless $params->{confirmed} || $state eq 'unconfirmed';
 
     FixMyStreet::App->model('DB::Comment')->create($params);
 }
@@ -718,7 +749,7 @@ sub encoded_content {
 
 sub content_as_csv {
     my $self = shift;
-    open my $data_handle, '<', \$self->content;
+    open my $data_handle, '<:encoding(utf-8)', \$self->encoded_content;
     my $csv = Text::CSV->new({ binary => 1 });
     my @rows;
     while (my $row = $csv->getline($data_handle)) {

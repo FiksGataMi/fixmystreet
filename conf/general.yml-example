@@ -28,6 +28,10 @@ SECURE_PROXY_SSL_HEADER: ''
 # If you're behind a proxy, set this to a two-element list containing the
 # trusted HTTP header and the required value. For example:
 #   SECURE_PROXY_SSL_HEADER: [ 'X-Forwarded-Proto', 'https' ]
+CONTENT_SECURITY_POLICY: ''
+# To activate CSP, set this to 1. If you have additional third party domains to
+# allow JavaScript on, or want to specify extra script-src CSP directives, set
+# this to a e.g. space-separated list of domains or a list of the same.
 
 # Email domain used for emails, and contact name/email for admin use.
 EMAIL_DOMAIN: 'example.org'
@@ -48,12 +52,10 @@ STAGING_SITE: 1
 #   this to 1 if you want a staging site to route reports as normal.
 # - skip_checks: Manual testing of multiple cobrands can be made easier by
 #   skipping some checks they have in them, if this variable is set.
-# - enable_appcache: Whether the appcache should be active. NB: Only affects
-#     superuser sessions.
 STAGING_FLAGS:
   send_reports: 0
   skip_checks: 0
-  enable_appcache: 0
+  hide_staging_banner: 0
 
 # What to use as front page/alert example places placeholder
 # Defaults to High Street, Main Street
@@ -192,6 +194,14 @@ ALLOWED_COBRANDS:
 # the admin interface. Defaults to BASE_URL with "/admin" on the end.
 ADMIN_BASE_URL: ''
 
+# If your site has many cobrands, you may want to have per-cobrand settings. To
+# do this, make a hash of feature keys, each of which is a hash of monikers, eg
+#   COBRAND_FEATURES:
+#     suggest_duplicates:
+#       buckinghamshire: 1
+#       oxfordshire: 1
+COBRAND_FEATURES: ''
+
 # How many items are returned in the GeoRSS and Open311 feeds by default
 RSS_LIMIT: '20'
 OPEN311_LIMIT: 1000
@@ -251,3 +261,14 @@ LOGIN_REQUIRED: 0
 # If you want to stop new users from registering, set this to 1.
 # NB: This also disables all Facebook/Twitter logins.
 SIGNUPS_DISABLED: 0
+
+# Setting these variable to more than 1 will let fetch-comments run in parallel
+# with MIN to MAX children (new children will be added if a child takes longer
+# than TIMEOUT on one body).
+FETCH_COMMENTS_PROCESSES_MIN: 0
+FETCH_COMMENTS_PROCESSES_MAX: 0
+FETCH_COMMENTS_PROCESS_TIMEOUT: 0
+
+# If you use the daemon for sending reports, rather than the cron script,
+# this is how many children it will have.
+QUEUE_DAEMON_PROCESSES: 4

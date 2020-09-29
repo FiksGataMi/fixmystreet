@@ -10,6 +10,7 @@ use DateTime::Format::W3CDTF;
 has system_user => ( is => 'rw' );
 has start_date => ( is => 'ro', default => sub { undef } );
 has end_date => ( is => 'ro', default => sub { undef } );
+has body => ( is => 'ro', default => sub { undef } );
 has fetch_all => ( is => 'rw', default => 0 );
 has verbose => ( is => 'ro', default => 0 );
 has schema => ( is =>'ro', lazy => 1, default => sub { FixMyStreet::DB->schema->connect } );
@@ -26,6 +27,10 @@ sub fetch {
             endpoint        => { '!=', '' },
         }
     );
+
+    if ( $self->body ) {
+        $bodies = $bodies->search( { name => $self->body } );
+    }
 
     while ( my $body = $bodies->next ) {
         my $o = $self->create_open311_object( $body );
@@ -55,18 +60,17 @@ sub create_problems {
 
     my $args = {};
 
-    if ( $self->start_date || $self->end_date ) {
-        return 0 unless $self->start_date && $self->end_date;
-
+    my $dt = DateTime->now();
+    if ($self->start_date) {
         $args->{start_date} = DateTime::Format::W3CDTF->format_datetime( $self->start_date );
+    } elsif ( !$self->fetch_all ) {
+        $args->{start_date} = DateTime::Format::W3CDTF->format_datetime( $dt->clone->add(hours => -1) );
+    }
+
+    if ($self->end_date) {
         $args->{end_date} = DateTime::Format::W3CDTF->format_datetime( $self->end_date );
     } elsif ( !$self->fetch_all ) {
-        my $end_dt = DateTime->now();
-        my $start_dt = $end_dt->clone;
-        $start_dt->add( hours => -1 );
-
-        $args->{start_date} = DateTime::Format::W3CDTF->format_datetime( $start_dt );
-        $args->{end_date} = DateTime::Format::W3CDTF->format_datetime( $end_dt );
+        $args->{end_date} = DateTime::Format::W3CDTF->format_datetime( $dt );
     }
 
     my $requests = $open311->get_service_requests( $args );
@@ -146,7 +150,8 @@ sub create_problems {
             next;
         }
 
-        if ( my $cobrand = $body->get_cobrand_handler ) {
+        my $cobrand = $body->get_cobrand_handler;
+        if ( $cobrand ) {
             my $filtered = $cobrand->call_hook('filter_report_description', $request->{description});
             $request->{description} = $filtered if defined $filtered;
         }
@@ -157,6 +162,7 @@ sub create_problems {
         my $state = $open311->map_state($request->{status});
 
         my $non_public = $request->{non_public} ? 1 : 0;
+        $non_public ||= $contacts[0] ? $contacts[0]->non_public : 0;
 
         my $problem = $self->schema->resultset('Problem')->new(
             {
@@ -183,6 +189,8 @@ sub create_problems {
                 non_public => $non_public,
             }
         );
+
+        next if $cobrand && $cobrand->call_hook(open311_skip_report_fetch => $problem);
 
         $open311->add_media($request->{media_url}, $problem)
             if $request->{media_url};

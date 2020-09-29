@@ -73,32 +73,6 @@ subtest "change report to hidden and check for 410 status" => sub {
     ok $report->update( { state => 'confirmed' } ), 'confirm report again';
 };
 
-subtest "change report to non_public and check for 403 status" => sub {
-    ok $report->update( { non_public => 1 } ), 'make report non public';
-    ok $mech->get("/report/$report_id"), "get '/report/$report_id'";
-    is $mech->res->code, 403, "access denied";
-    is $mech->uri->path, "/report/$report_id", "at /report/$report_id";
-    $mech->content_contains('That report cannot be viewed on FixMyStreet.');
-    ok $report->update( { non_public => 0 } ), 'make report public';
-};
-
-subtest "check owner of report can view non public reports" => sub {
-    ok $report->update( { non_public => 1 } ), 'make report non public';
-    $mech->log_in_ok( $report->user->email );
-    ok $mech->get("/report/$report_id"), "get '/report/$report_id'";
-    is $mech->res->code, 200, "report can be viewed";
-    is $mech->uri->path, "/report/$report_id", "at /report/$report_id";
-    $mech->log_out_ok;
-
-    $mech->log_in_ok( $user2->email );
-    ok $mech->get("/report/$report_id"), "get '/report/$report_id'";
-    is $mech->res->code, 403, "access denied to user who is not report creator";
-    is $mech->uri->path, "/report/$report_id", "at /report/$report_id";
-    $mech->content_contains('That report cannot be viewed on FixMyStreet.');
-    $mech->log_out_ok;
-    ok $report->update( { non_public => 0 } ), 'make report public';
-};
-
 subtest "duplicate reports are signposted correctly" => sub {
     $report2->set_extra_metadata(duplicate_of => $report->id);
     $report2->state('duplicate');
@@ -249,6 +223,39 @@ for my $test (
         fixed => 0
     },
     {
+        cobrand => 'fixmystreet',
+        description => 'old open311 report',
+        date => DateTime->new(
+            year => 2009,
+            month => 6,
+            day => 12,
+            hour => 9,
+            minute => 43,
+            second => 12
+        ),
+        state => 'confirmed',
+        send_method => 'Open311',
+        banner_id => undef,
+        banner_text => undef,
+        fixed => 0
+    },
+    {
+        cobrand => 'westminster',
+        description => 'old westminster report',
+        date => DateTime->new(
+            year => 2009,
+            month => 6,
+            day => 12,
+            hour => 9,
+            minute => 43,
+            second => 12
+        ),
+        state => 'confirmed',
+        banner_id => undef,
+        banner_text => undef,
+        fixed => 0
+    },
+    {
         description => 'old fixed report',
         date => DateTime->new(
             year => 2009,
@@ -364,9 +371,16 @@ for my $test (
         $report->confirmed( $test->{date}->ymd . ' ' . $test->{date}->hms );
         $report->lastupdate( $test->{date}->ymd . ' ' . $test->{date}->hms );
         $report->state( $test->{state} );
+        $report->send_method_used( $test->{send_method} || undef );
         $report->update;
 
-        $mech->get_ok("/report/$report_id");
+        my $cobrands = $test->{cobrand} ? [ $test->{cobrand} ] : [];
+        FixMyStreet::override_config {
+            ALLOWED_COBRANDS => $cobrands,
+            MAPIT_URL => 'http://mapit.uk/',
+        }, sub {
+            $mech->get_ok("/report/$report_id");
+        };
         is $mech->uri->path, "/report/$report_id", "at /report/$report_id";
         my $banner = $mech->extract_problem_banner;
         if ( $banner->{text} ) {
@@ -394,6 +408,20 @@ for my $test (
         }
     };
 }
+
+subtest "Correct OpenGraph image is used when report has no photo" => sub {
+        $report->update({ photo => undef });
+        $mech->get_ok("/report/$report_id");
+        $mech->content_contains("/cobrands/fixmystreet/images/fms-og_image.jpg", "site image is used");
+        $mech->content_lacks("/photo/$report_id.0.og", "report image is not present");
+};
+
+subtest "Correct OpenGraph image is used when report has a photo" => sub {
+        $report->update({ photo => '74e3362283b6ef0c48686fb0e161da4043bbcc97.jpeg' });
+        $mech->get_ok("/report/$report_id");
+        $mech->content_contains("/photo/$report_id.0.og.jpeg", "report opengraph image is present");
+        $mech->content_lacks("/cobrands/fixmystreet/images/fms-og_image.jpg", "site image is not used");
+};
 
 my $body_westminster = $mech->create_body_ok(2504, 'Westminster City Council');
 my $body_camden = $mech->create_body_ok(2505, 'Camden Borough Council');

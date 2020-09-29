@@ -6,6 +6,7 @@ use warnings;
 
 use Moo;
 with 'FixMyStreet::Roles::ConfirmValidation';
+with 'FixMyStreet::Roles::ConfirmOpen311';
 
 use LWP::Simple;
 use URI;
@@ -17,31 +18,27 @@ sub council_area { return 'Bath and North East Somerset'; }
 sub council_name { return 'Bath and North East Somerset Council'; }
 sub council_url { return 'bathnes'; }
 
-sub contact_email {
-    my $self = shift;
-    return join( '@', 'councilconnect_rejections', 'bathnes.gov.uk' );
-}
-
-sub suggest_duplicates { 1 }
-
 sub admin_user_domain { 'bathnes.gov.uk' }
 
-sub base_url {
-    my $self = shift;
-    return $self->next::method() if FixMyStreet->config('STAGING_SITE');
-    return 'https://fix.bathnes.gov.uk';
-}
-
-sub map_type { 'BathNES' }
+sub map_type { 'OSM' }
 
 sub on_map_default_status { 'open' }
 
-sub example_places {
-    return ( 'BA1 1JQ', "Lansdown Grove" );
-}
-
 sub get_geocoder {
     return 'OSM'; # default of Bing gives poor results, let's try overriding.
+}
+
+sub contact_extra_fields { [ 'display_name' ] }
+
+sub contact_extra_fields_validation {
+    my ($self, $contact, $errors) = @_;
+    return unless $contact->get_extra_metadata('display_name');
+
+    my @contacts = $contact->body->contacts->not_deleted->search({ id => { '!=', $contact->id } });
+    my %display_names = map { ($_->get_extra_metadata('display_name') || '') => 1 } @contacts;
+    if ($display_names{$contact->get_extra_metadata('display_name')}) {
+        $errors->{display_name} = 'That display name is already in use';
+    }
 }
 
 sub disambiguate_location {
@@ -91,21 +88,7 @@ sub pin_colour {
 
 sub send_questionnaires { 0 }
 
-sub enable_category_groups { 1 }
-
 sub default_map_zoom { 3 }
-
-sub map_js_extra {
-    my $self = shift;
-
-    my $c = $self->{c};
-    return unless $c->user_exists;
-
-    my $banes_user = $c->user->from_body && $c->user->from_body->areas->{$self->council_area_id};
-    if ( $banes_user || $c->user->is_superuser ) {
-        return ['/cobrands/bathnes/staff.js'];
-    }
-}
 
 sub category_extra_hidden {
     my ($self, $meta) = @_;
@@ -113,33 +96,6 @@ sub category_extra_hidden {
     # These two are used in the non-Open311 'Street light fault' category.
     return 1 if $code eq 'unitid' || $code eq 'asset_details';
     return $self->SUPER::category_extra_hidden($meta);
-}
-
-sub open311_config {
-    my ($self, $row, $h, $params) = @_;
-
-    my $extra = $row->get_extra_fields;
-    push @$extra,
-        { name => 'report_url',
-          value => $h->{url} },
-        { name => 'title',
-          value => $row->title },
-        { name => 'description',
-          value => $row->detail };
-
-    # Reports made via FMS.com or the app probably won't have a USRN
-    # value because we don't display the adopted highways layer on those
-    # frontends. Instead we'll look up the closest asset from the WFS
-    # service at the point we're sending the report over Open311.
-    if (!$row->get_extra_field_value('site_code')) {
-        if (my $usrn = $self->lookup_usrn($row)) {
-            push @$extra,
-                { name => 'site_code',
-                value => $usrn };
-        }
-    }
-
-    $row->set_extra_fields(@$extra);
 }
 
 sub available_permissions {
@@ -155,7 +111,7 @@ sub available_permissions {
 
 sub report_sent_confirmation_email { 'id' }
 
-sub lookup_usrn {
+sub lookup_site_code {
     my $self = shift;
     my $row = shift;
 
@@ -205,31 +161,23 @@ sub categories_restriction {
     # send_method set to 'Email::BathNES' (to use a custom template) which must
     # be show on the cobrand.
     return $rs->search( { -or => [
-        'me.send_method' => undef, # Open311 categories
+        'me.send_method' => undef, # Open311 categories, or Highways England
         'me.send_method' => '', # Open311 categories that have been edited in the admin
         'me.send_method' => 'Email::BathNES', # Street Light Fault
         'me.send_method' => 'Blackhole', # Parks categories
     ] } );
 }
 
-# Do a manual prefetch, as easier than sorting out quoting 'user'
+# Do a manual prefetch of all staff users for contributed_by lookup
 sub _dashboard_user_lookup {
     my $self = shift;
     my $c = $self->{c};
 
-    # Fetch all the relevant user IDs, and look them up
-    my @user_ids = $c->stash->{objects_rs}->search({}, { columns => [ 'user_id' ] })->all;
-    @user_ids = map { $_->user_id } @user_ids;
-    @user_ids = $c->model('DB::User')->search(
-        { id => { -in => \@user_ids } },
-        { columns => [ 'id', 'email', 'phone' ] })->all;
-
-    # Plus all staff users for contributed_by lookup
-    push @user_ids, $c->model('DB::User')->search(
+    my @user_ids = $c->model('DB::User')->search(
         { from_body => { '!=' => undef } },
-        { columns => [ 'id', 'email', 'phone' ] })->all;
+        { columns => [ 'id', 'email' ] })->all;
 
-    my %user_lookup = map { $_->id => { email => $_->email, phone => $_->phone } } @user_ids;
+    my %user_lookup = map { $_->id => $_->email } @user_ids;
     return \%user_lookup;
 }
 
@@ -244,6 +192,10 @@ sub dashboard_export_updates_add_columns {
     push @{$c->stash->{csv}->{columns}}, "staff_user";
     push @{$c->stash->{csv}->{columns}}, "user_email";
 
+    $c->stash->{csv}->{objects} = $c->stash->{csv}->{objects}->search(undef, {
+        '+columns' => ['user.email'],
+        join => 'user',
+    });
     my $user_lookup = $self->_dashboard_user_lookup;
 
     $c->stash->{csv}->{extra_data} = sub {
@@ -251,11 +203,11 @@ sub dashboard_export_updates_add_columns {
 
         my $staff_user = '';
         if ( my $contributed_by = $report->get_extra_metadata('contributed_by') ) {
-            $staff_user = $user_lookup->{$contributed_by}{email};
+            $staff_user = $user_lookup->{$contributed_by};
         }
 
         return {
-            user_email => $user_lookup->{$report->user_id}{email} || '',
+            user_email => $report->user->email || '',
             staff_user => $staff_user,
         };
     };
@@ -283,6 +235,10 @@ sub dashboard_export_problems_add_columns {
         "attribute_data",
     ];
 
+    $c->stash->{csv}->{objects} = $c->stash->{csv}->{objects}->search(undef, {
+        '+columns' => ['user.email', 'user.phone'],
+        join => 'user',
+    });
     my $user_lookup = $self->_dashboard_user_lookup;
 
     $c->stash->{csv}->{extra_data} = sub {
@@ -290,12 +246,12 @@ sub dashboard_export_problems_add_columns {
 
         my $staff_user = '';
         if ( my $contributed_by = $report->get_extra_metadata('contributed_by') ) {
-            $staff_user = $user_lookup->{$contributed_by}{email};
+            $staff_user = $user_lookup->{$contributed_by};
         }
         my $attribute_data = join "; ", map { $_->{name} . " = " . $_->{value} } @{ $report->get_extra_fields };
         return {
-            user_email => $user_lookup->{$report->user_id}{email} || '',
-            user_phone => $user_lookup->{$report->user_id}{phone} || '',
+            user_email => $report->user->email || '',
+            user_phone => $report->user->phone || '',
             staff_user => $staff_user,
             attribute_data => $attribute_data,
         };

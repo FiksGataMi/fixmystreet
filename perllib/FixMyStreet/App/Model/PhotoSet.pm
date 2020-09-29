@@ -8,7 +8,6 @@ use Scalar::Util 'openhandle', 'blessed';
 use Image::Size;
 use IPC::Cmd qw(can_run);
 use IPC::Open3;
-use MIME::Base64;
 
 use FixMyStreet;
 use FixMyStreet::ImageMagick;
@@ -121,23 +120,8 @@ has ids => ( #  Arrayref of $fileid tuples (always, so post upload/raw data proc
                     return ();
                 }
 
-                # base64 decode the file if it's encoded that way
-                # Catalyst::Request::Upload doesn't do this automatically
-                # unfortunately.
-                my $transfer_encoding = $upload->headers->header('Content-Transfer-Encoding');
-                if (defined $transfer_encoding && $transfer_encoding eq 'base64') {
-                    my $decoded = decode_base64($upload->slurp);
-                    if (open my $fh, '>', $upload->tempname) {
-                        binmode $fh;
-                        print $fh $decoded;
-                        close $fh
-                    } else {
-                        my $c = $self->c;
-                        $c->log->info('Couldn\'t open temp file to save base64 decoded image: ' . $!);
-                        $c->stash->{photo_error} = _("Sorry, we couldn't save your image(s), please try again.");
-                        return ();
-                    }
-                }
+                # Make sure any base64 encoding is handled.
+                FixMyStreet::PhotoStorage::base64_decode_upload($self->c, $upload);
 
                 # get the photo into a variable
                 my $photo_blob = eval {
@@ -208,7 +192,6 @@ sub get_image_data {
 
     my $image = $self->get_raw_image( $num )
         or return;
-    my $photo = $image->{data};
 
     my $size = $args{size};
 
@@ -217,25 +200,30 @@ sub get_image_data {
         return $image;
     }
 
-    my $im = FixMyStreet::ImageMagick->new(blob => $photo);
+    my $im = FixMyStreet::ImageMagick->new(blob => $image->{data});
+    my $photo;
     if ( $size eq 'tn' ) {
-        $photo = $im->shrink('x100')->as_blob;
+        $photo = $im->shrink('x100');
     } elsif ( $size eq 'fp' ) {
-        $photo = $im->crop->as_blob;
+        $photo = $im->crop;
+    } elsif ( $size eq 'og' ) {
+        $photo = $im->crop('1200x630');
     } elsif ( $size eq 'full' ) {
-        # do nothing
+        $photo = $im
     } else {
-        $photo = $im->shrink($args{default} || '250x250')->as_blob;
+        $photo = $im->shrink($args{default} || '250x250');
     }
 
     return {
-        data => $photo,
+        data => $photo->as_blob,
+        width => $photo->width,
+        height => $photo->height,
         content_type => $image->{content_type},
     };
 }
 
 sub delete_cached {
-    my ($self) = @_;
+    my ($self, %params) = @_;
     my $object = $self->object or return;
     my $id = $object->id or return;
 
@@ -255,6 +243,11 @@ sub delete_cached {
         foreach my $size ("", ".fp", ".tn", ".full") {
             unlink FixMyStreet->path_to(@dirs, "$id.$i$size.$type");
         }
+    }
+
+    # Loop through all the updates as well if requested
+    if ($params{plus_updates}) {
+        $_->get_photoset->delete_cached() foreach $object->comments->all;
     }
 }
 

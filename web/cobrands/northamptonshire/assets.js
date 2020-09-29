@@ -4,36 +4,7 @@ if (!fixmystreet.maps) {
     return;
 }
 
-/* utility functions */
-function show_responsibility_error(id, asset_item, asset_type) {
-    hide_responsibility_errors();
-    $("#js-roads-responsibility").removeClass("hidden");
-    $("#js-roads-responsibility .js-responsibility-message").addClass("hidden");
-    if (asset_item) {
-        $('#js-roads-asset').html('a <b class="asset-' + asset_type + '">' + asset_item + '</b>');
-    } else {
-        $('#js-roads-asset').html('an item');
-    }
-    $(id).removeClass("hidden");
-}
-
-function hide_responsibility_errors() {
-    $("#js-roads-responsibility").addClass("hidden");
-    $("#js-roads-responsibility .js-responsibility-message").addClass("hidden");
-}
-
-function enable_report_form() {
-    $(".js-hide-if-invalid-category").show();
-}
-
-function disable_report_form() {
-    $(".js-hide-if-invalid-category").hide();
-}
-
-var is_live = false;
-if ( location.hostname === 'www.fixmystreet.com' || location.hostname == 'fixmystreet.northamptonshire.gov.uk' ) {
-    is_live = true;
-}
+var is_live = !fixmystreet.staging;
 
 var layers = [
   /*
@@ -254,6 +225,20 @@ var layers = [
 },
   */
 {
+  "categories": [
+        "Loose / Raised/Sunken",
+        "Broken / Missing",
+        "Blocked - flooding private property",
+        "Blocked - flooding road/path",
+        "Blocked/Damaged",
+  ],
+  "item_name": "drain",
+  "layer_name": "Gully",
+  "layer": 66,
+  "version": "66.80-",
+  "max_resolution": 0.5971642833948135
+},
+{
   "categories": [ "Grit Bin - damaged/replacement", "Grit Bin - empty/refill" ],
   "item_name": "grit bin",
   "layer_name": "Grit Bins",
@@ -266,46 +251,48 @@ var layers = [
   "item_name": 'bridge',
   "layer_name": "Structures",
   "layer": 14,
-  "version": "14.3-"
+  "version": "14.7-"
 },
 {
   "categories": [ "Damaged / Missing / Facing Wrong Way", "Obscured by vegetation or Dirty" ],
   "item_name": "sign",
   "layer_name": "Signs",
   "layer": is_live ? 60 : 303,
-  "version": is_live ? "60.2113-" : "303.1-"
+  "version": is_live ? "60.2172-" : "303.1-"
 },
 {
   "categories": [ "Shelter Damaged", "Sign/Pole Damaged" ],
   "layer_name": "Bus Stop",
   "layer": 72,
-  "version": "72.8-"
+  "version": "72.14-"
 },
 {
   "categories": [ "Bridge-Damaged/ Missing" ],
-  "item_name": "bridge",
+  "item_name": "bridge or right of way",
   "layer_name": "BRIDGES",
   "layer": 177,
-  "version": "177.18-"
+  "version": "177.40-"
 },
 {
   "categories": [ "Gate - Damaged/ Missing" ],
+  "item_name": "gate or right of way",
   "layer_name": "GATE",
   "layer": 181,
-  "version": "181.3-"
+  "version": "181.14-"
 },
 {
   "categories": [ "Stile-Damaged/Missing" ],
+  "item_name": "stile or right of way",
   "layer_name": "STILE",
   "layer": 185,
-  "version": "185.3-"
+  "version": "185.10-"
 },
 {
   "categories": [ "Sign/Waymarking - Damaged/Missing" ],
-  "item_name": "waymarking",
+  "item_name": "waymarking or right of way",
   "layer_name": "WAYMARK POST",
   "layer": 187,
-  "version": "187.3-"
+  "version": "187.10-"
 },
 {
   "categories": [
@@ -317,7 +304,24 @@ var layers = [
     "Signal Head Failure",
     "Request Timing Review",
     "Damaged Control box",
-    "Signal Failure/Damaged - Toucan/Pelican",
+    "Signal Failure/Damaged - Toucan/Pelican"
+  ],
+  "item_name": "signal or crossing",
+  "layer_name": "Midblock",
+  "layer": 223,
+  "version": "223.2-"
+},
+{
+  "categories": [
+    "Damaged/Exposed Wiring / Vandalised",
+    "Lamp/Bulb Failure",
+    "Signal Failure",
+    "Signal Failure all out",
+    "Signal Stuck",
+    "Signal Head Failure",
+    "Request Timing Review",
+    "Damaged Control box",
+    "Signal Failure/Damaged - Toucan/Pelican"
   ],
   "item_name": "signal or crossing",
   "layer_name": "TL Junction",
@@ -326,31 +330,22 @@ var layers = [
 },
 {
   "categories": [
-    "Fallen Tree",
+      "Fallen Tree",
+      "Restricted Visibility / Overgrown / Overhanging",
+      "Restricted Visibility"
   ],
   "layer_name": "Tree",
-  "layer": is_live ? 307 : 228,
-  "version": is_live ? "307.1-" : "228.24-"
+  "layer": 307,
+  "version": "307.7-",
+  "snap_threshold": 0,
 },
 {
   "categories": [ "Safety Bollard - Damaged/Missing" ],
   "layer_name": "Safety Bollard",
   "layer": 233,
-  "version": "233.27-"
+  "version": "233.28-"
 },
 ];
-
-// make sure we fire the code to check if an asset is selected if
-// we change options in the Highways England message
-$(fixmystreet).on('report_new:highways_change', function() {
-    if (fixmystreet.body_overrides.get_only_send() === 'Highways England') {
-        hide_responsibility_errors();
-        enable_report_form();
-        $('#ncc_streetlights').remove();
-    } else {
-        $(fixmystreet).trigger('report_new:category_change', [ $('#form_category') ]);
-    }
-});
 
 // This is required so that the found/not found actions are fired on category
 // select and pin move rather than just on asset select/not select.
@@ -364,10 +359,33 @@ OpenLayers.Layer.NCCVectorAsset = OpenLayers.Class(OpenLayers.Layer.VectorAsset,
     CLASS_NAME: 'OpenLayers.Layer.NCCVectorAsset'
 });
 
+OpenLayers.Layer.NCCVectorNearest = OpenLayers.Class(OpenLayers.Layer.VectorNearest, {
+    feature_table: {},
+    initialize: function(name, options) {
+        OpenLayers.Layer.VectorNearest.prototype.initialize.apply(this, arguments);
+        this.events.register('beforefeatureadded', this, this.checkCanAddFeature);
+    },
+
+    destroyFeatures: function(features, options) {
+        OpenLayers.Layer.VectorNearest.prototype.destroyFeatures.apply(this, arguments);
+        this.feature_table = {};
+    },
+
+    checkCanAddFeature: function(obj) {
+      if (this.feature_table[obj.feature.fid]) {
+        return false;
+      }
+
+      this.feature_table[obj.feature.fid] = 1;
+    },
+
+    CLASS_NAME: 'OpenLayers.Layer.NCCVectorNearest'
+});
+
 // default options for northants assets include
 // a) checking for multiple assets in same location
 // b) preventing submission unless an asset is selected
-var northants_defaults = $.extend(true, {}, fixmystreet.assets.alloy_defaults, {
+var northants_defaults = $.extend(true, {}, fixmystreet.alloy_defaults, {
   class: OpenLayers.Layer.NCCVectorAsset,
   protocol_class: OpenLayers.Protocol.Alloy,
   http_options: {
@@ -383,12 +401,9 @@ var northants_defaults = $.extend(true, {}, fixmystreet.assets.alloy_defaults, {
   select_action: true,
   actions: {
     asset_found: function(asset) {
-      var emergency_state = ncc_is_emergency_category();
-      if (emergency_state.relevant && !emergency_state.body) {
+      if (fixmystreet.message_controller.asset_found()) {
           return;
       }
-      hide_responsibility_errors();
-      enable_report_form();
       var lonlat = asset.geometry.getBounds().getCenterLonLat();
       // Features considered overlapping if within 1M of each other
       // TODO: Should zoom/marker size be considered when determining if markers overlap?
@@ -419,35 +434,36 @@ var northants_defaults = $.extend(true, {}, fixmystreet.assets.alloy_defaults, {
     },
     asset_not_found: function() {
       $("#overlapping_features_msg").addClass('hidden');
-      var emergency_state = ncc_is_emergency_category();
-
-      disable_report_form();
-      if ((!emergency_state.relevant || emergency_state.body) && this.visibility) {
-          show_responsibility_error('#js-not-an-asset', this.fixmystreet.asset_item, this.fixmystreet.asset_type);
-      } else {
-          hide_responsibility_errors();
-      }
+      fixmystreet.message_controller.asset_not_found.call(this);
     }
   }
 });
 
 $.each(layers, function(index, layer) {
     if ( layer.categories ) {
-        fixmystreet.assets.add($.extend(true, {}, northants_defaults, {
-            http_options: {
-              layerid: layer.layer,
-              layerVersion: layer.version,
-            },
-            asset_type: layer.asset_type || 'spot',
-            asset_category: layer.categories,
-            asset_item: layer.item_name || layer.layer_name.toLowerCase(),
-        }));
+        var options = {
+          http_options: {
+            layerid: layer.layer,
+            layerVersion: layer.version,
+          },
+          asset_type: layer.asset_type || 'spot',
+          asset_category: layer.categories,
+          asset_item: layer.item_name || layer.layer_name.toLowerCase(),
+        };
+        if (layer.max_resolution) {
+          options.max_resolution = layer.max_resolution;
+        }
+        if (layer.snap_threshold || layer.snap_threshold === 0) {
+          options.snap_threshold = layer.snap_threshold;
+        }
+        fixmystreet.assets.add(northants_defaults, options);
     }
 });
 
 // NCC roads layers which prevent report submission unless we have selected
 // an asset.
-var northants_road_defaults = $.extend(true, {}, fixmystreet.assets.alloy_defaults, {
+var northants_road_defaults = $.extend(true, {}, fixmystreet.alloy_defaults, {
+    class: OpenLayers.Layer.NCCVectorNearest,
     protocol_class: OpenLayers.Protocol.Alloy,
     http_options: {
         environment: is_live ? 26 : 28
@@ -458,52 +474,30 @@ var northants_road_defaults = $.extend(true, {}, fixmystreet.assets.alloy_defaul
     non_interactive: true,
     no_asset_msg_id: '#js-not-a-road',
     usrn: {
-        attribute: 'fid',
         field: 'asset_resource_id'
     },
     getUSRN: function(feature) {
       return feature.fid;
     },
     actions: {
-        found: function(layer, feature) {
-            var emergency_state = ncc_is_emergency_category();
-            if (!emergency_state.relevant || emergency_state.body) {
-                enable_report_form();
-            }
-            hide_responsibility_errors();
-        },
-        not_found: function(layer) {
-            // don't show the message if clicking on a highways england road
-            var emergency_state = ncc_is_emergency_category();
-            if (fixmystreet.body_overrides.get_only_send() == 'Highways England' || !layer.visibility) {
-                if (!emergency_state.relevant || emergency_state.body) {
-                    enable_report_form();
-                }
-                hide_responsibility_errors();
-            } else {
-                disable_report_form();
-                if (!emergency_state.relevant || emergency_state.body) {
-                    show_responsibility_error(layer.fixmystreet.no_asset_msg_id);
-                } else {
-                    hide_responsibility_errors();
-                }
-            }
-        },
+        found: fixmystreet.message_controller.road_found,
+        not_found: fixmystreet.message_controller.road_not_found
     }
 });
 
 
-fixmystreet.assets.add($.extend(true, {}, northants_road_defaults, {
+fixmystreet.assets.add(northants_road_defaults, {
     http_options: {
       layerid: 221,
       layerVersion: '221.4-',
     },
-    no_asset_msg_id: '#js-not-a-speedhump',
+    no_asset_msg_id: '#js-not-an-asset',
+    asset_item: 'speed hump',
     asset_type: "area",
     asset_category: [
-        "Damaged Speed Humps",
+        "Damaged Speed Humps"
     ]
-}));
+});
 
 var barrier_style = new OpenLayers.Style({
     fill: false,
@@ -512,19 +506,21 @@ var barrier_style = new OpenLayers.Style({
     strokeWidth: 4
 });
 
-fixmystreet.assets.add($.extend(true, {}, northants_road_defaults, {
+fixmystreet.assets.add(northants_road_defaults, {
     http_options: {
-      layerid: 230,
-      layerVersion: '230.3-',
+      layerid: is_live ? 1068 : 230,
+      layerVersion: is_live ? '1068.1-' : '230.4-',
     },
     stylemap: new OpenLayers.StyleMap({
         'default': barrier_style
     }),
-    no_asset_msg_id: '#js-not-a-ped-barrier',
+    no_asset_msg_id: '#js-not-an-asset',
+    asset_item: 'pedestrian barrier',
+    asset_type: 'area',
     asset_category: [
-        "Pedestrian Barriers - Damaged / Missing",
+        "Pedestrian Barriers - Damaged / Missing"
     ]
-}));
+});
 
 var highways_style = new OpenLayers.Style({
     fill: false,
@@ -533,21 +529,16 @@ var highways_style = new OpenLayers.Style({
     strokeWidth: 7
 });
 
-fixmystreet.assets.add($.extend(true, {}, northants_road_defaults, {
+fixmystreet.assets.add(northants_road_defaults, {
     protocol_class: OpenLayers.Protocol.Alloy,
     http_options: {
-      layerid: is_live ? 20 : 308,
-      layerVersion: is_live ? '20.123-' : '308.8-',
+      layerid: 20,
+      layerVersion: '20.249-',
     },
     stylemap: new OpenLayers.StyleMap({
         'default': highways_style
     }),
     asset_category: [
-        "Loose / Raised/Sunken",
-        "Broken / Missing",
-        "Blocked - flooding private property",
-        "Blocked - flooding road/path",
-        "Blocked/Damaged",
         "Blocked Ditch",
         "Blocked Ditch Causing Flooding",
         "Obstruction (Not Vegetation)",
@@ -568,87 +559,89 @@ fixmystreet.assets.add($.extend(true, {}, northants_road_defaults, {
         "Icy Footpath",
         "Icy Road",
         "Missed published Gritted Route",
+        "Fallen Tree",
         "Restricted Visibility / Overgrown / Overhanging",
-        "Restricted Visibility",
+        "Restricted Visibility"
     ]
-}));
+});
 
+
+function ncc_match_prow_type(f, styleId) {
+    return f &&
+           f.attributes &&
+           f.attributes.layerStyleId &&
+           f.attributes.layerStyleId == styleId;
+}
+
+function ncc_prow_is_fp(f) {
+    return ncc_match_prow_type(f, is_live ? 6190 : 1454);
+}
+
+function ncc_prow_is_bw(f) {
+    return ncc_match_prow_type(f, is_live ? 6192 : 1453);
+}
+
+function ncc_prow_is_boat(f) {
+    return ncc_match_prow_type(f, is_live ? 6193: 1455);
+}
+
+var rule_footpath = new OpenLayers.Rule({
+    filter: new OpenLayers.Filter.FeatureId({
+        type: OpenLayers.Filter.Function,
+        evaluate: ncc_prow_is_fp
+    }),
+    symbolizer: {
+        strokeColor: "#800000",
+    }
+});
+var rule_boat = new OpenLayers.Rule({
+    filter: new OpenLayers.Filter.FeatureId({
+        type: OpenLayers.Filter.Function,
+        evaluate: ncc_prow_is_boat
+    }),
+    symbolizer: {
+        strokeColor: "#964b00",
+    }
+});
+var rule_bridleway = new OpenLayers.Rule({
+    filter: new OpenLayers.Filter.FeatureId({
+        type: OpenLayers.Filter.Function,
+        evaluate: ncc_prow_is_bw
+    }),
+    symbolizer: {
+        strokeColor: "#008000",
+    }
+});
 
 var prow_style = new OpenLayers.Style({
     fill: false,
     strokeColor: "#115511",
-    strokeOpacity: 0.1,
+    strokeOpacity: 0.8,
     strokeWidth: 7
 });
 
-fixmystreet.assets.add($.extend(true, {}, northants_road_defaults, {
+prow_style.addRules([rule_footpath, rule_boat, rule_bridleway]);
+
+fixmystreet.assets.add(northants_road_defaults, {
     http_options: {
-      layerid: 173,
-      layerVersion: '173.1-',
+      layerid: is_live ? 1110 : 310,
+      layerVersion: is_live ? '1110.1-' : '310.1-',
     },
     stylemap: new OpenLayers.StyleMap({
         'default': prow_style
     }),
-    no_asset_msg_id: "#js-not-a-prow",
+    no_asset_msg_id: "#js-not-a-road",
+    asset_item: 'right of way',
     asset_category: [
+      "Bridge-Damaged/ Missing",
+      "Gate - Damaged/ Missing",
       "Livestock",
-      "Passage-Obstructed/Overgrown"
+      "Passage-Obstructed/Overgrown",
+      "Sign/Waymarking - Damaged/Missing",
+      "Stile-Damaged/Missing"
     ]
-}));
+});
 
-function ncc_is_emergency_category() {
-    var relevant_body = OpenLayers.Util.indexOf(fixmystreet.bodies, northants_defaults.body) > -1;
-    var relevant_cat = !!$('label[for=form_emergency]').length;
-    var relevant = relevant_body && relevant_cat;
-    var currently_shown = !!$('#northants-emergency-message').length;
-    var body = $('#form_category').data('body');
-
-    return {relevant: relevant, currently_shown: currently_shown, body: body};
-}
-
-// Hide form when emergency category used
-function check_emergency() {
-    var state = ncc_is_emergency_category();
-
-    if (state.relevant === state.currently_shown || state.body || fixmystreet.body_overrides.get_only_send() == 'Highways England') {
-        // Either should be shown and already is, or shouldn't be shown and isn't
-        return;
-    }
-
-    if (!state.relevant) {
-        $('#northants-emergency-message').remove();
-        if ( !$('#js-roads-responsibility').is(':visible') ) {
-            $('.js-hide-if-invalid-category').show();
-        }
-        return;
-    }
-
-    var $msg = $('<div class="box-warning" id="northants-emergency-message"></div>');
-    $msg.html($('label[for=form_emergency]').html());
-    $msg.insertBefore('#js-post-category-messages');
-    $('.js-hide-if-invalid-category').hide();
-}
-$(fixmystreet).on('report_new:category_change', check_emergency);
-
-function ncc_check_streetlights() {
-    var relevant_body = OpenLayers.Util.indexOf(fixmystreet.bodies, northants_defaults.body) > -1;
-    var relevant_cat = $('#form_category').val() == 'Street lighting';
-    var relevant = relevant_body && relevant_cat;
-    var currently_shown = !!$('#ncc_streetlights').length;
-
-    if (relevant === currently_shown || fixmystreet.body_overrides.get_only_send() == 'Highways England') {
-        return;
-    }
-
-    if (!relevant) {
-        $('#ncc_streetlights').remove();
-        return;
-    }
-
-    var $msg = $('<p id="ncc_streetlights" class="box-warning">Street lighting in Northamptonshire is maintained by Balfour Beatty on behalf of the County Council under a Street Lighting Private Finance Initiative (PFI) contract. Please view our <b><a href="https://www3.northamptonshire.gov.uk/councilservices/northamptonshire-highways/roads-and-streets/Pages/street-lighting.aspx">Street Lighting</a></b> page to report any issues.</p>');
-    $msg.insertBefore('#js-post-category-messages');
-    disable_report_form();
-}
-$(fixmystreet).on('report_new:category_change', ncc_check_streetlights);
+fixmystreet.message_controller.add_ignored_body(northants_defaults.body);
 
 })();

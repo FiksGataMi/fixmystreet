@@ -93,12 +93,34 @@ __PACKAGE__->many_to_many( response_templates => 'contact_response_templates', '
 __PACKAGE__->many_to_many( response_priorities => 'contact_response_priorities', 'response_priority' );
 __PACKAGE__->many_to_many( defect_types => 'contact_defect_types', 'defect_type' );
 
+__PACKAGE__->might_have(
+  "translations",
+  "FixMyStreet::DB::Result::Translation",
+  sub {
+    my $args = shift;
+    return {
+        "$args->{foreign_alias}.object_id" => { -ident => "$args->{self_alias}.id" },
+        "$args->{foreign_alias}.tbl" => { '=' => \"?" },
+        "$args->{foreign_alias}.col" => { '=' => \"?" },
+        "$args->{foreign_alias}.lang" => { '=' => \"?" },
+    };
+  },
+  { cascade_copy => 0, cascade_delete => 0 },
+);
+
 sub category_display {
     my $self = shift;
-    $self->translate_column('category');
+    $self->get_extra_metadata('display_name') || $self->translate_column('category');
 }
 
-sub get_metadata_for_editing {
+sub groups {
+    my $self = shift;
+    my $groups = $self->get_extra_metadata('group') || [];
+    $groups = [ $groups ] unless ref $groups eq 'ARRAY';
+    return $groups;
+}
+
+sub get_all_metadata {
     my $self = shift;
     my @metadata = @{$self->get_extra_fields};
 
@@ -111,9 +133,19 @@ sub get_metadata_for_editing {
     return \@metadata;
 }
 
+sub get_metadata_for_editing {
+    my $self = shift;
+    my $metadata = $self->get_all_metadata;
+
+    # Ignore the special admin-form-created entry
+    my @metadata = grep { $_->{code} ne '_fms_disable_' } @$metadata;
+
+    return \@metadata;
+}
+
 sub get_metadata_for_input {
     my $self = shift;
-    my $metadata = $self->get_metadata_for_editing;
+    my $metadata = $self->get_all_metadata;
 
     # Also ignore any we have with a 'server_set' automated attribute
     my @metadata = grep { !$_->{automated} || $_->{automated} ne 'server_set' } @$metadata;
@@ -121,9 +153,26 @@ sub get_metadata_for_input {
     return \@metadata;
 }
 
+sub get_metadata_for_storage {
+    my $self = shift;
+    my $metadata = $self->get_metadata_for_input;
+
+    # Also ignore any that were only for textual display
+    my @metadata = grep { ($_->{variable} || '') ne 'false' } @$metadata;
+
+    return \@metadata;
+}
+
 sub id_field {
     my $self = shift;
     return $self->get_extra_metadata('id_field') || 'fixmystreet_id';
+}
+
+sub disable_form_field {
+    my $self = shift;
+    my $metadata = $self->get_all_metadata;
+    my ($field) = grep { $_->{code} eq '_fms_disable_' } @$metadata;
+    return $field;
 }
 
 1;

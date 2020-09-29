@@ -214,7 +214,7 @@ sub report_moderate_hide : Private {
     if ($c->get_param('problem_hide')) {
 
         $problem->update({ state => 'hidden' });
-        $problem->get_photoset->delete_cached;
+        $problem->get_photoset->delete_cached(plus_updates => 1);
 
         $c->res->redirect( '/' ); # Go directly to front-page
         $c->detach( 'report_moderate_audit', ['hide'] ); # break chain here.
@@ -263,8 +263,8 @@ sub moderate_boolean : Private {
 
     if ($new != $old) {
         if ($thing eq 'photo') {
-            $object->$thing($new ? $original : undef);
             $object->get_photoset->delete_cached;
+            $object->$thing($new ? $original : undef);
         } else {
             $object->$thing($new);
         }
@@ -298,7 +298,7 @@ sub moderate_location : Private {
 
     my $problem = $c->stash->{problem};
 
-    my $moved = $c->forward('/admin/report_edit_location', [ $problem ]);
+    my $moved = $c->forward('/admin/reports/edit_location', [ $problem ]);
     if (!$moved) {
         # New lat/lon isn't valid, show an error
         $c->stash->{moderate_errors} ||= [];
@@ -315,11 +315,11 @@ sub moderate_category : Private {
     return unless $c->get_param('category');
 
     # The admin category editing needs to know all the categories etc
-    $c->forward('/admin/categories_for_point');
+    $c->forward('/admin/reports/categories_for_point');
 
     my $problem = $c->stash->{problem};
 
-    my $changed = $c->forward( '/admin/report_edit_category', [ $problem, 1 ] );
+    my $changed = $c->forward( '/admin/reports/edit_category', [ $problem, 1 ] );
     # It might need to set_report_extras in future
     if ($changed) {
         return 'category';

@@ -39,7 +39,10 @@ sub auto : Private {
 
     # decide which cobrand this request should use
     $c->setup_request();
+    $c->forward('check_password_expiry');
     $c->detach('/auth/redirect') if $c->cobrand->call_hook('check_login_disallowed');
+
+    $c->forward('/offline/_stash_manifest_theme', [ $c->cobrand->moniker ]);
 
     return 1;
 }
@@ -122,7 +125,9 @@ sub page_error_410_gone : Private {
 
 sub page_error_403_access_denied : Private {
     my ( $self, $c, $error_msg ) = @_;
-    $c->detach('page_error', [ $error_msg || _("Sorry, you don't have permission to do that."), 403 ]);
+    $c->stash->{title} = _('Access denied');
+    $error_msg ||= _("Sorry, you don't have permission to do that.");
+    $c->detach('page_error', [ $error_msg, 403 ]);
 }
 
 sub page_error_400_bad_request : Private {
@@ -156,12 +161,28 @@ sub check_login_required : Private {
     }x;
     return if $c->request->path =~ $whitelist;
 
-    # Blacklisted URLs immediately 404
-    # This is primarily to work around a Safari bug where the appcache
-    # URL is requested in an infinite loop if it returns a 302 redirect.
-    $c->detach('/page_error_404_not_found', []) if $c->request->path =~ /^offline/;
-
     $c->detach( '/auth/redirect' );
+}
+
+sub check_password_expiry : Private {
+    my ($self, $c) = @_;
+
+    return unless $c->user_exists;
+
+    return if $c->action eq $c->controller('JS')->action_for('translation_strings');
+    return if $c->controller eq $c->controller('Auth');
+
+    my $expiry = $c->cobrand->call_hook('password_expiry');
+    return unless $expiry;
+
+    my $last_change = $c->user->get_extra_metadata('last_password_change') || 0;
+    my $midnight = int(time()/86400)*86400;
+    my $expired = $last_change + $expiry < $midnight;
+    return unless $expired;
+
+    my $uri = $c->uri_for('/auth/expired');
+    $c->res->redirect( $uri );
+    $c->detach;
 }
 
 =head2 end

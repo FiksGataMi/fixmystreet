@@ -27,23 +27,37 @@ my @PLACES = (
     [ 'EH1 1BB', 55.952055, -3.189579, 2651, 'Edinburgh City Council', 'UTA', 20728, 'City Centre', 'UTE' ],
     [ 'BS10 5EE', 51.494885, -2.602237, 2561, 'Bristol City Council', 'UTA', 148646, 'Bedminster', 'UTW' ],
     [ 'BS20 5EE', 51.496194, -2.603439, 2608, 'Borsetshire County Council', 'CTY', 148646, 'Bedminster', 'UTW' ],
-    [ 'SL9 0NX', 51.615559, -0.556903, 2217, 'Buckinghamshire County Council', 'CTY', 2257, 'Chiltern District Council', 'DIS' ],
+    [ 'SL9 0NX', 51.615559, -0.556903, 2217, 'Buckinghamshire Council', 'CTY', 2257, 'Chiltern District Council', 'DIS' ],
+    [ '?', 51.615499, -0.556667, 2217, 'Buckinghamshire Council', 'CTY', 2257, 'Chiltern District Council', 'DIS' ],
+    [ '?', 51.615439, -0.558362, 2217, 'Buckinghamshire Council', 'CTY', 2257, 'Chiltern District Council', 'DIS' ],
     [ 'SW1A 1AA', 51.501009, -0.141588, 2504, 'Westminster City Council', 'LBO' ],
     [ 'GL50 2PR', 51.896268, -2.093063, 2226, 'Gloucestershire County Council', 'CTY', 2326, 'Cheltenham Borough Council', 'DIS', 4544, 'Lansdown', 'DIW', 143641, 'Lansdown and Park', 'CED' ],
     [ 'OX20 1SZ', 51.754926, -1.256179, 2237, 'Oxfordshire County Council', 'CTY', 2421, 'Oxford City Council', 'DIS' ],
     [ 'OX16 9UP', 52.038712, -1.346397, 2237, 'Oxfordshire County Council', 'CTY', 2419, 'Cherwell District Council', 'DIS', 151767, "Banbury, Calthorpe & Easington", "DIW" ],
-    [ 'RG9 6TL', 51.561705, -0.868388, 2217, 'Buckinghamshire County Council', 'CTY'],
+    [ 'RG9 6TL', 51.561705, -0.868388, 2217, 'Buckinghamshire Council', 'CTY'],
     [ 'PE9 2GX', 52.656144, -0.502566, 2232, 'Lincolnshire County Council', 'CTY'],
     [ 'LE15 0GJ', 52.670447, -0.727877, 2600, 'Rutland County Council', 'CTY'],
     [ 'BR1 3UH', 51.4021, 0.01578, 2482, 'Bromley Council', 'LBO' ],
     [ 'BR1 3UH', 51.402096, 0.015784, 2482, 'Bromley Council', 'LBO' ],
-    [ 'NN1 1NS', 52.236251, 0.892052, 2234, 'Northamptonshire County Council', 'CTY' ],
+    [ 'BR1 3EF', 51.4039, 0.018697, 2482, 'Bromley Council', 'LBO' ],
+    [ 'NN1 1NS', 52.236251, -0.892052, 2234, 'Northamptonshire County Council', 'CTY', 2397, 'Northampton Borough Council', 'DIS' ],
+    [ 'NN1 2NS', 52.238301, -0.889992, 2234, 'Northamptonshire County Council', 'CTY', 2397, 'Northampton Borough Council', 'DIS' ],
+    [ '?', 52.238827, -0.894970, 2234, 'Northamptonshire County Council', 'CTY', 2397, 'Northampton Borough Council', 'DIS' ],
+    [ '?', 52.23025, -1.015826, 2234, 'Northamptonshire County Council', 'CTY', 2397, 'Northampton Borough Council', 'DIS' ],
+    [ 'TW7 5JN', 51.482286, -0.328163, 2483, 'Hounslow Borough Council', 'LBO' ],
+    [ '?', 51.48111, -0.327219, 2483, 'Hounslow Borough Council', 'LBO' ],
+    [ '?', 51.482045, -0.327219, 2483, 'Hounslow Borough Council', 'LBO' ],
+    [ '?', 51.345714, -0.227959, 2457, 'Epsom and Ewell Borough Council', 'DIS' ],
+    [ 'CW11 1HZ', 53.145324, -2.370437, 21069, 'Cheshire East Council', 'UTA', 135301, 'Sandbach Town', 'UTW' ],
     [ '?', 50.78301, -0.646929 ],
     [ 'TA1 1QP', 51.023569, -3.099055, 2239, 'Somerset County Council', 'CTY', 2429, 'Taunton Deane Borough Council', 'DIS' ],
     [ 'GU51 4AE', 51.279456, -0.846216, 2333, 'Hart District Council', 'DIS', 2227, 'Hampshire County Council', 'CTY' ],
     [ 'WS1 4NH', 52.563074, -1.991032, 2535, 'Sandwell Borough Council', 'MTD' ],
+    [ 'PO30 5XJ', 50.71086, -1.29573, 2636, 'Isle of Wight Council', 'UTA' ],
+    [ 'PE1 1HF', 52.57146, -0.24201, 2566, 'Peterborough City Council', 'UTA' ],
     [ 'OX28 4DS', 51.784721, -1.494453 ],
     [ 'E14 2DN', 51.508536, '0.000001' ],
+    [ '?', 52.51093, -1.86514, 11809, 'West Midlands', 'EUR' ],
     # Norway
     [ '3290', 59, 10, 709, 'Larvik', 'NKO', 7, 'Vestfold', 'NFY' ],
     [ '0045', "59.9", "10.9", 301, 'Oslo', 'NKO', 3, 'Oslo', 'NFY' ],
@@ -89,8 +103,8 @@ sub dispatch_request {
             }
         }
         my $response = {
-            "63999" => {"parent_area" => 2245, "generation_high" => 25, "all_names" => {}, "id" => 63999, "codes" => {"ons" => "00HYNS", "gss" => "E05008366", "unit_id" => "44025"}, "name" => "Kington", "country" => "E", "type_name" => "Unitary Authority electoral division (UTE)", "generation_low" => 12, "country_name" => "England", "type" => "UTE"},
-            "2245" => {"parent_area" => undef, "generation_high" => 25, "all_names" => {}, "id" => 2245, "codes" => {"ons" => "00HY", "gss" => "E06000054", "unit_id" => "43925"}, "name" => "Wiltshire Council", "country" => "E", "type_name" => "Unitary Authority", "generation_low" => 11, "country_name" => "England", "type" => "UTA"}
+            "153255" => {"parent_area" => 2608, "generation_high" => 36, "all_names" => {}, "id" => 153255, "codes" => {"gss" => "E05012110", "unit_id" => "174450"}, "name" => "Chipping Sodbury & Cotswold Edge", "country" => "E", "type_name" => "Unitary Authority ward (UTW)", "generation_low" => 36, "country_name" => "England", "type" => "UTW"},
+            "2608" => {"parent_area" => undef, "generation_high" => 36, "all_names" => {}, "id" => 2608, "codes" => {"ons" => "00HD", "gss" => "E06000025", "unit_id" => "25559"}, "name" => "South Gloucestershire Council", "country" => "E", "type_name" => "Unitary Authority", "generation_low" => 1, "country_name" => "England", "type" => "UTA"}
         };
         return $self->output($response);
     },
@@ -107,6 +121,15 @@ sub dispatch_request {
             $self->output({2326 => {parent_area => undef, id => 2326, name => "Cheltenham Borough Council", type => "DIS"}});
         } elsif ($areas eq 'UTA') {
             $self->output({2650 => {parent_area => undef, id => 2650, name => "Aberdeen Council", type => "UTA"}});
+        } elsif ($areas eq 'GRE') {
+            $self->output({2493 => {parent_area => undef, id => 2493, name => "Greenwich Borough Council", type => "LBO"}});
+        } elsif ($areas eq 'LBO') {
+            $self->output({
+                2482 => {parent_area => undef, id => 2482, name => "Bromley Borough Council", type => "LBO"},
+                2483 => {parent_area => undef, id => 2483, name => "Hounslow Borough Council", type => "LBO"},
+            });
+        } elsif ($areas eq 60705) {
+            $self->output({60705 => {parent_area => 2245, id => 60705, name => "Trowbridge", type => "CPC"}});
         }
     },
 

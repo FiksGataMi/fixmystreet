@@ -102,8 +102,8 @@ fixmystreet.maps.matrix_ids = [
 
 (function() {
     function pin_dragged(lonlat) {
-        document.getElementById('fixmystreet.latitude').value = lonlat.y;
-        document.getElementById('fixmystreet.longitude').value = lonlat.x;
+        document.getElementById('fixmystreet.latitude').value = lonlat.y.toFixed(6);
+        document.getElementById('fixmystreet.longitude').value = lonlat.x.toFixed(6);
     }
 
     $(function(){
@@ -152,13 +152,5 @@ fixmystreet.maps.config = function() {
     fixmystreet.area_format = { fillColor: 'none', strokeWidth: 4, strokeColor: 'black' };
 };
 
-fixmystreet.maps.marker_size = function() {
-    var zoom = fixmystreet.map.getZoom() + fixmystreet.zoomOffset;
-    if (zoom >= 6) {
-        return 'normal';
-    } else if (zoom >= 3) {
-        return 'small';
-    } else {
-        return 'mini';
-    }
-};
+fixmystreet.maps.zoom_for_normal_size = 6;
+fixmystreet.maps.zoom_for_small_size = 3;

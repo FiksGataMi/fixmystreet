@@ -23,6 +23,8 @@ FixMyBarangay.po
 
 # Photo upload cache
 /web/photo
+# And theme upload
+/web/theme
 
 # Installation
 /local
@@ -55,3 +57,4 @@ gh_fixmycommunity
 *[Gg]round[Cc]ontrol*
 [Ss]midsy*
 [Kk]iit[Cc]*
+[Tt]ransport[Ff]ocus*

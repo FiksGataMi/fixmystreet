@@ -17,7 +17,7 @@ my $mech = FixMyStreet::TestMech->new;
 my $c = ctx_request("/");
 
 # set some values in the stash
-$c->stash->{foo} = 'bar';
+$c->stash->{foo} = 'bar <b>bold</b>';
 
 # clear the email queue
 $mech->clear_emails_ok;
@@ -40,7 +40,7 @@ my $email = Email::MIME->new($email_as_string);
 
 my $expected_email_content =   path(__FILE__)->parent->child('send_email_sample.txt')->slurp;
 my $name = FixMyStreet->config('CONTACT_NAME');
-my $sender = '"' . $name . '" <' . FixMyStreet->config('DO_NOT_REPLY_EMAIL') . '>';
+my $sender = $name . ' <' . FixMyStreet->config('DO_NOT_REPLY_EMAIL') . '>';
 $expected_email_content =~ s{CONTACT_EMAIL}{$sender};
 my $expected_email = Email::MIME->new($expected_email_content);
 
@@ -118,6 +118,14 @@ subtest 'Inline emails!' => sub {
            \ {10}\+\ text/plain.*\n
            \ {10}\+\ text/html.*\n
         \ {5}\+\ image/gif]x;
+    $email->walk_parts(sub {
+        my ($part) = @_;
+        if ($part->content_type =~ m[text/plain]i) {
+            like $part->body_str, qr/foo: bar <b>bold<\/b>/;
+        } elsif ($part->content_type =~ m[text/html]i) {
+            like $part->body_str, qr/foo: bar &lt;b&gt;bold&lt;\/b&gt;/;
+        }
+    });
     $mech->clear_emails_ok;
 };
 

@@ -24,7 +24,6 @@ fixmystreet.maps.banes_defaults = {
     asset_item: "asset",
     asset_type: 'spot',
     max_resolution: 4.777314267158508,
-    min_resolution: 0.5971642833948135,
     asset_id_field: 'feature_no',
     attributes: null,
     geometryName: 'msGeometry',
@@ -33,7 +32,7 @@ fixmystreet.maps.banes_defaults = {
 };
 
 
-fixmystreet.assets.add($.extend(true, {}, fixmystreet.maps.banes_defaults, {
+fixmystreet.assets.add(fixmystreet.maps.banes_defaults, {
     http_options: {
         params: {
             TYPENAME: "Gritbins"
@@ -44,9 +43,9 @@ fixmystreet.assets.add($.extend(true, {}, fixmystreet.maps.banes_defaults, {
     attributes: {
         asset_details: 'feature_location'
     }
-}));
+});
 
-fixmystreet.assets.add($.extend(true, {}, fixmystreet.maps.banes_defaults, {
+fixmystreet.assets.add(fixmystreet.maps.banes_defaults, {
     http_options: {
         params: {
             TYPENAME: "ParksOpenSpacesAssets"
@@ -68,12 +67,7 @@ fixmystreet.assets.add($.extend(true, {}, fixmystreet.maps.banes_defaults, {
     ],
     asset_item: "park",
     disable_pin_snapping: true,
-    stylemap: new OpenLayers.StyleMap({
-        'default': new OpenLayers.Style({
-            fill: false,
-            stroke: false
-        })
-    }),
+    stylemap: fixmystreet.assets.stylemap_invisible,
     attributes: {
         asset_details: function() {
             var a = this.attributes;
@@ -91,7 +85,7 @@ fixmystreet.assets.add($.extend(true, {}, fixmystreet.maps.banes_defaults, {
         'Seats'
     ],
     name: "Parks and Grounds"
-}));
+});
 
 
 
@@ -161,36 +155,16 @@ var rule_not_owned = new OpenLayers.Rule({
 });
 lighting_default_style.addRules([rule_owned, rule_not_owned]);
 
-// XXX fixmystreet.pin_prefix isn't always available here (e.g. on /report/new),
-// so get it from the DOM directly
-var pin_prefix = fixmystreet.pin_prefix || document.getElementById('js-map-data').getAttribute('data-pin_prefix');
-
 var lighting_stylemap = new OpenLayers.StyleMap({
     'default': lighting_default_style,
-    'select': new OpenLayers.Style({
-        externalGraphic: pin_prefix + "pin-spot.png",
-        fillColor: "#55BB00",
-        graphicWidth: 48,
-        graphicHeight: 64,
-        graphicXOffset: -24,
-        graphicYOffset: -56,
-        backgroundGraphic: pin_prefix + "pin-shadow.png",
-        backgroundWidth: 60,
-        backgroundHeight: 30,
-        backgroundXOffset: -7,
-        backgroundYOffset: -22,
-        popupYOffset: -40,
-        graphicOpacity: 1.0
-    }),
+    'select': fixmystreet.assets.style_default_select,
     'hover': new OpenLayers.Style({
         pointRadius: 8,
         cursor: 'pointer'
     })
-
 });
 
-
-fixmystreet.assets.add($.extend(true, {}, fixmystreet.maps.banes_defaults, {
+fixmystreet.assets.add(fixmystreet.maps.banes_defaults, {
     http_options: {
         params: {
             TYPENAME: "StreetLighting"
@@ -211,32 +185,54 @@ fixmystreet.assets.add($.extend(true, {}, fixmystreet.maps.banes_defaults, {
                    "description: " + a.unitdescription;
         }
     }
-}));
-
-
-var highways_stylemap = new OpenLayers.StyleMap({
-    'default': new OpenLayers.Style({
-        fill: false,
-        stroke: false
-    })
 });
 
-fixmystreet.assets.add($.extend(true, {}, fixmystreet.maps.banes_defaults, {
+fixmystreet.assets.add(fixmystreet.maps.banes_defaults, {
     http_options: {
         params: {
             TYPENAME: "AdoptedHighways"
         }
     },
-    stylemap: highways_stylemap,
+    stylemap: fixmystreet.assets.stylemap_invisible,
     non_interactive: true,
     always_visible: true,
     usrn: {
         attribute: 'usrn',
         field: 'site_code'
     },
+    road: true,
+    asset_item: "road",
+    asset_type: 'road',
+    all_categories: true, // Not really, but want to allow on all but one, not stop
+    no_asset_msg_id: '#js-not-a-road',
+    cat_map: {
+      'Blocked drain surface': 'road',
+      'Blocked drain': 'road',
+      'Damage to pavement': 'pavement',
+      'Damage to road': 'road',
+      'Damaged Railing, manhole, or drain cover': 'road',
+      'Damaged bollard or post': 'road',
+      'Damaged road sign': 'road',
+      'Damaged street nameplate': 'road',
+      'Faded road markings': 'road',
+      'Flooding of a road or pavement': 'road'
+    },
+    actions: {
+        found: fixmystreet.message_controller.road_found,
+        not_found: function(layer) {
+            var cat = $('select#form_category').val();
+            var asset_item = layer.fixmystreet.cat_map[cat];
+            if (asset_item) {
+                layer.fixmystreet.asset_item = asset_item;
+                fixmystreet.message_controller.road_not_found(layer);
+            } else {
+                fixmystreet.message_controller.road_found(layer);
+            }
+        }
+    },
     name: "Adopted Highways",
     attribution: " © Crown Copyright. All rights reserved. 1000233344"
-}));
+});
 
 
 })();

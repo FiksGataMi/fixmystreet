@@ -98,15 +98,10 @@ fixmystreet.maps.matrix_ids = [
  * to setup the way the map should operate.
  */
 fixmystreet.maps.config = function() {
-    var permalink_id;
-    if ($('#map_permalink').length) {
-        permalink_id = 'map_permalink';
-    }
-
     fixmystreet.controls = [
         new OpenLayers.Control.ArgParserFMS(),
         new OpenLayers.Control.Navigation(),
-        new OpenLayers.Control.PermalinkFMS(permalink_id)
+        new OpenLayers.Control.PermalinkFMS('map')
     ];
     if ( fixmystreet.page != 'report' || !$('html').hasClass('mobile') ) {
         fixmystreet.controls.push( new OpenLayers.Control.PanZoomFMS({id: 'fms_pan_zoom' }) );
@@ -120,13 +115,5 @@ fixmystreet.maps.config = function() {
     this.setup_wmts_base_map();
 };
 
-fixmystreet.maps.marker_size = function() {
-    var zoom = fixmystreet.map.getZoom() + fixmystreet.zoomOffset;
-    if (zoom >= 7) {
-        return 'normal';
-    } else if (zoom >= 4) {
-        return 'small';
-    } else {
-        return 'mini';
-    }
-};
+fixmystreet.maps.zoom_for_normal_size = 7;
+fixmystreet.maps.zoom_for_small_size = 4;

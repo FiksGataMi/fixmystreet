@@ -29,20 +29,26 @@ sub send {
             use_service_as_deviceid => 0,
             extended_description    => 1,
             multi_photos            => 0,
+            upload_files            => 0,
+            always_upload_photos    => 0,
             fixmystreet_body => $body,
         );
+
+        my $contact = $self->fetch_category($body, $row) or next;
 
         my $cobrand = $body->get_cobrand_handler || $row->get_cobrand_logged;
         $cobrand->call_hook(open311_config => $row, $h, \%open311_params);
 
         # Try and fill in some ones that we've been asked for, but not asked the user for
-
-        my $contact = $row->result_source->schema->resultset("Contact")->not_deleted->find( {
-            body_id => $body->id,
-            category => $row->category
-        } );
-
         my $extra = $row->get_extra_fields();
+        my ($include, $exclude) = $cobrand->call_hook(open311_extra_data => $row, $h, $extra, $contact);
+
+        my $original_extra = [ @$extra ];
+        push @$extra, @$include if $include;
+        if ($exclude) {
+            $exclude = join('|', @$exclude);
+            @$extra = grep { $_->{name} !~ /$exclude/ } @$extra;
+        }
 
         my $id_field = $contact->id_field;
         foreach (@{$contact->get_extra_fields}) {
@@ -83,8 +89,8 @@ sub send {
             $self->open311_test_req_used($open311->test_req_used);
         }
 
-        # make sure we don't save user changes from above
-        $row->discard_changes();
+        # make sure we don't save extra changes from above
+        $row->set_extra_fields( @$original_extra );
 
         if ( $resp ) {
             $row->external_id( $resp );
@@ -96,7 +102,7 @@ sub send {
             $self->error( $self->error . "\n" . $open311->error );
         }
 
-        $cobrand->call_hook(open311_post_send => $row, $h);
+        $cobrand->call_hook(open311_post_send => $row, $h, $contact);
     }
 
 

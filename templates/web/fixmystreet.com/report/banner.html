@@ -19,7 +19,7 @@
 
 [% IF NOT problem.to_body_named('Bromley') %]
 
-    [% IF problem.is_open AND date.now - problem.lastupdate.epoch > 8 * 7 * 24 * 60 * 60 %]
+    [% IF problem.send_method_used != 'Open311' AND problem.is_open AND date.now - problem.lastupdate.epoch > 8 * 7 * 24 * 60 * 60 %]
         [% INCLUDE banner, id = 'unknown', text = loc('Unknown') %]
     [% ELSIF problem.is_in_progress %]
         [% INCLUDE banner, id = 'progress', text = loc('In progress') %]

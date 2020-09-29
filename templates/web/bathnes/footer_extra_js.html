@@ -1,3 +1,9 @@
-[% scripts.push(
-    version('/cobrands/fixmystreet-uk-councils/council_validation_rules.js'),
-) %]
+[% PROCESS 'footer_extra_js_base.html' highways=1 cobrand_js=1 validation=1 %]
+[%~
+SET council_area_id = c.cobrand.council_area_id;
+IF c.user_exists AND ((c.user.from_body AND c.user.from_body.areas.$council_area_id) OR c.user.is_superuser);
+    scripts.push(
+        version('/cobrands/bathnes/staff.js'),
+    );
+END
+%]

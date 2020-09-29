@@ -12,7 +12,11 @@
 [% IF c.cobrand.moniker == 'fixmystreet' %]
 <h1>FixMyStreet technical support</h1>
 [% ELSE %]
-<h1>[% loc('Contact the team') %]</h1>
+    [% TRY %]
+    [% INCLUDE 'contact/_heading.html' %]
+    [% CATCH file %]
+    <h1>[% loc('Contact the team') %]</h1>
+    [% END %]
 [% END %]
 
 <form method="post" action="/contact/submit" class="validate">
@@ -92,7 +96,7 @@
 
         <div class="form-group">
           <label for="form_phone">[% loc('Your phone number') %]</label>
-          <span class="required-text required-text--optional">optional</span>
+          <span class="required-text required-text--optional">[% loc('optional') %]</span>
           <input type="text" class="form-control extra.phone" name="extra.phone" id="form_phone" value="" size="30">
         </div>
 

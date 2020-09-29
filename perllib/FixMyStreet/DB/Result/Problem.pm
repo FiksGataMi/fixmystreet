@@ -201,6 +201,8 @@ use Moo;
 use namespace::clean -except => [ 'meta' ];
 use Utils;
 use FixMyStreet::Map::FMS;
+use FixMyStreet::Template;
+use FixMyStreet::Template::SafeString;
 use LWP::Simple qw($ua);
 use RABX;
 use URI;
@@ -338,6 +340,7 @@ around service => sub {
 sub title_safe {
     my $self = shift;
     return _('Awaiting moderation') if $self->cobrand eq 'zurich' && $self->state eq 'submitted';
+    return sprintf("%s problem", $self->category) if $self->cobrand eq 'tfl' && $self->result_source->schema->cobrand->moniker ne 'tfl';
     return $self->title;
 }
 
@@ -362,6 +365,9 @@ sub check_for_errors {
     $errors{title} = _('Please enter a subject')
       unless $self->title =~ m/\S/;
 
+    $errors{title} = _('Please make sure you are not including an email address')
+        if mySociety::EmailUtil::is_valid_email($self->title);
+
     $errors{detail} = _('Please enter some details')
       unless $self->detail =~ m/\S/;
 
@@ -371,13 +377,6 @@ sub check_for_errors {
 
     if ( !$self->name || $self->name !~ m/\S/ ) {
         $errors{name} = _('Please enter your name');
-    }
-
-    if (   $self->category
-        && $self->category eq _('-- Pick a category --') )
-    {
-        $errors{category} = _('Please choose a category');
-        $self->category(undef);
     }
 
     return \%errors;
@@ -408,7 +407,28 @@ sub confirm {
 
 sub category_display {
     my $self = shift;
-    $self->translate_column('category');
+    my $contact = $self->category_row;
+    return $self->category unless $contact; # Fallback; shouldn't happen, but some tests
+    return $contact->category_display;
+}
+
+=head2 category_row
+
+Returns the corresponding Contact object for this problem's category and body.
+If the report was sent to multiple bodies, only returns the first.
+
+=cut
+
+sub category_row {
+    my $self = shift;
+    my $schema = $self->result_source->schema;
+    my $body_id = $self->bodies_str_ids->[0];
+    return unless $body_id && $body_id =~ /^[0-9]+$/;
+    my $contact = $schema->resultset("Contact")->find({
+        body_id => $body_id,
+        category => $self->category,
+    });
+    return $contact;
 }
 
 sub bodies_str_ids {
@@ -503,6 +523,31 @@ sub tokenised_url {
     );
 
     return "/M/". $token->token;
+}
+
+has view_token => (
+    is => 'ro',
+    lazy => 1,
+    default => sub {
+        my $self = shift;
+        my $token = FixMyStreet::DB->resultset('Token')->create({
+            scope => 'alert_to_reporter',
+            data => { id => $self->id }
+        });
+    },
+);
+
+=head2 view_url
+
+Return a url for this problem report that will always show it
+(even if e.g. a private report) but does not log the user in.
+
+=cut
+
+sub view_url {
+    my $self = shift;
+    return $self->url unless $self->non_public;
+    return "/R/" . $self->view_token->token;
 }
 
 =head2 is_hidden
@@ -652,16 +697,16 @@ sub body {
             my $cache = $problem->result_source->schema->cache;
             return $cache->{bodies}{$problem->external_body} //= $c->model('DB::Body')->find({ id => $problem->external_body });
         } else {
-            $body = $problem->external_body;
+            $body = FixMyStreet::Template::html_filter($problem->external_body);
         }
     } else {
         my $bodies = $problem->bodies;
         my @body_names = sort map {
             my $name = $_->name;
             if ($c and FixMyStreet->config('AREA_LINKS_FROM_PROBLEMS')) {
-                '<a href="' . $_->url . '">' . $name . '</a>';
+                '<a href="' . $_->url . '">' . FixMyStreet::Template::html_filter($name) . '</a>';
             } else {
-                $name;
+                FixMyStreet::Template::html_filter($name);
             }
         } values %$bodies;
         if ( scalar @body_names > 2 ) {
@@ -671,7 +716,7 @@ sub body {
             $body = join( _(' and '), @body_names);
         }
     }
-    return $body;
+    return FixMyStreet::Template::SafeString->new($body);
 }
 
 
@@ -755,23 +800,26 @@ sub defect_types {
 #     Note:   this only makes sense when called on a problem that has been sent!
 sub can_display_external_id {
     my $self = shift;
-    if ($self->external_id && $self->send_method_used && $self->to_body_named('Oxfordshire|Lincolnshire')) {
+    if ($self->external_id && $self->to_body_named('Oxfordshire|Lincolnshire|Isle of Wight|East Sussex')) {
         return 1;
     }
     return 0;
 }
 
+# This can return HTML and is safe, so returns a FixMyStreet::Template::SafeString
 sub duration_string {
     my ( $problem, $c ) = @_;
     my $body = $c->cobrand->call_hook(link_to_council_cobrand => $problem) || $problem->body($c);
     my $handler = $c->cobrand->call_hook(get_body_handler_for_problem => $problem);
     if ( $handler && $handler->call_hook('is_council_with_case_management') ) {
-        return sprintf(_('Received by %s moments later'), $body);
+        my $s = sprintf(_('Received by %s moments later'), $body);
+        return FixMyStreet::Template::SafeString->new($s);
     }
     return unless $problem->whensent;
-    return sprintf(_('Sent to %s %s later'), $body,
+    my $s = sprintf(_('Sent to %s %s later'), $body,
         Utils::prettify_duration($problem->whensent->epoch - $problem->confirmed->epoch, 'minute')
     );
+    return FixMyStreet::Template::SafeString->new($s);
 }
 
 sub local_coords {
@@ -889,6 +937,8 @@ bodies by some mechanism. Right now that mechanism is Open311.
 
 sub updates_sent_to_body {
     my $self = shift;
+
+    return 1 if $self->to_body_named('TfL');
     return unless $self->send_method_used && $self->send_method_used =~ /Open311/;
 
     # Some bodies only send updates *to* FMS, they don't receive updates.
@@ -1015,11 +1065,12 @@ sub pin_data {
         problem => $self,
         draggable => $opts{draggable},
         type => $opts{type},
+        base_url => $c->cobrand->relative_url_for_report($self),
     }
 };
 
 sub static_map {
-    my ($self) = @_;
+    my ($self, %params) = @_;
 
     return unless $IM;
 
@@ -1027,7 +1078,11 @@ sub static_map {
         unless $FixMyStreet::Map::map_class->isa("FixMyStreet::Map::OSM");
 
     my $map_data = $FixMyStreet::Map::map_class->generate_map_data(
-        { cobrand => $self->get_cobrand_logged },
+        {
+            cobrand => $self->get_cobrand_logged,
+            distance => 1, # prevents the call to Gaze which isn't necessary
+            $params{zoom} ? ( zoom => $params{zoom} ) : (),
+        },
         latitude  => $self->latitude,
         longitude => $self->longitude,
         pins      => $self->used_map
@@ -1084,7 +1139,7 @@ sub static_map {
     $image->Extent( geometry => '512x384', gravity => 'NorthWest');
     $image->Extent( geometry => '512x320', gravity => 'SouthWest');
 
-    $image->Scale( geometry => "310x200>" );
+    $image->Scale( geometry => "310x200>" ) unless $params{full_size};
 
     my @blobs = $image->ImageToBlob(magick => 'jpeg');
     undef $image;
@@ -1158,6 +1213,17 @@ has inspection_log_entry => (
     default => sub {
         my $self = shift;
         return $self->admin_log_entries->search({ action => 'inspected' }, { order_by => { -desc => 'whenedited' } })->first;
+    },
+);
+
+has alerts => (
+    is => 'ro',
+    lazy => 1,
+    default => sub {
+        my $self = shift;
+        return $self->result_source->schema->resultset('Alert')->search({
+            alert_type => 'new_updates', parameter => $self->id
+        });
     },
 );
 

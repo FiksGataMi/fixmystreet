@@ -1,11 +1,11 @@
-<h1>[% loc('Report your problem') %]</h1>
+[% PROCESS 'report/new/form_heading.html' %]
 
 <p class="form-error">
     [% loc('Please note your report has <strong>not yet been sent</strong>.') %]
     [% loc('We need your email address, please give it below.') %]
 </p>
 
-[% sidebar_html %]
+[% sidebar_html | safe %]
 
 [% INCLUDE 'errors.html' %]
 
@@ -17,5 +17,6 @@
 
         <input type="hidden" name="oauth_need_email" value="1">
         [% PROCESS 'report/new/form_report.html' %]
+        <input class="btn btn--primary btn--block btn--final js-submit_register" type="submit" name="submit_register" value="[% loc('Submit') %]">
     </div>
 </fieldset>

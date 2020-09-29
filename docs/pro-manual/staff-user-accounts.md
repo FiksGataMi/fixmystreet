@@ -1,7 +1,7 @@
 ---
 layout: pro
 title: FixMyStreet Pro staff user accounts
-order: 3
+order: 4
 user-guide: true
 categories: user-guide
 ---
@@ -46,13 +46,14 @@ the end of your session.
 You can change your password at any time by clicking on ‘Your account’ in the top menu bar.
 
 
-## Permissions
+## Permissions and Roles
 
-Staff accounts can be assigned a variety of permissions, depending on each team member’s needs
-or responsibilities. Permissions can be combined in any way.
+Staff accounts can be assigned a variety of permissions or roles, depending on
+each team member’s needs or responsibilities. Permissions can be combined in
+any way, grouped into custom roles, or applied individually.
 
 Some common staff roles and the appropriate permissions are shown in the table below, but you
-can tailor your permissions to best reflect your team’s operations.
+can tailor your permissions and roles to best reflect your team’s operations.
 
 
 <table class="table table--responsive">

@@ -40,6 +40,7 @@ sub send() {
                    $item_table.confirmed as item_confirmed,
                    $item_table.photo as item_photo,
                    $item_table.problem_state as item_problem_state,
+                   $item_table.cobrand as item_cobrand,
                    $head_table.*
             from alert, $item_table, $head_table
                 where alert.parameter::integer = $head_table.id
@@ -47,6 +48,7 @@ sub send() {
                 ";
         } else {
             $query .= " $item_table.*,
+                   $item_table.cobrand as item_cobrand,
                    $item_table.id as item_id
             from alert, $item_table
             where 1 = 1";
@@ -84,6 +86,8 @@ sub send() {
 
             next unless FixMyStreet::DB::Result::Problem::visible_states()->{$row->{state}};
 
+            next if $row->{alert_cobrand} ne 'tfl' && $row->{item_cobrand} eq 'tfl';
+
             $schema->resultset('AlertSent')->create( {
                 alert_id  => $row->{alert_id},
                 parameter => $row->{item_id},
@@ -97,7 +101,7 @@ sub send() {
                     !( $last_problem_state eq '' && $row->{item_problem_state} eq 'confirmed' ) &&
                     $last_problem_state ne $row->{item_problem_state}
                 ) {
-                    my $state = FixMyStreet::DB->resultset("State")->display($row->{item_problem_state}, 1, $cobrand);
+                    my $state = FixMyStreet::DB->resultset("State")->display($row->{item_problem_state}, 1, $cobrand->moniker);
 
                     my $update = _('State changed to:') . ' ' . $state;
                     $row->{item_text} = $row->{item_text} ? $row->{item_text} . "\n\n" . $update :
@@ -121,6 +125,13 @@ sub send() {
                 $data{state_message} = _("This report is currently marked as open.");
             }
 
+            if (!$data{alert_user_id}) {
+                if ($ref eq 'new_updates') {
+                    # Get a report object for its photo and static map
+                    $data{report} = $schema->resultset('Problem')->find({ id => $row->{id} });
+                }
+            }
+
             my $url = $cobrand->base_url_for_report($row);
             # this is currently only for new_updates
             if (defined($row->{item_text})) {
@@ -138,6 +149,12 @@ sub send() {
                         }
                     } );
                     $data{problem_url} = $url . "/R/" . $token_obj->token;
+
+                    # Also record timestamp on report if it's an update about being fixed...
+                    if (FixMyStreet::DB::Result::Problem::fixed_states()->{$row->{state}} || FixMyStreet::DB::Result::Problem::closed_states()->{$row->{state}}) {
+                        $data{report}->set_extra_metadata_if_undefined('closure_alert_sent_at', time());
+                        $data{report}->update;
+                    }
                 } else {
                     $data{problem_url} = $url . "/report/" . $row->{id};
                 }
@@ -181,10 +198,6 @@ sub send() {
 
             if (!$data{alert_user_id}) {
                 %data = (%data, %$row);
-                if ($ref eq 'new_updates') {
-                    # Get a report object for its photo and static map
-                    $data{report} = $schema->resultset('Problem')->find({ id => $row->{id} });
-                }
                 if ($ref eq 'area_problems') {
                     my $va_info = FixMyStreet::MapIt::call('area', $row->{alert_parameter});
                     $data{area_name} = $va_info->{name};
@@ -239,7 +252,7 @@ sub send() {
             cobrand_data => $alert->cobrand_data,
             schema => $schema,
         );
-        my $q = "select problem.id, problem.bodies_str, problem.postcode, problem.geocode, problem.confirmed,
+        my $q = "select problem.id, problem.bodies_str, problem.postcode, problem.geocode, problem.confirmed, problem.cobrand,
             problem.title, problem.detail, problem.photo from problem_find_nearby(?, ?, ?) as nearby, problem, users
             where nearby.problem_id = problem.id
             and problem.user_id = users.id
@@ -252,6 +265,8 @@ sub send() {
         $q = FixMyStreet::DB->schema->storage->dbh->prepare($q);
         $q->execute($latitude, $longitude, $d, $alert->whensubscribed, $alert->id, $alert->user->email);
         while (my $row = $q->fetchrow_hashref) {
+            next if $alert->cobrand ne 'tfl' && $row->{cobrand} eq 'tfl';
+
             $schema->resultset('AlertSent')->create( {
                 alert_id  => $alert->id,
                 parameter => $row->{id},
@@ -333,7 +348,6 @@ sub _get_address_from_geocode {
     my $geocode = shift;
 
     return '' unless defined $geocode;
-    utf8::encode($geocode) if utf8::is_utf8($geocode);
     my $h = new IO::String($geocode);
     my $data = RABX::wire_rd($h);
 

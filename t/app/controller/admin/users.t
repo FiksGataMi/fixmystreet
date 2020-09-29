@@ -3,6 +3,9 @@ use FixMyStreet::TestMech;
 my $mech = FixMyStreet::TestMech->new;
 
 my $user = $mech->create_user_ok('test@example.com', name => 'Test User');
+my $original_user_id = $user->id; # For log later
+my $user2 = $mech->create_user_ok('test2@example.com', name => 'Test User 2');
+my $user3 = $mech->create_user_ok('test3@example.com', name => 'Test User 3');
 
 my $superuser = $mech->create_user_ok('superuser@example.com', name => 'Super User', is_superuser => 1);
 
@@ -13,7 +16,7 @@ my $southend = $mech->create_body_ok(2607, 'Southend-on-Sea Borough Council');
 $mech->log_in_ok( $superuser->email );
 
 subtest 'search abuse' => sub {
-    my $abuse = FixMyStreet::App->model('DB::Abuse')->find_or_create( { email => $user->email } );
+    my $abuse = FixMyStreet::DB->resultset('Abuse')->find_or_create( { email => $user->email } );
     $mech->get_ok( '/admin/users?search=example' );
     $mech->content_like(qr{test\@example.com.*</td>\s*<td>.*?</td>\s*<td>User in abuse table}s);
 };
@@ -24,26 +27,26 @@ subtest 'remove user from abuse list from edit user page' => sub {
 
     $mech->click_ok('unban');
 
-    my $abuse = FixMyStreet::App->model('DB::Abuse')->find( { email => $user->email } );
+    my $abuse = FixMyStreet::DB->resultset('Abuse')->find( { email => $user->email } );
     ok !$abuse, 'record removed from abuse table';
 };
 
 subtest 'remove user with phone account from abuse list from edit user page' => sub {
     my $abuse_user = $mech->create_user_ok('01234 456789');
-    my $abuse = FixMyStreet::App->model('DB::Abuse')->find_or_create( { email => $abuse_user->phone } );
+    my $abuse = FixMyStreet::DB->resultset('Abuse')->find_or_create( { email => $abuse_user->phone } );
     $mech->get_ok( '/admin/users/' . $abuse_user->id );
     $mech->content_contains('User in abuse table');
-    my $abuse_found = FixMyStreet::App->model('DB::Abuse')->find( { email => $abuse_user->phone } );
+    my $abuse_found = FixMyStreet::DB->resultset('Abuse')->find( { email => $abuse_user->phone } );
     ok $abuse_found, 'user in abuse table';
 
     $mech->click_ok('unban');
 
-    $abuse = FixMyStreet::App->model('DB::Abuse')->find( { email => $user->phone } );
+    $abuse = FixMyStreet::DB->resultset('Abuse')->find( { email => $user->phone } );
     ok !$abuse, 'record removed from abuse table';
 };
 
 subtest 'no option to remove user already in abuse list' => sub {
-    my $abuse = FixMyStreet::App->model('DB::Abuse')->find( { email => $user->email } );
+    my $abuse = FixMyStreet::DB->resultset('Abuse')->find( { email => $user->email } );
     $abuse->delete if $abuse;
     $mech->get_ok( '/admin/users/' . $user->id );
     $mech->content_lacks('User in abuse table');
@@ -60,6 +63,7 @@ subtest 'show flagged entries' => sub {
     $user->update;
 };
 
+my $role;
 subtest 'user search' => sub {
     $mech->get_ok('/admin/users');
     $mech->get_ok('/admin/users?search=' . $user->name);
@@ -74,17 +78,37 @@ subtest 'user search' => sub {
 
     $user->from_body($haringey->id);
     $user->update;
+    $role = $user->roles->create({
+        body => $haringey,
+        name => 'Role A',
+        permissions => ['moderate', 'user_edit'],
+    });
+    $user->add_to_roles($role);
     $mech->get_ok('/admin/users?search=' . $haringey->id );
-    $mech->content_contains('Haringey');
+    $mech->content_contains('test@example.com');
+    $mech->get_ok('/admin/users?role=' . $role->id);
+    $mech->content_contains('selected>Role A');
+    $mech->content_contains('test@example.com');
+};
+
+subtest 'user assign role' => sub {
+    $user->remove_from_roles($role);
+    is $user->roles->count, 0;
+    $mech->get_ok('/admin/users');
+    $mech->submit_form_ok({ with_fields => { uid => $user->id, roles => $role->id } });
+    is $user->roles->count, 1;
 };
 
 subtest 'search does not show user from another council' => sub {
     FixMyStreet::override_config {
         ALLOWED_COBRANDS => [ 'oxfordshire' ],
     }, sub {
+        $superuser->update({ from_body => $oxfordshire->id });
         $mech->get_ok('/admin/users');
-        $mech->get_ok('/admin/users?search=' . $user->name);
+        $mech->content_lacks('Super User');
+        $superuser->update({ from_body => undef });
 
+        $mech->get_ok('/admin/users?search=' . $user->name);
         $mech->content_contains( "Searching found no users." );
 
         $mech->get_ok('/admin/users?search=' . $user->email);
@@ -101,6 +125,71 @@ subtest 'user_edit does not show user from another council' => sub {
         is $mech->res->code, 404, "got 404";
     };
 };
+
+$mech->log_out_ok;
+
+subtest 'user_edit redirects appropriately' => sub {
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => [ 'oxfordshire' ],
+        MAPIT_URL => 'http://mapit.uk/',
+    }, sub {
+        $user2->update({ from_body => $oxfordshire->id });
+        $user3->update({ from_body => $oxfordshire->id });
+        $user3->user_body_permissions->create( {
+            body => $oxfordshire,
+            permission_type => 'user_edit',
+        } );
+        $user3->user_body_permissions->create( {
+            body => $oxfordshire,
+            permission_type => 'user_assign_body',
+        } );
+        $mech->log_in_ok( $user3->email );
+
+        $mech->get_ok('/admin/users/' . $user2->id);
+        $mech->submit_form_ok( { with_fields => {
+            name => "Updated Name"
+        } } );
+        $user2->discard_changes;
+        is $user2->name, "Updated Name", "Name set correctly";
+        is $mech->uri->path, '/admin/users/' . $user2->id, 'redirected back to user form';
+
+        $mech->get_ok('/admin/users/' . $user2->id);
+        $mech->submit_form_ok( { with_fields => {
+            body => undef
+        } } );
+        $user2->discard_changes;
+        is $user2->from_body, undef, "from_body unset";
+        is $mech->uri->path, '/admin/users', 'redirected back to users list';
+
+        $mech->log_out_ok;
+    };
+};
+
+subtest 'user categories are cleared when from_body is unset' => sub {
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => [ 'oxfordshire' ],
+        MAPIT_URL => 'http://mapit.uk/',
+    }, sub {
+        $mech->log_in_ok( $user3->email );
+
+        my $cat1 = $mech->create_contact_ok( body_id => $oxfordshire->id, category => 'Traffic lights', email => 'lights@example.com' );
+        my $cat2 = $mech->create_contact_ok( body_id => $oxfordshire->id, category => 'Potholes', email => 'potholes@example.com' );
+        $user2->set_extra_metadata('categories', [ $cat1->id, $cat2->id ]);
+        $user2->from_body($oxfordshire->id);
+        $user2->update;
+
+        $mech->get_ok('/admin/users/' . $user2->id);
+        $mech->submit_form_ok( { with_fields => {
+            body => undef
+        } } );
+
+        $user2->discard_changes;
+        is $user2->from_body, undef, "from_body unset";
+        is $user2->get_extra_metadata('categories'), undef, "categories unset";
+    };
+};
+
+$mech->log_in_ok( $superuser->email );
 
 for my $test (
     {
@@ -157,6 +246,7 @@ for my $test (
     subtest $test->{desc} => sub {
         $mech->get_ok('/admin/users');
         $mech->submit_form_ok( { with_fields => $test->{fields} } );
+        $mech->content_contains('Norman') if $test->{fields}{name};
         if ($test->{error}) {
             $mech->content_contains($_) for @{$test->{error}};
         } else {
@@ -166,7 +256,7 @@ for my $test (
 }
 
 my %default_perms = (
-    "permissions[moderate]" => undef,
+    "permissions[moderate]" => 'on',
     "permissions[planned_reports]" => undef,
     "permissions[report_mark_private]" => undef,
     "permissions[report_edit]" => undef,
@@ -180,14 +270,13 @@ my %default_perms = (
     "permissions[contribute_as_body]" => undef,
     "permissions[default_to_body]" => undef,
     "permissions[view_body_contribute_details]" => undef,
-    "permissions[user_edit]" => undef,
+    "permissions[user_edit]" => 'on',
     "permissions[user_manage_permissions]" => undef,
     "permissions[user_assign_body]" => undef,
     "permissions[user_assign_areas]" => undef,
     "permissions[template_edit]" => undef,
     "permissions[responsepriority_edit]" => undef,
     "permissions[category_edit]" => undef,
-    trusted_bodies => undef,
 );
 
 # Start this section with user having no name
@@ -202,7 +291,7 @@ FixMyStreet::override_config {
             desc => 'edit user name',
             fields => {
                 name => '',
-                email => 'test@example.com',
+                email => $user->email,
                 email_verified => 1,
                 body => $haringey->id,
                 phone => '',
@@ -211,6 +300,7 @@ FixMyStreet::override_config {
                 is_superuser => undef,
                 area_ids => undef,
                 %default_perms,
+                roles => $role->id,
             },
             changes => {
                 name => 'Changed User',
@@ -222,7 +312,7 @@ FixMyStreet::override_config {
             desc => 'edit user email',
             fields => {
                 name => 'Changed User',
-                email => 'test@example.com',
+                email => $user->email,
                 email_verified => 1,
                 body => $haringey->id,
                 phone => '',
@@ -231,6 +321,7 @@ FixMyStreet::override_config {
                 is_superuser => undef,
                 area_ids => undef,
                 %default_perms,
+                roles => $role->id,
             },
             changes => {
                 email => 'changed@example.com',
@@ -251,10 +342,14 @@ FixMyStreet::override_config {
                 is_superuser => undef,
                 area_ids => undef,
                 %default_perms,
+                roles => $role->id,
             },
             changes => {
                 body => $southend->id,
             },
+            removed => [
+                'roles',
+            ],
             log_count => 3,
             log_entries => [qw/edit edit edit/],
         },
@@ -339,6 +434,8 @@ FixMyStreet::override_config {
             },
             added => {
                 %default_perms,
+                'permissions[moderate]' => undef,
+                'permissions[user_edit]' => undef,
             },
             log_count => 5,
             log_entries => [qw/edit edit edit edit edit/],
@@ -394,7 +491,7 @@ FixMyStreet::override_config {
         $mech->create_problems_for_body(2, 2514, 'Title', { user => $existing_user });
         my $count = FixMyStreet::DB->resultset('Problem')->search({ user_id => $user->id })->count;
         $mech->get_ok( '/admin/users/' . $user->id );
-        $mech->submit_form_ok( { with_fields => { email => 'existing@example.com' } }, 'submit email change' );
+        $mech->submit_form_ok( { with_fields => { email => $existing_user->email } }, 'submit email change' );
         is $mech->uri->path, '/admin/users/' . $existing_user->id, 'redirected';
         my $p = FixMyStreet::DB->resultset('Problem')->search({ user_id => $existing_user->id })->count;
         is $p, $count + 2, 'reports merged';
@@ -448,7 +545,7 @@ subtest "Send login email from admin for unverified email" => sub {
 
     is $email->header('Subject'), "Your FixMyStreet account details",
       "subject is correct";
-    is $email->header('To'), 'test@example.com', "to is correct";
+    is $email->header('To'), $user->email, "to is correct";
 
     my $link = $mech->get_link_from_email($email);
 
@@ -470,7 +567,10 @@ subtest "Send login email from admin for unverified email" => sub {
 };
 
 subtest "Anonymizing user from admin" => sub {
-    $mech->create_problems_for_body(4, 2237, 'Title');
+    my ($problem) = $mech->create_problems_for_body(4, 2237, 'Title');
+    $mech->create_comment_for_problem($problem, $user, $user->name, 'An update', 'f', 'confirmed', 'confirmed');
+    $mech->create_comment_for_problem($problem, $user, $user->name, '2nd update', 't', 'confirmed', 'fixed - user');
+    $mech->create_comment_for_problem($problem, $user, $user->name, '3rd update', 'f', 'unconfirmed', 'confirmed');
     my $count_p = FixMyStreet::DB->resultset('Problem')->search({ user_id => $user->id })->count;
     my $count_u = FixMyStreet::DB->resultset('Comment')->search({ user_id => $user->id })->count;
     $mech->get_ok( '/admin/users/' . $user->id );
@@ -490,6 +590,12 @@ subtest "Hiding user's reports from admin" => sub {
     is $c, $count_p;
     $c = FixMyStreet::DB->resultset('Comment')->search({ user_id => $user->id, state => 'hidden' })->count;
     is $c, $count_u;
+};
+
+subtest "Hiding user with only unconfirmed updates does not error" => sub {
+    FixMyStreet::DB->resultset('Comment')->search({ user_id => $user->id, state => 'hidden' })->update({ state => 'unconfirmed' });
+    $mech->get_ok( '/admin/users/' . $user->id );
+    $mech->submit_form_ok({ button => 'hide_everywhere' });
 };
 
 subtest "Logging user out" => sub {
@@ -578,6 +684,27 @@ subtest "can edit list of user's alerts" => sub {
 
 subtest "View timeline" => sub {
     $mech->get_ok('/admin/timeline');
+};
+
+subtest 'View user log' => sub {
+    my $p = FixMyStreet::DB->resultset('Problem')->search({ user_id => $user->id })->first;
+    $user->add_to_planned_reports($p);
+
+    # User 1 created all the reports
+    my $id = $p->id;
+    $mech->get_ok('/admin/users?search=' . $user->email);
+    $mech->follow_link_ok({ text => 'Timeline', n => 2 });
+    $mech->content_like(qr/Problem.*?>$id<\/a> created/);
+    $mech->content_like(qr/Problem.*?>$id<\/a> added to shortlist/);
+
+    # User 3 edited user 2 above
+    $mech->get_ok('/admin/users/' . $user3->id . '/log');
+    $mech->content_like(qr/Edited user.*?test2\@example/);
+
+    # Superuser added a user, and merged one
+    $mech->get_ok('/admin/users/' . $superuser->id . '/log');
+    $mech->content_like(qr/Added user.*?0156/);
+    $mech->content_like(qr/Merged user $original_user_id/);
 };
 
 done_testing();

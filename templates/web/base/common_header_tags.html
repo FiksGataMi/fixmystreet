@@ -1,6 +1,13 @@
 [% SET start = c.config.ADMIN_BASE_URL IF admin %]
 
 <meta http-equiv="content-type" content="text/html; charset=utf-8">
+<link rel="manifest" href="/.well-known/manifest.webmanifest">
+[% IF manifest_theme %]
+    <meta name='theme-color' content='[% manifest_theme.theme_colour %]'>
+    [% FOREACH icon IN manifest_theme.icons %]
+        <link rel="apple-touch-icon" sizes="[% icon.sizes %]" href="[% icon.src %]">
+    [% END %]
+[% END %]
 
 [% IF csrf_token %]
   <meta content="[% csrf_token %]" name="csrf-token" />
@@ -15,6 +22,14 @@
     (function(a){a=a.documentElement;a.className=a.className.replace(/\bno-js\b/,"js");var b=-1<a.className.indexOf("ie8");b=Modernizr.mq("(min-width: 48em)")||b?"desktop":"mobile";"IntersectionObserver"in window&&(a.className+=" lazyload");"mobile"==b&&(a.className+=' mobile[% " map-fullscreen only-map map-reporting" IF page == "around" %]')})(document);
 </script>
 
+<script nonce="[% csp_nonce %]">
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function() {
+        navigator.serviceWorker.register('/service-worker.js');
+    });
+}
+</script>
+
 [% IF robots %]
     <meta name="robots" content="[% robots %]">
 [% ELSIF c.config.STAGING_SITE %]
@@ -23,10 +38,7 @@
 
 [% INCLUDE 'header_rss.html' %]
 
-<title>
-    [% "$title :: " | html IF title %]
-    [% site_name -%]
-</title>
+[% INCLUDE 'header/title.html' %]
 
 [% IF bodyclass.match('frontpage') %]
     <link rel="prefetch" href="[% version('/js/validation_rules.js') %]">

@@ -25,7 +25,7 @@ my $dt = DateTime->new(
     second => 23
 );
 
-my $report = FixMyStreet::App->model('DB::Problem')->find_or_create(
+my $report = FixMyStreet::DB->resultset('Problem')->find_or_create(
     {
         postcode           => 'SW1A 1AA',
         bodies_str         => '2504',
@@ -53,7 +53,7 @@ my $report = FixMyStreet::App->model('DB::Problem')->find_or_create(
 my $report_id = $report->id;
 ok $report, "created test report - $report_id";
 
-my $alert = FixMyStreet::App->model('DB::Alert')->find_or_create(
+my $alert = FixMyStreet::DB->resultset('Alert')->find_or_create(
     {
         alert_type => 'area_problems',
         parameter => 2482,
@@ -65,34 +65,34 @@ my $alert = FixMyStreet::App->model('DB::Alert')->find_or_create(
 $mech->log_in_ok( $superuser->email );
 
 subtest 'check summary counts' => sub {
-    my $problems = FixMyStreet::App->model('DB::Problem')->search( { state => { -in => [qw/confirmed fixed closed investigating planned/, 'in progress', 'fixed - user', 'fixed - council'] } } );
+    my $problems = FixMyStreet::DB->resultset('Problem')->search( { state => { -in => [qw/confirmed fixed closed investigating planned/, 'in progress', 'fixed - user', 'fixed - council'] } } );
 
     ok $mech->host('www.fixmystreet.com');
 
     my $problem_count = $problems->count;
     $problems->update( { cobrand => '' } );
 
-    FixMyStreet::App->model('DB::Problem')->search( { bodies_str => 2489 } )->update( { bodies_str => 1 } );
+    FixMyStreet::DB->resultset('Problem')->search( { bodies_str => 2489 } )->update( { bodies_str => 1 } );
 
-    my $q = FixMyStreet::App->model('DB::Questionnaire')->find_or_new( { problem => $report, });
+    my $q = FixMyStreet::DB->resultset('Questionnaire')->find_or_new( { problem => $report, });
     $q->whensent( \'current_timestamp' );
     $q->in_storage ? $q->update : $q->insert;
 
-    my $alerts =  FixMyStreet::App->model('DB::Alert')->search( { confirmed => { '>' => 0 } } );
+    my $alerts =  FixMyStreet::DB->resultset('Alert')->search( { confirmed => { '>' => 0 } } );
     my $a_count = $alerts->count;
 
     FixMyStreet::override_config {
         ALLOWED_COBRANDS => [ 'fixmystreet' ],
     }, sub {
-        $mech->get_ok('/admin');
+        $mech->get_ok('/admin/stats');
     };
 
-    $mech->title_like(qr/Summary/);
+    $mech->title_like(qr/Stats/);
 
     $mech->content_contains( "$problem_count</strong> live problems" );
     $mech->content_contains( "$a_count confirmed alerts" );
 
-    my $questionnaires = FixMyStreet::App->model('DB::Questionnaire')->search( { whensent => { -not => undef } } );
+    my $questionnaires = FixMyStreet::DB->resultset('Questionnaire')->search( { whensent => { -not => undef } } );
     my $q_count = $questionnaires->count();
 
     $mech->content_contains( "$q_count questionnaires sent" );
@@ -102,8 +102,8 @@ subtest 'check summary counts' => sub {
     }, sub {
         ok $mech->host('oxfordshire.fixmystreet.com');
 
-        $mech->get_ok('/admin');
-        $mech->title_like(qr/Summary/);
+        $mech->get_ok('/admin/stats');
+        $mech->title_like(qr/Stats/);
 
         my ($num_live) = $mech->content =~ /(\d+)<\/strong> live problems/;
         my ($num_alerts) = $mech->content =~ /(\d+) confirmed alerts/;
@@ -116,7 +116,7 @@ subtest 'check summary counts' => sub {
         $alert->cobrand('oxfordshire');
         $alert->update;
 
-        $mech->get_ok('/admin');
+        $mech->get_ok('/admin/stats');
 
         $mech->content_contains( ($num_live+1) . "</strong> live problems" );
         $mech->content_contains( ($num_alerts+1) . " confirmed alerts" );
@@ -130,12 +130,12 @@ subtest 'check summary counts' => sub {
         $alert->update;
     };
 
-    FixMyStreet::App->model('DB::Problem')->search( { bodies_str => 1 } )->update( { bodies_str => 2489 } );
+    FixMyStreet::DB->resultset('Problem')->search( { bodies_str => 1 } )->update( { bodies_str => 2489 } );
     ok $mech->host('www.fixmystreet.com');
 };
 
 subtest "Check admin_base_url" => sub {
-    my $rs = FixMyStreet::App->model('DB::Problem');
+    my $rs = FixMyStreet::DB->resultset('Problem');
     my $cobrand = $report->get_cobrand_logged;
 
     is ($report->admin_url($cobrand),

@@ -342,7 +342,7 @@ underway’ and ‘This issue is now closed’.
 
 From the report page, staff with the appropriate permissions may select from the ‘public update’
 dropdown. This will prefill an update with template text for one of a number of common statuses.
-The templates are created by the Administrator; see ‘[Creating response templates](#creating-and-editing-priorities)’.
+The templates are created by the Administrator; see ‘[Creating response templates](#creating-editing-response-templates)’.
 
 The text in template responses is fully editable on the report page, so staff may also choose to add
 their own comments or edit the preformatted responses to reflect the precise circumstances of the
@@ -379,7 +379,7 @@ details' must be ticked.</span>
 #### Setting a priority
 From the panel on the right hand side of a report, staff with the appropriate permissions may
 select a priority from a drop-down list. These priorities are created by Administrator-level users;
-see ‘[Setting categories and priorities](#creating-and-editing-priorities) ’.
+see ‘[Setting categories and priorities](#creating-editing-priorities) ’.
 
 </div>
 
@@ -468,7 +468,7 @@ To synchronise your records once you're back online, just visit any page on FixM
 
 #### Creating a staff account
 
-<span class="admin-task__permissions">Permissions required: User must be marked as staff; ‘Edit other users’ permissions’ must be ticked.</span>
+<span class="admin-task__permissions">Permissions required: User must be marked as staff; ‘Edit users’ details’ must be ticked.</span>
 
 <img alt="From the user admin page you can administer staff accounts" src="/assets/img/pro-user-guide/user-admin-page.png" class="admin-screenshot" />
 
@@ -478,29 +478,43 @@ You’ll see a table of existing users. Below this is the ‘add user’ interfa
 
 First create the basic user account by inputting a name and email address, plus any other contact
 details desired. Once this is done and you have saved the input, you can edit the account to assign
-any permissions required.
+any roles or permissions required.
 
 You can use the same form to create a user account for a resident or a member of staff, so tick
 ‘staff user’ if you wish to create an admin account.
 
 The new staff user can then log in via the normal method.
 
-#### Assigning permissions
+#### Creating roles
+
+<span class="admin-task__permissions">Permissions required: User must be marked as staff; ‘Edit other users' permissions must be ticked.</span>
+
+Go to the ‘Roles’ tab in the admin menu.
+
+Here you can create a group of permissions, called a ‘role’. See [Staff user
+accounts](../staff-user-accounts/) for some possible examples, but you can use
+whatever makes sense to your own organisation.
+
+Once you have created a role, you can then assign a user to one or more roles
+to give that user access to all the permissions of those roles, without having
+to assign permissions individually for each user.
+
+#### Assigning roles and permissions
 
 <span class="admin-task__permissions">Permissions required: User must be marked as staff; ‘Edit other users' permissions must be ticked.</span>
 
 <img alt="You can assign permissions to users on this screen" src="/assets/img/pro-user-guide/user-admin-permissions.png" class="admin-screenshot" />
 
 Once you have created the basic staff user account, you’ll be taken to a page where you can assign
-permissions.
+roles and permissions.
 
 You can also always edit any user from the table at the top of the Users page by clicking ‘edit’.
-Check the boxes relating to the permissions you wish that user to have, and click ‘submit changes’.
+Select the roles or permissions you wish that user to have, and click ‘submit changes’.
 
 
 #### Setting categories or areas
 
-<span class="admin-task__permissions">Permissions required: User must be marked as staff; ‘Edit other users' permissions’ must be ticked.</span>
+<span class="admin-task__permissions">Permissions required: User must be marked as staff; ‘Assign users to areas’ must be ticked (for areas).</span>
 
 <img alt="You can allocate categories to individual users by checking the relevant category boxes" src="/assets/img/pro-user-guide/user-admin-categories.png" class="admin-screenshot" />
 
@@ -550,6 +564,13 @@ that, a form by which you can create new ones.
 Input a title for the category, and the email address to which reports in that category should be
 forwarded. When creating a category, these are the only fields required.
 
+You can also choose a variety of options – whether to automatically hide any
+reports made in this category, whether to prevent form submission when this
+category is selected, or what parent category or categories a particular
+category is in. See below for information on <a
+href="#creating-editing-notices">creating/editing extra notices and
+questions</a> for a category.
+
 You can set up as many or as few categories as you like, and each category can have its own email
 address attached to it, so for example, reports about potholes may go to one council email
 address, while reports about road signs go to another. More than one category may share the
@@ -579,22 +600,63 @@ ticked.</span>
 You can edit categories at any time by clicking on their title within the table at the top of the
 Categories page.
 
-From here, you can:
+From here, you can change the email address that the reports in this category are routed to,
+or any of the other options for the category.
 
-- Change the email address that the reports in this category are routed to
-- Set the category’s ‘state’ to Confirmed, Unconfirmed, Inactive or Deleted. This can be
-    useful when categories are discontinued or changed, for example if responsibilities are
-    transferred to another council, or your own council reconfigures its departments.
-  - **Confirmed** ​ indicates that the email address has been verified as correct.
-  - **Inactive** ​ will remove the category from use when reporting problems, but keep it
-          available in map filters. It’s useful for categories which have been discontinued,
-          but which you’d still like users to to be able to view data on.
-  - **Deleted** ​ will remove the category from use, and from map filters. Use this if you
-          want to discontinue a category and have no need for it to appear on the site.
-  - **Unconfirmed** ​ is for categories where the attached email address has not been
-    verified as correct. This option is not commonly used by councils. Reports sent to
-    unconfirmed categories are not routed to the council; instead, an alert email is
-    sent to mySociety staff.
+</div>
+
+<div class="admin-task" markdown="1" id="creating-editing-notices">
+
+### Creating and editing category notices and questions
+
+<div class="boxout" markdown="1">
+
+#### Note
+
+If your FixMyStreet Pro installation has been integrated with a CRM system, some of this
+section may not not apply, e.g. extra questions may be pulled directly from the backend.
+
+</div>
+
+<span class="admin-task__permissions">Permissions required: User must be marked as staff; “Add/edit problem categories” must be
+ticked.</span>
+
+Each category can have additional notices and questions associated with it, called “Extra data”.
+You can add as many as necessary (though we do recommend as few as possible, to stop people
+being put off from filling in your form), reorder them, and update them. No extra data answers
+are shown in public by default.
+
+<img alt="Control the extra notices and questions the site displays when a report is made in this category"
+    src="/assets/img/pro-user-guide/edit-category-notice.png" class="admin-screenshot" />
+
+#### Notices
+
+A notice is some text that is displayed to the user when the category is
+selected. This can be used to provide extra information about the category,
+point specific cases elsewhere (e.g. a phone number for urgent enquiries), or
+anything else you think the reporter may find useful.
+
+#### Questions
+
+A question can ask the user to provide some specific additional information
+that you require in order to treat the problem appropriately, such as what
+specific type of issue is being reported, or some additional details you
+require to take the report forward. It can either be a free-text field, or a
+drop-down, where you can specify the options to be picked from.
+
+You can also selectively disable the form submission process based upon a
+drop-down question answer - for example, if you had a question asking if the
+situation was dangerous, you could disable the form if the reporter answered
+Yes and display a message asking the user to ring a number instead.
+
+#### Hidden/internal data fields
+
+As well as questions and notices, you can set up hidden and internal data
+fields.  A hidden data field will be output in the reporting form HTML (so e.g.
+clicking on a map asset could fill this field with the asset’s ID), whereas an
+internal data field is not output in the HTML (this is for special fields that
+your server knows to accept, e.g. different co-ordinate systems, special
+handling of textual input, and so on).
 
 </div>
 
@@ -680,9 +742,18 @@ the ‘Resolved’ status update text is automatically applied. While this funct
 time-saver, we advise using it with caution to ensure that the template text is applicable to every
 situation in which is will be automatically applied.
 
-If you have an Open311 connection, you can click ‘auto-response’ so that a template will be
-applied when the state is updated by the automated Open311 process.
+If you have an Open311 connection, you can click ‘auto-response’ so that a
+template will be applied when the state is updated by the automated Open311
+process. In this instance, if your Open311 server returns extra text as part of
+the update, you may put the placeholder `{% raw %}{{description}}{% endraw %}` in the template here,
+and that placeholder will be replaced by the text from the Open311 server.
 
+If you don’t have an Open311 connection, or your Open311 connection does not
+provide an immediate initial update, there is a special case where if a
+template is assigned to the Open state, and marked as ‘auto-response’, then it
+will automatically be added as a first update to any new report created that
+matches the template (ie. in the relevant category if assigned). This lets
+you give e.g. estimated timescales or other useful information up front.
 
 #### Editing or deleting a template
 

@@ -5,20 +5,11 @@ use parent 'FixMyStreet::Cobrand::Default';
 
 sub council_area_id { 1 }
 
-
-package FixMyStreet::Cobrand::TesterGroups;
-
-use parent 'FixMyStreet::Cobrand::Default';
-
-sub council_area_id { 1 }
-
-sub enable_category_groups { 1 }
-
-
 package main;
 
 use FixMyStreet::Test;
 use FixMyStreet::DB;
+use Test::Warn;
 use utf8;
 
 use_ok( 'Open311::PopulateServiceList' );
@@ -44,20 +35,23 @@ $bromley->body_areas->create({
 } );
 
 my $bucks = FixMyStreet::DB->resultset('Body')->create({
-    name => 'Buckinghamshire County Council',
+    name => 'Buckinghamshire Council',
 });
 $bucks->body_areas->create({
     area_id => 2217
 });
 
 for my $test (
-    { desc => 'groups not set for new contacts', cobrand => 'tester', groups => 0, delete => 1 },
-    { desc => 'groups set for new contacts', cobrand => 'testergroups', groups => 1, delete => 1},
-    { desc => 'groups removed for existing contacts', cobrand => 'tester', groups => 0, delete => 0 },
-    { desc => 'groups added for existing contacts', cobrand => 'testergroups', groups => 1, delete => 0},
+    { desc => 'groups not set for new contacts', enable_groups => 0, groups => 0, delete => 1 },
+    { desc => 'groups set for new contacts', enable_groups => 1, groups => 1, delete => 1},
+    { desc => 'groups removed for existing contacts', enable_groups => 0, groups => 0, delete => 0 },
+    { desc => 'groups added for existing contacts', enable_groups => 1, groups => 1, delete => 0},
 ) {
     FixMyStreet::override_config {
-        ALLOWED_COBRANDS => [ $test->{cobrand} ],
+        ALLOWED_COBRANDS => [ 'tester' ],
+        COBRAND_FEATURES => {
+           category_groups => { tester => $test->{enable_groups} },
+        }
     }, sub {
         subtest 'check basic functionality, ' . $test->{desc} => sub {
             FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->delete() if $test->{delete};
@@ -82,6 +76,104 @@ for my $test (
         };
     };
 }
+
+my $last_update = {};
+for my $test (
+    { desc => 'set multiple groups for contact', enable_multi => 1, groups => ['sanitation', 'street']  },
+    { desc => 'groups not edited if unchanged', enable_multi => 1, groups => ['sanitation', 'street'], unchanged => 1  },
+) {
+    subtest $test->{desc} => sub {
+        FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->delete();
+
+        my $services_xml = '<?xml version="1.0" encoding="utf-8"?>
+        <services>
+          <service>
+            <service_code>100</service_code>
+            <service_name>Cans left out 24x7</service_name>
+            <description>Garbage or recycling cans that have been left out for more than 24 hours after collection. Violators will be cited.</description>
+            <metadata>false</metadata>
+            <type>realtime</type>
+            <keywords>lorem, ipsum, dolor</keywords>
+            <groups><group>sanitation</group><group>street</group></groups>
+          </service>
+          <service>
+            <service_code>002</service_code>
+            <metadata>false</metadata>
+            <type>realtime</type>
+            <keywords>lorem, ipsum, dolor</keywords>
+            <group>street</group>
+            <service_name>Construction plate shifted</service_name>
+            <description>Metal construction plate covering the street or sidewalk has been moved.</description>
+          </service>
+        </services>
+        ';
+
+        my $service_list = get_xml_simple_object($services_xml);
+
+        FixMyStreet::override_config {
+            ALLOWED_COBRANDS => [ 'tester' ],
+            COBRAND_FEATURES => {
+               category_groups => { tester => 1 },
+            }
+        }, sub {
+            my $processor = Open311::PopulateServiceList->new();
+            $processor->_current_body( $body );
+            $processor->process_services( $service_list );
+        };
+        my $contact_count = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->count();
+        is $contact_count, 2, 'correct number of contacts';
+
+        my $contact = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id, email => 100 } )->first;
+        is_deeply $contact->get_extra->{group}, $test->{groups}, "Multi groups set correctly";
+        if ($test->{unchanged}) {
+            is $contact->whenedited, $last_update->{100}, "contact unchanged";
+        }
+        $last_update->{100} = $contact->whenedited;
+
+        $contact = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id, email => '002'} )->first;
+        is $contact->get_extra->{group}, 'street', "Single groups set correctly";
+        if ($test->{unchanged}) {
+            is $contact->whenedited, $last_update->{002}, "contact unchanged";
+        }
+        $last_update->{002} = $contact->whenedited;
+    };
+}
+
+subtest "set multiple groups with groups element" => sub {
+    FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->delete();
+
+    my $services_xml = '<?xml version="1.0" encoding="utf-8"?>
+    <services>
+      <service>
+        <service_code>100</service_code>
+        <service_name>Cans left out 24x7</service_name>
+        <description>Garbage or recycling cans that have been left out for more than 24 hours after collection. Violators will be cited.</description>
+        <metadata>false</metadata>
+        <type>realtime</type>
+        <keywords>lorem, ipsum, dolor</keywords>
+        <groups><group>sanitation &amp; cleaning</group><group>street</group></groups>
+      </service>
+    </services>
+    ';
+
+    my $service_list = get_xml_simple_object($services_xml);
+
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => [ 'tester' ],
+        COBRAND_FEATURES => {
+           category_groups => { tester => 1 },
+        }
+    }, sub {
+        my $processor = Open311::PopulateServiceList->new();
+        $processor->_current_body( $body );
+        $processor->process_services( $service_list );
+    };
+    my $contact_count = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->count();
+    is $contact_count, 1, 'correct number of contacts';
+
+    my $contact = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id, email => 100 } )->first;
+    is_deeply $contact->get_extra->{group}, ['sanitation & cleaning','street'], "groups set correctly";
+};
 
 subtest 'check non open311 contacts marked as deleted' => sub {
     FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->delete();
@@ -225,6 +317,153 @@ subtest 'check conflicting contacts not changed' => sub {
     is $contact_count, 4, 'correct number of contacts';
 };
 
+subtest 'check new category marked non_public' => sub {
+    FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->delete();
+
+    my $services_xml = '<?xml version="1.0" encoding="utf-8"?>
+    <services>
+      <service>
+        <service_code>100</service_code>
+        <service_name>Cans left out 24x7</service_name>
+        <description>Garbage or recycling cans that have been left out for more than 24 hours after collection. Violators will be cited.</description>
+        <metadata>false</metadata>
+        <type>realtime</type>
+        <keywords>private</keywords>
+        <group>sanitation</group>
+      </service>
+    </services>
+        ';
+
+    my $service_list = get_xml_simple_object( $services_xml );
+
+    my $processor = Open311::PopulateServiceList->new();
+    $processor->_current_body( $body );
+    $processor->process_services( $service_list );
+
+    my $contact_count = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->count();
+    is $contact_count, 1, 'correct number of contacts';
+
+    my $contact = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->first;
+    is $contact->email, '100', 'email correct';
+    is $contact->category, 'Cans left out 24x7', 'category correct';
+    is $contact->non_public, 1, 'contact marked as non_public';
+};
+
+subtest 'check protected categories do not have name/group overwritten' => sub {
+    my $contact = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->first;
+    $contact->set_extra_metadata('open311_protect', 1);
+    $contact->set_extra_metadata('group', [ 'sanitation' ]);
+    $contact->non_public(0);
+    $contact->update;
+
+    my $services_xml = '<?xml version="1.0" encoding="utf-8"?>
+    <services>
+      <service>
+        <service_code>100</service_code>
+        <service_name>Cans left out constantly</service_name>
+        <description>Garbage or recycling cans that have been left out for more than 24 hours after collection. Violators will be cited.</description>
+        <metadata>false</metadata>
+        <type>realtime</type>
+        <keywords>private</keywords>
+        <group>cleansing</group>
+      </service>
+    </services>
+        ';
+
+    my $service_list = get_xml_simple_object( $services_xml );
+
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => [ 'tester' ],
+        COBRAND_FEATURES => {
+           category_groups => { tester => 1 },
+        }
+    }, sub {
+        my $processor = Open311::PopulateServiceList->new();
+        $processor->_current_body( $body );
+        $processor->process_services( $service_list );
+    };
+
+    my $contact_count = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->count();
+    is $contact_count, 1, 'correct number of contacts';
+
+    $contact->discard_changes;
+    is $contact->email, '100', 'email correct';
+    is $contact->category, 'Cans left out 24x7', 'category unchanged';
+    is_deeply $contact->groups, ['sanitation'], 'group unchanged';
+    # test that something did change
+    is $contact->non_public, 1, 'contact marked as non_public';
+};
+
+
+subtest 'check existing category marked non_public' => sub {
+    my $contact = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->first;
+    $contact->update({
+        non_public => 0
+    });
+    is $contact->non_public, 0, 'contact not marked as non_public';
+
+    my $services_xml = '<?xml version="1.0" encoding="utf-8"?>
+    <services>
+      <service>
+        <service_code>100</service_code>
+        <service_name>Cans left out 24x7</service_name>
+        <description>Garbage or recycling cans that have been left out for more than 24 hours after collection. Violators will be cited.</description>
+        <metadata>false</metadata>
+        <type>realtime</type>
+        <keywords>private</keywords>
+        <group>sanitation</group>
+      </service>
+    </services>
+        ';
+
+    my $service_list = get_xml_simple_object( $services_xml );
+
+    my $processor = Open311::PopulateServiceList->new();
+    $processor->_current_body( $body );
+    $processor->process_services( $service_list );
+
+    my $contact_count = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->count();
+    is $contact_count, 1, 'correct number of contacts';
+
+    $contact->discard_changes;
+    is $contact->email, '100', 'email correct';
+    is $contact->category, 'Cans left out 24x7', 'category correct';
+    is $contact->non_public, 1, 'contact changed to non_public';
+};
+
+subtest 'check existing non_public category does not get marked public' => sub {
+    my $contact = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->first;
+    is $contact->non_public, 1, 'contact marked as non_public';
+
+    my $services_xml = '<?xml version="1.0" encoding="utf-8"?>
+    <services>
+      <service>
+        <service_code>100</service_code>
+        <service_name>Cans left out 24x7</service_name>
+        <description>Garbage or recycling cans that have been left out for more than 24 hours after collection. Violators will be cited.</description>
+        <metadata>false</metadata>
+        <type>realtime</type>
+        <keywords></keywords>
+        <group>sanitation</group>
+      </service>
+    </services>
+        ';
+
+    my $service_list = get_xml_simple_object( $services_xml );
+
+    my $processor = Open311::PopulateServiceList->new();
+    $processor->_current_body( $body );
+    $processor->process_services( $service_list );
+
+    my $contact_count = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->count();
+    is $contact_count, 1, 'correct number of contacts';
+
+    $contact->discard_changes;
+    is $contact->email, '100', 'email correct';
+    is $contact->category, 'Cans left out 24x7', 'category correct';
+    is $contact->non_public, 1, 'contact remains non_public';
+};
+
 for my $test (
     {
         desc => 'check meta data added to existing contact',
@@ -237,7 +476,7 @@ for my $test (
                 required => 'true',
                 datatype_description => 'Type of bin',
                 order => 1,
-                description => 'Type of bin'
+                description => 'Type of <b>bin</b>'
 
         } ],
         meta_xml => '<?xml version="1.0" encoding="utf-8"?>
@@ -251,7 +490,7 @@ for my $test (
                 <required>true</required>
                 <datatype_description>Type of bin</datatype_description>
                 <order>1</order>
-                <description>Type of bin</description>
+                <description>&lt;type&gt;Type&lt;/type&gt; of &lt;b&gt;bin&lt;/b&gt;</description>
             </attribute>
         </attributes>
     </service_definition>
@@ -365,6 +604,134 @@ for my $test (
                 <order>1</order>
                 <description>Type of bin</description>
             </attribute>
+        </attributes>
+    </service_definition>
+        ',
+    },
+    {
+        desc => 'check protected meta data not overwritten',
+        has_meta => 1,
+        end_meta => [ {
+                variable => 'true',
+                code => 'type',
+                datatype => 'string',
+                required => 'true',
+                datatype_description => 'Bin type',
+                order => 1,
+                description => 'Bin type',
+                protected => 'true'
+
+        } ],
+        orig_meta => [ {
+                variable => 'true',
+                code => 'type',
+                datatype => 'string',
+                required => 'true',
+                datatype_description => 'Bin type',
+                order => 1,
+                description => 'Bin type',
+                protected => 'true'
+
+        } ],
+        meta_xml => '<?xml version="1.0" encoding="utf-8"?>
+    <service_definition>
+        <service_code>100</service_code>
+        <attributes>
+            <attribute>
+                <variable>true</variable>
+                <code>type</code>
+                <datatype>string</datatype>
+                <required>true</required>
+                <datatype_description>Type of bin</datatype_description>
+                <order>1</order>
+                <description>Type of bin</description>
+            </attribute>
+        </attributes>
+    </service_definition>
+        ',
+    },
+    {
+        desc => 'check protected meta data retained',
+        has_meta => 1,
+        end_meta => [
+            {
+                variable => 'true',
+                code => 'type2',
+                datatype => 'string',
+                required => 'true',
+                datatype_description => 'Type of bin',
+                order => 1,
+                description => 'Type of bin',
+
+            },
+            {
+                variable => 'true',
+                code => 'type',
+                datatype => 'string',
+                required => 'true',
+                datatype_description => 'Number of bin',
+                order => 1,
+                description => 'Number of bin',
+                protected => 'true'
+            },
+        ],
+        orig_meta => [ {
+                variable => 'true',
+                code => 'type',
+                datatype => 'string',
+                required => 'true',
+                datatype_description => 'Number of bin',
+                order => 1,
+                description => 'Number of bin',
+                protected => 'true'
+
+        } ],
+        meta_xml => '<?xml version="1.0" encoding="utf-8"?>
+    <service_definition>
+        <service_code>100</service_code>
+        <attributes>
+            <attribute>
+                <variable>true</variable>
+                <code>type2</code>
+                <datatype>string</datatype>
+                <required>true</required>
+                <datatype_description>Type of bin</datatype_description>
+                <order>1</order>
+                <description>Type of bin</description>
+            </attribute>
+        </attributes>
+    </service_definition>
+        ',
+    },
+    {
+        desc => 'check protected meta data retained on removal of all Open311 extras',
+        end_meta => [
+            {
+                variable => 'true',
+                code => 'type',
+                datatype => 'string',
+                required => 'true',
+                datatype_description => 'Number of bin',
+                order => 1,
+                description => 'Number of bin',
+                protected => 'true'
+            },
+        ],
+        orig_meta => [ {
+                variable => 'true',
+                code => 'type',
+                datatype => 'string',
+                required => 'true',
+                datatype_description => 'Number of bin',
+                order => 1,
+                description => 'Number of bin',
+                protected => 'true'
+
+        } ],
+        meta_xml => '<?xml version="1.0" encoding="utf-8"?>
+    <service_definition>
+        <service_code>100</service_code>
+        <attributes>
         </attributes>
     </service_definition>
         ',

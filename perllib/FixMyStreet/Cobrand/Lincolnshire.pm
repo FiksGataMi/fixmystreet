@@ -1,5 +1,5 @@
 package FixMyStreet::Cobrand::Lincolnshire;
-use parent 'FixMyStreet::Cobrand::UKCouncils';
+use parent 'FixMyStreet::Cobrand::Whitelabel';
 
 use strict;
 use warnings;
@@ -10,6 +10,7 @@ use Try::Tiny;
 use JSON::MaybeXS;
 
 use Moo;
+with 'FixMyStreet::Roles::ConfirmOpen311';
 with 'FixMyStreet::Roles::ConfirmValidation';
 
 sub council_area_id { return 2232; }
@@ -18,7 +19,6 @@ sub council_name { return 'Lincolnshire County Council'; }
 sub council_url { return 'lincolnshire'; }
 sub is_two_tier { 1 }
 
-sub enable_category_groups { 1 }
 sub send_questionnaires { 0 }
 sub report_sent_confirmation_email { 'external_id' }
 
@@ -27,23 +27,6 @@ sub admin_user_domain { 'lincolnshire.gov.uk' }
 sub enter_postcode_text {
     my ($self) = @_;
     return 'Enter a Lincolnshire postcode, street name and area, or check an existing report number';
-}
-
-
-sub base_url {
-    my $self = shift;
-    return $self->next::method() if FixMyStreet->config('STAGING_SITE');
-    return 'https://fixmystreet.lincolnshire.gov.uk';
-}
-
-sub contact_email {
-    my $self = shift;
-    return join( '@', 'confirm_support', 'lincolnshire.gov.uk' );
-}
-
-
-sub example_places {
-    return ( 'LN1 1YL', 'Orchard Street, Lincoln' );
 }
 
 sub disambiguate_location {
@@ -58,33 +41,6 @@ sub disambiguate_location {
     };
 }
 
-
-sub open311_config {
-    my ($self, $row, $h, $params) = @_;
-
-    my $extra = $row->get_extra_fields;
-    push @$extra,
-        { name => 'report_url',
-          value => $h->{url} },
-        { name => 'title',
-          value => $row->title },
-        { name => 'description',
-          value => $row->detail };
-
-    # Reports made via FMS.com or the app probably won't have a site code
-    # value because we don't display the adopted highways layer on those
-    # frontends. Instead we'll look up the closest asset from the WFS
-    # service at the point we're sending the report over Open311.
-    if (!$row->get_extra_field_value('site_code')) {
-        if (my $site_code = $self->lookup_site_code($row)) {
-            push @$extra,
-                { name => 'site_code',
-                value => $site_code };
-        }
-    }
-
-    $row->set_extra_fields(@$extra);
-}
 
 sub lookup_site_code_config { {
     buffer => 200, # metres
@@ -101,7 +57,7 @@ sub categories_restriction {
     # Lincolnshire is a two-tier council, but don't want to display
     # all district-level categories on their cobrand - just a couple.
     return $rs->search( { -or => [
-        'body.name' => "Lincolnshire County Council",
+        'body.name' => [ "Lincolnshire County Council", 'Highways England' ],
 
         # District categories:
         'me.category' => { -in => [
@@ -110,8 +66,6 @@ sub categories_restriction {
         ] },
     ] } );
 }
-
-sub map_type { 'Lincolnshire' }
 
 sub pin_colour {
     my ( $self, $p, $context ) = @_;

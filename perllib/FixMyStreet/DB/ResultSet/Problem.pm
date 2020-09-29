@@ -141,7 +141,7 @@ sub _recent {
     $query->{photo} = { '!=', undef } if $photos;
 
     my $attrs = {
-        order_by => { -desc => 'coalesce(confirmed, created)' },
+        order_by => { -desc => \'coalesce(confirmed, created)' },
         rows => $num,
     };
 
@@ -155,10 +155,11 @@ sub _recent {
     } else {
         $probs = Memcached::get($key);
         if ($probs) {
-            # Need to reattach schema so that confirmed column gets reinflated.
-            $probs->[0]->result_source->schema( $rs->result_source->schema ) if $probs->[0];
-            # Catch any cached ones since hidden
-            $probs = [ grep { $_->photo && ! $_->is_hidden } @$probs ];
+            # Need to refetch to check if hidden since cached
+            $probs = [ $rs->search({
+                id => [ map { $_->id } @$probs ],
+                %$query,
+            }, $attrs)->all ];
         } else {
             $probs = [ $rs->search( $query, $attrs )->all ];
             Memcached::set($key, $probs, _cache_timeout());
@@ -207,11 +208,6 @@ sub around_map {
 sub timeline {
     my ( $rs ) = @_;
 
-    my $prefetch =
-        $rs->result_source->storage->sql_maker->quote_char ?
-        [ qw/user/ ] :
-        [];
-
     return $rs->search(
         {
             -or => {
@@ -221,7 +217,7 @@ sub timeline {
             }
         },
         {
-            prefetch => $prefetch,
+            prefetch => 'user',
         }
     );
 }
@@ -245,12 +241,9 @@ sub unique_users {
     return $rs->search( {
         state => [ FixMyStreet::DB::Result::Problem->visible_states() ],
     }, {
-        select => [ { distinct => 'user_id' } ],
-        as     => [ 'user_id' ]
-    } )->as_subselect_rs->search( undef, {
-        select => [ { count => 'user_id' } ],
-        as     => [ 'count' ]
-    } )->first->get_column('count');
+        columns => [ 'user_id' ],
+        distinct => 1,
+    } );
 }
 
 sub categories_summary {
@@ -273,7 +266,9 @@ sub categories_summary {
 sub include_comment_counts {
     my $rs = shift;
     my $order_by = $rs->{attrs}{order_by};
-    return $rs unless ref $order_by eq 'HASH' && $order_by->{-desc} eq 'comment_count';
+    return $rs unless
+        (ref $order_by eq 'ARRAY' && ref $order_by->[0] eq 'HASH' && $order_by->[0]->{-desc} eq 'comment_count')
+        || (ref $order_by eq 'HASH' && $order_by->{-desc} eq 'comment_count');
     $rs->search({}, {
         '+select' => [ {
             "" => \'(select count(*) from comment where problem_id=me.id and state=\'confirmed\')',

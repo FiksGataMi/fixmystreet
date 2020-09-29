@@ -1,3 +1,4 @@
+use utf8;
 use FixMyStreet::TestMech;
 
 my $mech = FixMyStreet::TestMech->new();
@@ -253,7 +254,7 @@ $report->geocode(
                                 'estimatedTotal' => 1
                               }
                             ],
-          'copyright' => "Copyright \x{a9} 2011 Microsoft and its suppliers. All rights reserved. This API cannot be accessed and the content and any results may not be used, reproduced or transmitted in any manner without express written permission from Microsoft Corporation.",
+          'copyright' => "Copyright © 2011 Microsoft and its suppliers. All rights reserved. This API cannot be accessed and the content and any results may not be used, reproduced or transmitted in any manner without express written permission from Microsoft Corporation.",
           'statusCode' => 200,
           'authenticationResultCode' => 'ValidCredentials'
         }
@@ -336,6 +337,8 @@ foreach my $test (
     };
 }
 
+my $hart = $mech->create_body_ok(2333, 'Hart');
+
 my $ward_alert = FixMyStreet::DB->resultset('Alert')->find_or_create(
     {
         user => $user,
@@ -350,7 +353,7 @@ my $ward_alert = FixMyStreet::DB->resultset('Alert')->find_or_create(
 my $report_to_council = FixMyStreet::DB->resultset('Problem')->find_or_create(
     {
         postcode           => 'WS13 6YY',
-        bodies_str         => '2434',
+        bodies_str         => $hart->id,
         areas              => ',105255,11806,11828,2247,2504,7117,',
         category           => 'Other',
         title              => 'council report',
@@ -374,7 +377,7 @@ my $report_to_council = FixMyStreet::DB->resultset('Problem')->find_or_create(
 my $report_to_county_council = FixMyStreet::DB->resultset('Problem')->find_or_create(
     {
         postcode           => 'WS13 6YY',
-        bodies_str         => '2240',
+        bodies_str         => '2227',
         areas              => ',105255,11806,11828,2247,2504,7117,',
         category           => 'Other',
         title              => 'county report',
@@ -429,21 +432,22 @@ subtest "check alerts from cobrand send main site url for alerts for different c
     )->delete;
 
     FixMyStreet::override_config {
+        ALLOWED_COBRANDS => ['hart', 'fixmystreet'],
+        BASE_URL => 'https://national.example.org',
         MAPIT_URL => 'http://mapit.uk/',
     }, sub {
         FixMyStreet::DB->resultset('AlertType')->email_alerts();
+
+        my $body = $mech->get_text_body_from_email;
+
+        my $expected1 = FixMyStreet->config('BASE_URL') . '/report/' . $report_to_county_council->id;
+        my $expected3 = FixMyStreet->config('BASE_URL') . '/report/' . $report_outside_district->id;
+        my $cobrand = FixMyStreet::Cobrand->get_class_for_moniker('hart')->new();
+        my $expected2 = $cobrand->base_url . '/report/' . $report_to_council->id;
+        like $body, qr#$expected1#, 'non cobrand area report point to fixmystreet.com';
+        like $body, qr#$expected2#, 'cobrand area report point to cobrand url';
+        like $body, qr#$expected3#, 'report outside district report point to fixmystreet.com';
     };
-
-    my $body = $mech->get_text_body_from_email;
-
-    my $expected1 = FixMyStreet->config('BASE_URL') . '/report/' . $report_to_county_council->id;
-    my $expected3 = FixMyStreet->config('BASE_URL') . '/report/' . $report_outside_district->id;
-    my $cobrand = FixMyStreet::Cobrand->get_class_for_moniker('hart')->new();
-    my $expected2 = $cobrand->base_url . '/report/' . $report_to_council->id;
-
-    like $body, qr#$expected1#, 'non cobrand area report point to fixmystreet.com';
-    like $body, qr#$expected2#, 'cobrand area report point to cobrand url';
-    like $body, qr#$expected3#, 'report outside district report point to fixmystreet.com';
 };
 
 
@@ -485,7 +489,7 @@ subtest "correct i18n-ed summary for state of closed" => sub {
     $mech->clear_emails_ok;
 
     $report->update( { state => 'closed' } );
-    $alert->update( { lang => 'nb', cobrand => 'fiksgatami' } );
+    $alert->update( { lang => 'sv', cobrand => 'fixamingata' } );
 
     FixMyStreet::DB->resultset('AlertSent')->search( {
         alert_id => $alert->id,
@@ -493,14 +497,14 @@ subtest "correct i18n-ed summary for state of closed" => sub {
     } )->delete;
 
     FixMyStreet::override_config {
-        ALLOWED_COBRANDS => [ 'fiksgatami' ],
+        ALLOWED_COBRANDS => [ 'fixamingata' ],
     }, sub {
         FixMyStreet::DB->resultset('AlertType')->email_alerts();
     };
 
     my $body = $mech->get_text_body_from_email;
-    my $msg = 'Denne rapporten er for tiden markert som lukket';
-    like $body, qr/$msg/, 'email says problem is closed, in Norwegian';
+    my $msg = 'Den här rapporten är markerad som stängd';
+    like $body, qr/$msg/, 'email says problem is closed, in Swedish';
 };
 
 END {

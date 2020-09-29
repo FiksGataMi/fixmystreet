@@ -1,5 +1,8 @@
 use FixMyStreet::TestMech;
 use FixMyStreet::DB;
+use Catalyst::Test 'FixMyStreet::App';
+use HTTP::Request::Common;
+use Test::Exception;
 
 my $mech = FixMyStreet::TestMech->new();
 $mech->log_in_ok('test@example.com');
@@ -63,14 +66,46 @@ FixMyStreet::override_config {
     $mech->content_like(qr/may_show_name[^>c]*>/);
 };
 
-END {
-    done_testing();
-}
+subtest 'Check non-existent methods on user object die' => sub {
+    my $c = ctx_request(POST '/auth', { username => $problem->user->email, password_sign_in => 'secret' });
+    throws_ok(
+        sub { $c->user->is_super_user },
+        qr/Can't locate object method 'is_super_user'/,
+        'attempt to call non-existent method'
+    );
+};
+
+subtest 'OIDC ids can be manipulated correctly' => sub {
+    my $user = $problem->user;
+
+    is $user->oidc_ids, undef, 'user starts with no OIDC ids';
+
+    $user->add_oidc_id("fixmystreet:1234:5678");
+    is_deeply $user->oidc_ids, ["fixmystreet:1234:5678"], 'OIDC id added correctly';
+
+    $user->add_oidc_id("mycobrand:0123:abcd");
+    is_deeply [ sort @{$user->oidc_ids} ], ["fixmystreet:1234:5678", "mycobrand:0123:abcd"], 'Second OIDC id added correctly';
+
+    $user->add_oidc_id("mycobrand:0123:abcd");
+    is_deeply [ sort @{$user->oidc_ids} ], ["fixmystreet:1234:5678", "mycobrand:0123:abcd"], 'Adding existing OIDC id does not add duplicate';
+
+    $user->remove_oidc_id("mycobrand:0123:abcd");
+    is_deeply $user->oidc_ids, ["fixmystreet:1234:5678"], 'OIDC id can be removed OK';
+
+    $user->remove_oidc_id("mycobrand:0123:abcd");
+    is_deeply $user->oidc_ids, ["fixmystreet:1234:5678"], 'Removing non-existent OIDC id has no effect';
+
+    $user->remove_oidc_id("fixmystreet:1234:5678");
+    is $user->oidc_ids, undef, 'Removing last OIDC id results in undef';
+
+};
+
+done_testing();
 
 sub create_update {
     my ($problem, %params) = @_;
     my $dt = DateTime->now()->add(days => 1);
-    return FixMyStreet::App->model('DB::Comment')->find_or_create({
+    return FixMyStreet::DB->resultset('Comment')->find_or_create({
         problem_id => $problem->id,
         user_id => $problem->user_id,
         name => 'Other User',

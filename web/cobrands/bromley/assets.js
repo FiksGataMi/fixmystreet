@@ -6,7 +6,7 @@ if (!fixmystreet.maps) {
 
 var defaults = {
     http_options: {
-        url: "https://tilma.staging.mysociety.org/mapserver/bromley_wfs",
+        url: "https://tilma.mysociety.org/mapserver/bromley_wfs",
         params: {
             SERVICE: "WFS",
             VERSION: "1.1.0",
@@ -14,10 +14,8 @@ var defaults = {
             SRSNAME: "urn:ogc:def:crs:EPSG::3857"
         }
     },
-    format_class: OpenLayers.Format.GML.v3.MultiCurveFix,
     asset_type: 'spot',
     max_resolution: 4.777314267158508,
-    min_resolution: 0.5971642833948135,
     asset_id_field: 'CENTRAL_AS',
     geometryName: 'msGeometry',
     srsName: "EPSG:3857",
@@ -37,7 +35,7 @@ OpenLayers.Layer.VectorAssetBromley = OpenLayers.Class(OpenLayers.Layer.VectorAs
     CLASS_NAME: 'OpenLayers.Layer.VectorAssetBromley'
 });
 
-fixmystreet.assets.add($.extend(true, {}, defaults, {
+fixmystreet.assets.add(defaults, {
     class: OpenLayers.Layer.VectorAssetBromley,
     http_options: {
         params: {
@@ -51,9 +49,9 @@ fixmystreet.assets.add($.extend(true, {}, defaults, {
     asset_category: ["Street Lighting and Road Signs"],
     subcategories: [ 'SL_LAMP', 'SL_NOT_WORK', 'SL_ON_DAY', 'SL_BLOCK_VEG' ],
     asset_item: 'street light'
-}));
+});
 
-fixmystreet.assets.add($.extend(true, {}, defaults, {
+fixmystreet.assets.add(defaults, {
     class: OpenLayers.Layer.VectorAssetBromley,
     http_options: {
         params: {
@@ -64,9 +62,9 @@ fixmystreet.assets.add($.extend(true, {}, defaults, {
     subcategories: ['PG_OFLOW_DOG', 'SC_LIT_BIN'],
     asset_item: 'park bin',
     asset_item_message: 'For our parks, pick a <b class="asset-spot">bin</b> from the map &raquo;'
-}));
+});
 
-fixmystreet.assets.add($.extend(true, {}, defaults, {
+fixmystreet.assets.add(defaults, {
     http_options: {
         params: {
             TYPENAME: "Street_Trees"
@@ -74,62 +72,13 @@ fixmystreet.assets.add($.extend(true, {}, defaults, {
     },
     asset_category: ["Public Trees"],
     asset_item: 'tree'
-}));
-
-var highways_stylemap = new OpenLayers.StyleMap({
-    'default': new OpenLayers.Style({
-        fill: false,
-        stroke: false
-    })
 });
-
-var bromley_to_tfl = {
-    'Enforcement': ['ENF_NUI_SIGN', 'ENF_OBS_HIGH', 'ENF_OHANG_HANG', 'ENF_UNLIC_HIGH'],
-    'Graffiti and Flyposting': ['GF_NUI_SIGN'],
-    'Parks and Greenspace': ['PG_BLOC_DRAIN', 'PG_FLO_DISP', 'PG_GRASS_CUT'],
-    'Street Cleansing': ['SC_BLOCK_DRAIN'],
-    'Road and Pavement Issues': true,
-    'Street Lighting and Road Signs': true,
-    'Public Trees': true
-};
-var tfl_asset_categories = Object.keys(bromley_to_tfl);
 
 $(function(){
     $("#problem_form").on("change.category", "#form_service_sub_code", function() {
-        $(fixmystreet).trigger('report_new:category_change', [ $('#form_category') ]);
+        $(fixmystreet).trigger('report_new:category_change');
     });
 });
-
-fixmystreet.assets.add($.extend(true, {}, defaults, {
-    http_options: {
-        params: {
-            TYPENAME: "TFL_Red_Route"
-        }
-    },
-    stylemap: highways_stylemap,
-    always_visible: true,
-
-    asset_category: tfl_asset_categories,
-    non_interactive: true,
-    road: true,
-    body: 'Bromley Council',
-    actions: {
-        found: function(layer, feature) {
-            var category = $('select#form_category').val(),
-                subcategory = $('#form_service_sub_code').val(),
-                subcategories = bromley_to_tfl[category],
-                relevant = (subcategories === true || (subcategory && OpenLayers.Util.indexOf(subcategories, subcategory) > -1));
-            if (!fixmystreet.assets.selectedFeature() && relevant) {
-                fixmystreet.body_overrides.only_send('TfL');
-            } else {
-                fixmystreet.body_overrides.remove_only_send();
-            }
-        },
-        not_found: function(layer) {
-            fixmystreet.body_overrides.remove_only_send();
-        }
-    }
-}));
 
 var prow_stylemap = new OpenLayers.StyleMap({
     'default': new OpenLayers.Style({
@@ -141,7 +90,7 @@ var prow_stylemap = new OpenLayers.StyleMap({
     })
 });
 
-fixmystreet.assets.add($.extend(true, {}, defaults, {
+fixmystreet.assets.add(defaults, {
     http_options: {
         params: {
             TYPENAME: "PROW"
@@ -160,6 +109,6 @@ fixmystreet.assets.add($.extend(true, {}, defaults, {
             $('#form_prow_reference').val('');
         }
     }
-}));
+});
 
 })();

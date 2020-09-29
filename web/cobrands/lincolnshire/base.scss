@@ -14,20 +14,6 @@ h1, h2, h3 {
   font-weight: bold;
 }
 
-a {
-  color: $lincs-link;
-
-  &:visited {
-    color: $lincs-link-visited;
-  }
-  
-  &:hover,
-  &:active,
-  &:focus {
-    color: $lincs-link-hover;
-  }
-}
-
 #site-header {
   background-color: $primary;
   border-top: 0;
@@ -141,10 +127,6 @@ body.mappage .big-green-banner {
 #front-main-container {
   border-bottom: solid 5px $lincs-pop;
   padding: 2em 0 3em;
-}
-
-.js-roadworks-message dd:last-child {
-  margin-bottom: 0;
 }
 
 // Certain categories have linear assets so hide the spot marker in the guidance
