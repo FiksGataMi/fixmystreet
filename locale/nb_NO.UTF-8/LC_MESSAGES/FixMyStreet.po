@@ -1666,7 +1666,7 @@ msgstr "Glad for å høre at det er i orden!"
 #: templates/web/base/reports/index.html:89
 #: templates/web/zurich/admin/stats/index.html:37
 msgid "Go"
-msgstr "Søk"
+msgstr "Fortsett"
 
 #: templates/web/base/admin/reports/edit.html:101
 msgid "Going to send questionnaire?"
